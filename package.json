@@ -1,0 +1,30 @@
+{
+  "name": "pi-rlm-extension",
+  "version": "0.1.0",
+  "description": "Pi extension that swaps LLM provider with RLM-backed provider",
+  "main": "extension.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "pi": {
+    "type": "extension",
+    "activationEvents": ["onStartup"],
+    "contributes": {
+      "providers": ["rlm"],
+      "commands": [
+        {
+          "command": "rlm",
+          "title": "Toggle RLM Mode"
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "@mariozechner/pi-ai": "^0.1.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": ["pi", "extension", "rlm", "llm", "recursive"],
+  "license": "MIT"
+}

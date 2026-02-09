@@ -1,0 +1,13 @@
+# RLM library
+rlms>=0.1.0
+
+# Web server
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Async support (optional, for streaming in Phase 3)
+gunicorn>=21.0.0
+gevent>=24.0.0
+
+# Dev dependencies
+python-dotenv>=1.0.0
