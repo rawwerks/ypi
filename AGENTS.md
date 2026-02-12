@@ -125,14 +125,14 @@ fi
 **Test**: `make test-guardrails` — G5, G6
 **Borrowed from**: rlm-cli's `other_backends` + `_subcall()` model override
 
-### 5. 🟡 Structured error messages
+### 5. ✅ Structured error messages
 **Design**: Helper function for consistent error output.
 **Borrowed from**: rlm-cli's `CliError` with why/fix/try_steps
 
-### 6. 🟡 Graceful early exit (trap SIGTERM/SIGINT, return partial)
+### 6. ✅ Graceful early exit (trap SIGINT/SIGTERM)
 **Borrowed from**: rlm-cli's SIGUSR1 + `_best_partial_answer`
 
-### 7. 🟢 Execution summary from trace file
+### 7. ✅ Execution summary from trace file
 **Borrowed from**: rlm-cli's `build_execution_summary()`
 
 ## Development Workflow

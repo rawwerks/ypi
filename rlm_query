@@ -29,6 +29,9 @@
 
 set -euo pipefail
 
+# Structured error helper
+rlm_error() { echo "✗ $1" >&2; [ -n "${2:-}" ] && echo "  Why: $2" >&2; [ -n "${3:-}" ] && echo "  Fix: $3" >&2; }
+
 PROMPT="${1:?Usage: rlm_query \"your prompt here\"}"
 
 # ----------------------------------------------------------------------
@@ -55,7 +58,7 @@ fi
 RLM_CALL_COUNT=$(( ${RLM_CALL_COUNT:-0} + 1 ))
 export RLM_CALL_COUNT
 if [ -n "${RLM_MAX_CALLS:-}" ] && [ "$RLM_CALL_COUNT" -ge "$RLM_MAX_CALLS" ]; then
-    echo "Error: max calls exceeded ($RLM_MAX_CALLS)" >&2
+    rlm_error "Max calls exceeded" "$RLM_CALL_COUNT of $RLM_MAX_CALLS calls used" "Increase RLM_MAX_CALLS or reduce recursion depth"
     exit 1
 fi
 
@@ -73,6 +76,7 @@ CHILD_CONTEXT=$(mktemp /tmp/rlm_ctx_d${NEXT_DEPTH}_XXXXXX.txt)
 
 # Cleanup trap – FEATURE 1 (already present)
 trap 'rm -f "$CHILD_CONTEXT"' EXIT
+trap 'rlm_error "Interrupted" "Received signal" "Re-run the command"; exit 130' INT TERM
 
 # ----------------------------------------------------------------------
 # Detect piped stdin
@@ -122,14 +126,20 @@ $CHILD_CONTENT"
         ELAPSED=$(( $(date +%s) - RLM_START_TIME ))
         REMAINING=$(( RLM_TIMEOUT - ELAPSED ))
         if [ "$REMAINING" -le 0 ]; then
-            echo "Error: timeout exceeded ($RLM_TIMEOUT seconds)" >&2
+            rlm_error "Timeout exceeded" "Ran for ${ELAPSED}s of ${RLM_TIMEOUT}s" "Increase RLM_TIMEOUT or simplify the task"
             exit 124
         fi
         TIMEOUT_CMD="timeout $REMAINING"
     fi
 
     $TIMEOUT_CMD pi -p --provider "$PROVIDER" --model "$MODEL" --no-session --no-extensions --no-tools "$FULL_PROMPT"
-    exit $?
+    RC=$?
+    # Execution summary (Feature 7)
+    if [ -n "${PI_TRACE_FILE:-}" ]; then
+        ELAPSED=$(( $(date +%s) - RLM_START_TIME ))
+        echo "[$(date +%Y-%m-%dT%H:%M:%S%z)] depth=$DEPTH COMPLETED exit=$RC elapsed=${ELAPSED}s" >> "$PI_TRACE_FILE"
+    fi
+    exit $RC
 fi
 
 # ----------------------------------------------------------------------
@@ -156,11 +166,17 @@ if [ -n "${RLM_TIMEOUT:-}" ]; then
     ELAPSED=$(( $(date +%s) - RLM_START_TIME ))
     REMAINING=$(( RLM_TIMEOUT - ELAPSED ))
     if [ "$REMAINING" -le 0 ]; then
-        echo "Error: timeout exceeded ($RLM_TIMEOUT seconds)" >&2
+        rlm_error "Timeout exceeded" "Ran for ${ELAPSED}s of ${RLM_TIMEOUT}s" "Increase RLM_TIMEOUT or simplify the task"
         exit 124
     fi
     TIMEOUT_CMD="timeout $REMAINING"
 fi
 
 $TIMEOUT_CMD pi "${CMD_ARGS[@]}" "$PROMPT"
-exit $?
+RC=$?
+# Execution summary (Feature 7)
+if [ -n "${PI_TRACE_FILE:-}" ]; then
+    ELAPSED=$(( $(date +%s) - RLM_START_TIME ))
+    echo "[$(date +%Y-%m-%dT%H:%M:%S%z)] depth=$DEPTH COMPLETED exit=$RC elapsed=${ELAPSED}s" >> "$PI_TRACE_FILE"
+fi
+exit $RC
