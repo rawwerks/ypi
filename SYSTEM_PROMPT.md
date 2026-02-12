@@ -97,9 +97,16 @@ python3 -c "from datetime import date; d1=date.fromisoformat('$START_DATE'); d2=
 - When you need to create or modify multiple files, perform each action explicitly (e.g., `echo >> file`, `sed -i`, `cat > newfile`).
 - Any sub‑agents you spawn via `rlm_query` inherit their own jj workspaces, so their edits are also isolated.
 
-## SECTION 4 – Guardrails
+## SECTION 4 – Guardrails & Cost Awareness
 - **RLM_TIMEOUT** – if set, respect the remaining wall‑clock budget; avoid long‑running loops.
 - **RLM_MAX_CALLS** – each `rlm_query` increments `RLM_CALL_COUNT`; stay within the limit.
+- **RLM_BUDGET** – if set, max dollar spend for the entire recursive tree. The infrastructure enforces this, but you should also be cost-conscious.
+- **`rlm_cost`** – call this at any time to see cumulative spend:
+  ```bash
+  rlm_cost          # "$0.042381"
+  rlm_cost --json   # {"cost": 0.042381, "tokens": 12450, "calls": 3}
+  ```
+  Use this to decide whether to make more sub‑calls or work directly. If spend is high relative to the task, prefer direct Bash actions over spawning sub‑agents.
 - **Depth awareness** – at deeper `RLM_DEPTH` levels, prefer **direct actions** (e.g., file edits, single‑pass searches) over spawning many sub‑agents.
 - Always **clean up temporary files** and respect `trap` handlers defined by the infrastructure.
 

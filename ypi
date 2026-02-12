@@ -21,6 +21,8 @@
 #   RLM_JJ             — set to "0" to disable jj workspace isolation (default: 1)
 #   RLM_EXTENSIONS     — set to "0" to disable Pi extensions (default: 1)
 #   RLM_CHILD_EXTENSIONS — override extensions for depth > 0 (default: same as parent)
+#   RLM_BUDGET         — max dollar spend for entire recursive tree (default: none)
+#   RLM_JSON           — set to "0" to disable JSON mode / cost tracking (default: 1)
 #   PI_TRACE_FILE      — path to trace log for all calls with timing (default: none)
 
 set -euo pipefail
@@ -48,6 +50,8 @@ export RLM_SYSTEM_PROMPT="$SCRIPT_DIR/SYSTEM_PROMPT.md"
 export RLM_JJ="${RLM_JJ:-1}"
 export RLM_EXTENSIONS="${RLM_EXTENSIONS:-1}"
 [ -n "${RLM_CHILD_EXTENSIONS:-}" ] && export RLM_CHILD_EXTENSIONS
+[ -n "${RLM_BUDGET:-}" ]           && export RLM_BUDGET
+export RLM_JSON="${RLM_JSON:-1}"
 
 # Session tree tracing — generate a trace ID that links all recursive sessions
 export RLM_TRACE_ID="${RLM_TRACE_ID:-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')}"

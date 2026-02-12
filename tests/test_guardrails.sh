@@ -67,6 +67,9 @@ chmod +x "$MOCK_BIN/pi"
 
 export PATH="$MOCK_BIN:$PROJECT_DIR:$PATH"
 
+# Disable JSON mode in guardrail tests — mock pi doesn't output JSON
+export RLM_JSON=0
+
 TEST_TMP=$(mktemp -d /tmp/rlm_test_XXXXXX)
 cat > "$TEST_TMP/ctx.txt" << 'EOF'
 Test context for guardrail tests.
@@ -827,6 +830,132 @@ OUTPUT=$(
     rlm_query "Child with ext off"
 )
 assert_contains "G38: child extensions disabled" "--no-extensions" "$OUTPUT"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BUDGET / COST TESTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+echo ""
+echo "=== Budget & Cost ==="
+
+# Restore standard mock
+cat > "$MOCK_BIN/pi" << 'MOCK_PI'
+#!/bin/bash
+echo "MOCK_PI_CALLED"
+echo "ARGS: $*"
+echo "RLM_DEPTH=$RLM_DEPTH"
+echo "RLM_MODEL=$RLM_MODEL"
+MOCK_PI
+chmod +x "$MOCK_BIN/pi"
+
+# G39: no budget by default — RLM_BUDGET not set, call succeeds
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_JSON=0 \
+    rlm_query "No budget test"
+)
+assert_contains "G39: no budget succeeds" "MOCK_PI_CALLED" "$OUTPUT"
+
+# G40: budget set but no spend yet — call proceeds
+COST_FILE=$(mktemp /tmp/rlm_cost_test_XXXXXX.jsonl)
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_JSON=0 \
+    RLM_BUDGET=1.00 \
+    RLM_COST_FILE="$COST_FILE" \
+    rlm_query "Budget with no spend"
+)
+assert_contains "G40: budget set, no spend, proceeds" "MOCK_PI_CALLED" "$OUTPUT"
+rm -f "$COST_FILE"
+
+# G41: budget exceeded — cost file shows spend over budget
+COST_FILE=$(mktemp /tmp/rlm_cost_test_XXXXXX.jsonl)
+echo '{"cost": 0.60, "tokens": 5000}' > "$COST_FILE"
+echo '{"cost": 0.45, "tokens": 4000}' >> "$COST_FILE"
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_JSON=0 \
+    RLM_BUDGET=1.00 \
+    RLM_COST_FILE="$COST_FILE" \
+    rlm_query "Over budget" 2>&1 || true
+)
+assert_contains "G41: budget exceeded" "Budget exceeded" "$OUTPUT"
+rm -f "$COST_FILE"
+
+# G42: budget not exceeded — cost under limit
+COST_FILE=$(mktemp /tmp/rlm_cost_test_XXXXXX.jsonl)
+echo '{"cost": 0.30, "tokens": 3000}' > "$COST_FILE"
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_JSON=0 \
+    RLM_BUDGET=1.00 \
+    RLM_COST_FILE="$COST_FILE" \
+    rlm_query "Under budget"
+)
+assert_contains "G42: under budget proceeds" "MOCK_PI_CALLED" "$OUTPUT"
+rm -f "$COST_FILE"
+
+# G43: RLM_COST_FILE propagated to children
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_JSON=0 \
+    RLM_BUDGET=5.00 \
+    rlm_query "Budget propagation test"
+)
+# Budget creates a cost file automatically
+assert_contains "G43: budget propagation proceeds" "MOCK_PI_CALLED" "$OUTPUT"
+
+# G44: rlm_cost with no cost file returns $0
+OUTPUT=$(
+    RLM_COST_FILE="" \
+    "$PROJECT_DIR/rlm_cost"
+)
+assert_contains "G44: rlm_cost no file" "\$0.000000" "$OUTPUT"
+
+# G45: rlm_cost with cost file returns total
+COST_FILE=$(mktemp /tmp/rlm_cost_test_XXXXXX.jsonl)
+echo '{"cost": 0.15, "tokens": 2000}' > "$COST_FILE"
+echo '{"cost": 0.25, "tokens": 3000}' >> "$COST_FILE"
+OUTPUT=$(
+    RLM_COST_FILE="$COST_FILE" \
+    "$PROJECT_DIR/rlm_cost"
+)
+assert_contains "G45: rlm_cost sums" "\$0.400000" "$OUTPUT"
+rm -f "$COST_FILE"
+
+# G46: rlm_cost --json returns structured data
+COST_FILE=$(mktemp /tmp/rlm_cost_test_XXXXXX.jsonl)
+echo '{"cost": 0.10, "tokens": 1000}' > "$COST_FILE"
+echo '{"cost": 0.20, "tokens": 2000}' >> "$COST_FILE"
+OUTPUT=$(
+    RLM_COST_FILE="$COST_FILE" \
+    "$PROJECT_DIR/rlm_cost" --json
+)
+assert_contains "G46: rlm_cost json has cost" "0.3" "$OUTPUT"
+assert_contains "G46: rlm_cost json has tokens" "3000" "$OUTPUT"
+assert_contains "G46: rlm_cost json has calls" '"calls": 2' "$OUTPUT"
+rm -f "$COST_FILE"
+
+# G47: RLM_JSON=0 disables JSON mode (plain text)
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_JSON=0 \
+    rlm_query "Plain text mode"
+)
+assert_contains "G47: RLM_JSON=0 works" "MOCK_PI_CALLED" "$OUTPUT"
 
 
 # ─── Summary ──────────────────────────────────────────────────────────────

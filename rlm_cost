@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# rlm_cost — Report cumulative cost for the current recursive tree.
+# Usage:
+#   rlm_cost          # prints "$0.042381"
+#   rlm_cost --json   # prints {"cost": 0.042381, "tokens": 12450, "calls": 3}
+
+if [ -z "${RLM_COST_FILE:-}" ] || [ ! -f "${RLM_COST_FILE:-}" ]; then
+    if [ "${1:-}" = "--json" ]; then
+        echo '{"cost": 0, "tokens": 0, "calls": 0}'
+    else
+        echo "\$0.000000"
+    fi
+    exit 0
+fi
+
+python3 -c "
+import json, sys
+total_cost = 0.0
+total_tokens = 0
+calls = 0
+with open('${RLM_COST_FILE}') as f:
+    for line in f:
+        line = line.strip()
+        if not line: continue
+        try:
+            obj = json.loads(line)
+            total_cost += obj.get('cost', 0)
+            total_tokens += obj.get('tokens', 0)
+            calls += 1
+        except: pass
+if '--json' in sys.argv:
+    print(json.dumps({'cost': round(total_cost, 6), 'tokens': total_tokens, 'calls': calls}))
+else:
+    print(f'\${total_cost:.6f}')
+" "$@"

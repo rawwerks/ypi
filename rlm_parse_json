@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Parse Pi JSON mode output. Stream text to stdout, write cost to fd 3."""
+import sys
+import json
+
+total_cost = 0.0
+total_tokens = 0
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+
+    t = obj.get("type", "")
+
+    # Stream text deltas to stdout as they arrive
+    if t == "message_update":
+        event = obj.get("assistantMessageEvent", {})
+        if event.get("type") == "text_delta":
+            delta = event.get("delta", "")
+            sys.stdout.write(delta)
+            sys.stdout.flush()
+
+    # Accumulate cost from each turn_end (handles multi-turn tool use)
+    if t == "turn_end":
+        msg = obj.get("message", {})
+        usage = msg.get("usage", {})
+        cost = usage.get("cost", {}).get("total", 0)
+        tokens = usage.get("totalTokens", 0)
+        total_cost += cost
+        total_tokens += tokens
+
+# Write cost summary to fd 3 (if open)
+cost_line = json.dumps({"cost": total_cost, "tokens": total_tokens})
+try:
+    with open(3, "w") as f:
+        f.write(cost_line)
+except OSError:
+    pass  # fd 3 not open, skip

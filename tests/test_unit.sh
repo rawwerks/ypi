@@ -96,6 +96,9 @@ chmod +x "$MOCK_BIN/pi"
 # Override PATH so rlm_query finds our mock pi
 export PATH="$MOCK_BIN:$PROJECT_DIR:$PATH"
 
+# Disable JSON mode in unit tests — mock pi doesn't output JSON
+export RLM_JSON=0
+
 # Temp dir for test artifacts
 TEST_TMP=$(mktemp -d /tmp/rlm_test_XXXXXX)
 trap 'rm -rf "$TEST_TMP" "$MOCK_BIN"' EXIT

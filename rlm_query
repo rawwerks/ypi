@@ -34,6 +34,9 @@
 #   RLM_JJ            — set to "0" to disable jj workspace isolation
 #   RLM_EXTENSIONS    — set to "0" to disable Pi extensions (default: 1)
 #   RLM_CHILD_EXTENSIONS — override extensions for depth > 0 (default: same as parent)
+#   RLM_BUDGET        — max dollar spend for entire recursive tree (e.g. "0.50")
+#   RLM_COST_FILE     — shared file tracking cumulative cost (auto‑created)
+#   RLM_JSON          — set to "0" to disable JSON mode (plain text, no cost tracking)
 #   RLM_TRACE_ID      — shared ID linking all sessions in a recursive tree
 #   RLM_SESSION_DIR   — Pi session directory for this project
 #   RLM_SESSION_FILE  — parent's session file (used with --fork)
@@ -91,6 +94,33 @@ if [ -n "${RLM_MAX_CALLS:-}" ] && [ "$RLM_CALL_COUNT" -ge "$RLM_MAX_CALLS" ]; th
 fi
 
 # ----------------------------------------------------------------------
+# Budget guard — check cumulative cost before proceeding
+# ----------------------------------------------------------------------
+if [ -n "${RLM_BUDGET:-}" ] && [ -n "${RLM_COST_FILE:-}" ] && [ -f "$RLM_COST_FILE" ]; then
+    CURRENT_COST=$(python3 -c "
+import json
+total = 0.0
+with open('$RLM_COST_FILE') as f:
+    for line in f:
+        line = line.strip()
+        if line:
+            try: total += json.loads(line).get('cost', 0)
+            except: pass
+print(f'{total:.6f}')
+" 2>/dev/null || echo "0")
+    OVER=$(python3 -c "print('yes' if $CURRENT_COST >= $RLM_BUDGET else 'no')" 2>/dev/null || echo "no")
+    if [ "$OVER" = "yes" ]; then
+        rlm_error "Budget exceeded" "Spent \$$CURRENT_COST of \$$RLM_BUDGET budget" "Increase RLM_BUDGET or simplify the task"
+        exit 1
+    fi
+fi
+
+# Initialize cost file if budget is set but no file exists yet
+if [ -n "${RLM_BUDGET:-}" ] && [ -z "${RLM_COST_FILE:-}" ]; then
+    export RLM_COST_FILE=$(mktemp /tmp/rlm_cost_XXXXXX.jsonl)
+fi
+
+# ----------------------------------------------------------------------
 # Session tree — each child gets a persisted session file
 # Trace ID groups all sessions from one recursive invocation.
 # ----------------------------------------------------------------------
@@ -138,7 +168,7 @@ if [ "${RLM_JJ:-1}" != "0" ] \
     fi
 fi
 
-# Cleanup: remove temp context + forget jj workspace
+# Cleanup: remove temp context + forget jj workspace (updated in run section below)
 trap '{
     rm -f "$CHILD_CONTEXT"
     rm -f "${COMBINED_PROMPT:-}"
@@ -189,6 +219,8 @@ export RLM_START_TIME="${RLM_START_TIME}"
 export RLM_TIMEOUT="${RLM_TIMEOUT:-}"
 export RLM_TRACE_ID="${RLM_TRACE_ID}"
 export RLM_SESSION_DIR="${RLM_SESSION_DIR:-}"
+export RLM_BUDGET="${RLM_BUDGET:-}"
+export RLM_COST_FILE="${RLM_COST_FILE:-}"
 
 # At max depth: remove rlm_query from PATH so the child can't recurse.
 # The child still gets full tools (bash, read, write, edit) — it just
@@ -260,12 +292,58 @@ if [ -n "$JJ_WORKSPACE" ]; then
     cd "$JJ_WORKSPACE"
 fi
 
-$TIMEOUT_CMD pi "${CMD_ARGS[@]}" "$PROMPT"
-RC=$?
+# ----------------------------------------------------------------------
+# Run child Pi — JSON mode (default) or plain text
+# JSON mode streams text to stdout and captures cost via fd 3.
+# ----------------------------------------------------------------------
+COST_OUT=$(mktemp /tmp/rlm_cost_out_XXXXXX.json)
+trap '{
+    rm -f "$CHILD_CONTEXT"
+    rm -f "${COMBINED_PROMPT:-}"
+    rm -f "$COST_OUT"
+    if [ -n "$JJ_WS_NAME" ]; then
+        jj workspace forget "$JJ_WS_NAME" 2>/dev/null || true
+    fi
+}' EXIT
 
-# Execution summary
-if [ -n "${PI_TRACE_FILE:-}" ]; then
-    ELAPSED=$(( $(date +%s) - RLM_START_TIME ))
-    echo "[$(date +%Y-%m-%dT%H:%M:%S%z)] depth=$DEPTH COMPLETED exit=$RC elapsed=${ELAPSED}s" >> "$PI_TRACE_FILE"
+if [ "${RLM_JSON:-1}" != "0" ]; then
+    # JSON mode: get structured cost + stream text
+    # Replace -p with --mode json, pipe through parser
+    JSON_CMD_ARGS=()
+    for arg in "${CMD_ARGS[@]}"; do
+        [ "$arg" = "-p" ] && continue
+        JSON_CMD_ARGS+=("$arg")
+    done
+    JSON_CMD_ARGS+=(--mode json)
+
+    PARSER="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/rlm_parse_json"
+
+    $TIMEOUT_CMD pi "${JSON_CMD_ARGS[@]}" "$PROMPT" 2>/dev/null | python3 "$PARSER" 3>"$COST_OUT"
+    RC=${PIPESTATUS[0]}
+
+    # Record cost if we got data
+    if [ -s "$COST_OUT" ] && [ -n "${RLM_COST_FILE:-}" ]; then
+        cat "$COST_OUT" >> "$RLM_COST_FILE"
+    fi
+
+    # Log cost to trace
+    if [ -s "$COST_OUT" ] && [ -n "${PI_TRACE_FILE:-}" ]; then
+        COST_DATA=$(cat "$COST_OUT")
+        ELAPSED=$(( $(date +%s) - RLM_START_TIME ))
+        echo "[$(date +%Y-%m-%dT%H:%M:%S%z)] depth=$DEPTH COMPLETED exit=$RC elapsed=${ELAPSED}s cost=$COST_DATA" >> "$PI_TRACE_FILE"
+    elif [ -n "${PI_TRACE_FILE:-}" ]; then
+        ELAPSED=$(( $(date +%s) - RLM_START_TIME ))
+        echo "[$(date +%Y-%m-%dT%H:%M:%S%z)] depth=$DEPTH COMPLETED exit=$RC elapsed=${ELAPSED}s" >> "$PI_TRACE_FILE"
+    fi
+else
+    # Plain text mode (RLM_JSON=0): no cost tracking
+    $TIMEOUT_CMD pi "${CMD_ARGS[@]}" "$PROMPT"
+    RC=$?
+
+    if [ -n "${PI_TRACE_FILE:-}" ]; then
+        ELAPSED=$(( $(date +%s) - RLM_START_TIME ))
+        echo "[$(date +%Y-%m-%dT%H:%M:%S%z)] depth=$DEPTH COMPLETED exit=$RC elapsed=${ELAPSED}s" >> "$PI_TRACE_FILE"
+    fi
 fi
+
 exit $RC

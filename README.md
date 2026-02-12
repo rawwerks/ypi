@@ -89,12 +89,21 @@ Depth 0 (root)    → full Pi with bash + rlm_query
 
 | Feature | Env var | What it does |
 |---------|---------|-------------|
+| Budget | `RLM_BUDGET=0.50` | Max dollar spend for entire recursive tree |
 | Timeout | `RLM_TIMEOUT=60` | Wall-clock limit for entire recursive tree |
 | Call limit | `RLM_MAX_CALLS=20` | Max total `rlm_query` invocations |
 | Model routing | `RLM_CHILD_MODEL=haiku` | Use cheaper model for sub-calls |
 | Depth limit | `RLM_MAX_DEPTH=3` | How deep recursion can go |
 | jj disable | `RLM_JJ=0` | Skip workspace isolation |
-| Tracing | `PI_TRACE_FILE=/tmp/trace.log` | Log all calls with timing |
+| Plain text | `RLM_JSON=0` | Disable JSON mode (no cost tracking) |
+| Tracing | `PI_TRACE_FILE=/tmp/trace.log` | Log all calls with timing + cost |
+
+The agent can check spend at any time:
+
+```bash
+rlm_cost          # "$0.042381"
+rlm_cost --json   # {"cost": 0.042381, "tokens": 12450, "calls": 3}
+```
 
 ---
 
