@@ -193,7 +193,8 @@ export RLM_SESSION_DIR="${RLM_SESSION_DIR:-}"
 # At max depth: remove rlm_query from PATH so the child can't recurse.
 # The child still gets full tools (bash, read, write, edit) — it just
 # can't spawn sub-agents. The depth guard above is a safety net.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Follow symlinks — npm install -g creates symlinks in .bin/
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 if [ "$NEXT_DEPTH" -ge "$MAX_DEPTH" ]; then
     export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v "^${SCRIPT_DIR}$" | paste -sd ':' -)
 fi
@@ -225,7 +226,7 @@ COMBINED_PROMPT=""
 if [ -n "$SYSTEM_PROMPT_FILE" ] && [ -f "$SYSTEM_PROMPT_FILE" ]; then
     COMBINED_PROMPT=$(mktemp /tmp/rlm_system_prompt_XXXXXX.md)
     cat "$SYSTEM_PROMPT_FILE" > "$COMBINED_PROMPT"
-    SELF_SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rlm_query"
+    SELF_SOURCE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/rlm_query"
     if [ -f "$SELF_SOURCE" ]; then
         cat >> "$COMBINED_PROMPT" << 'SYSEOF'
 

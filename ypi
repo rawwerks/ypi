@@ -26,7 +26,8 @@
 set -euo pipefail
 
 # Resolve the directory where ypi lives (and where rlm_query + SYSTEM_PROMPT.md are)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Follow symlinks — npm install -g creates symlinks in .bin/ pointing to node_modules/ypi/
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Put rlm_query on PATH so Pi's bash tool can find it
 export PATH="$SCRIPT_DIR:$PATH"
