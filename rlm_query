@@ -26,6 +26,7 @@
 #   RLM_CALL_COUNT    — current count of invocations (auto‑incremented)
 #   RLM_CHILD_MODEL   — model to use for child calls (depth > 0)
 #   RLM_CHILD_PROVIDER— provider to use for child calls (depth > 0)
+#   RLM_JJ            — set to "0" to disable jj workspace isolation
 
 set -euo pipefail
 
@@ -74,8 +75,31 @@ fi
 # ----------------------------------------------------------------------
 CHILD_CONTEXT=$(mktemp /tmp/rlm_ctx_d${NEXT_DEPTH}_XXXXXX.txt)
 
-# Cleanup trap – FEATURE 1 (already present)
-trap 'rm -f "$CHILD_CONTEXT"' EXIT
+# ----------------------------------------------------------------------
+# jj workspace isolation — give recursive children their own working copy
+# Skipped for leaf nodes (no tools, can't edit files) and when disabled.
+# ----------------------------------------------------------------------
+JJ_WORKSPACE=""
+JJ_WS_NAME=""
+if [ "$NEXT_DEPTH" -lt "$MAX_DEPTH" ] \
+   && [ "${RLM_JJ:-1}" != "0" ] \
+   && command -v jj &>/dev/null \
+   && jj root &>/dev/null 2>&1; then
+    JJ_WS_NAME="rlm-d${NEXT_DEPTH}-$$"
+    JJ_WORKSPACE=$(mktemp -d /tmp/rlm_ws_d${NEXT_DEPTH}_XXXXXX)
+    if ! jj workspace add --name "$JJ_WS_NAME" "$JJ_WORKSPACE" &>/dev/null; then
+        JJ_WORKSPACE=""
+        JJ_WS_NAME=""
+    fi
+fi
+
+# Cleanup: remove temp context + forget jj workspace
+trap '{
+    rm -f "$CHILD_CONTEXT"
+    if [ -n "$JJ_WS_NAME" ]; then
+        jj workspace forget "$JJ_WS_NAME" 2>/dev/null || true
+    fi
+}' EXIT
 trap 'rlm_error "Interrupted" "Received signal" "Re-run the command"; exit 130' INT TERM
 
 # ----------------------------------------------------------------------
@@ -170,6 +194,11 @@ if [ -n "${RLM_TIMEOUT:-}" ]; then
         exit 124
     fi
     TIMEOUT_CMD="timeout $REMAINING"
+fi
+
+# Enter jj workspace if available (child gets isolated working copy)
+if [ -n "$JJ_WORKSPACE" ]; then
+    cd "$JJ_WORKSPACE"
 fi
 
 $TIMEOUT_CMD pi "${CMD_ARGS[@]}" "$PROMPT"

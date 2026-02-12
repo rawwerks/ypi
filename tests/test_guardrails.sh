@@ -267,7 +267,7 @@ OUTPUT=$(
 )
 AFTER=$(ls /tmp/rlm_ctx_d* 2>/dev/null | wc -l)
 
-if _feature_exists "trap.*rm.*CHILD_CONTEXT"; then
+if grep -q 'rm -f "$CHILD_CONTEXT"' "$RLM_QUERY" 2>/dev/null; then
     # After implementing cleanup, AFTER should equal BEFORE
     assert_eq "G9: temp file cleaned up" "$BEFORE" "$AFTER"
 else
@@ -275,7 +275,7 @@ else
 fi
 
 # G10: temp files cleaned up even on error
-if _feature_exists "trap.*rm.*CHILD_CONTEXT"; then
+if grep -q 'rm -f "$CHILD_CONTEXT"' "$RLM_QUERY" 2>/dev/null; then
     # Make mock pi exit with error
     cat > "$MOCK_BIN/pi" << 'ERRPI'
 #!/bin/bash
