@@ -4,7 +4,7 @@
 
 Named after the [Y combinator](https://en.wikipedia.org/wiki/Fixed-point_combinator#Y_combinator) from lambda calculus — the fixed-point combinator that enables recursion. `ypi` is Pi that can call itself.
 
-Inspired by [Recursive Language Models](https://github.com/SuperAGI/recursive-lm) (RLM), which showed that an LLM with a code REPL and a `llm_query()` function can recursively decompose problems, analyze massive contexts, and write code — all through self-delegation.
+Inspired by [Recursive Language Models](https://github.com/alexzhang13/rlm) (RLM), which showed that an LLM with a code REPL and a `llm_query()` function can recursively decompose problems, analyze massive contexts, and write code — all through self-delegation.
 
 ## The Idea
 
@@ -33,30 +33,37 @@ Pi already has a bash REPL. We add one function — `rlm_query` — and a system
 └──────────────────────────────────────────┘
 ```
 
-## Quick Start
+---
+
+## Using ypi
+
+### Install
 
 ```bash
-# Install
 git clone https://github.com/rawwerks/ypi.git
 cd ypi
 git submodule update --init --depth 1  # pulls pi-mono
 
 # Add to PATH
 export PATH="$PWD:$PATH"
+```
 
-# Run (interactive)
+### Run
+
+```bash
+# Interactive
 ypi
 
-# Run (one-shot)
+# One-shot
 ypi "Refactor the error handling in this repo"
 
-# Run with a different model
+# Different model
 ypi --provider anthropic --model claude-sonnet-4-5-20250929 "What does this codebase do?"
 ```
 
-## How It Works
+### How It Works
 
-### The Three Pieces (same as Python RLM)
+**Three pieces** (same architecture as Python RLM):
 
 | Piece | Python RLM | ypi |
 |---|---|---|
@@ -64,9 +71,7 @@ ypi --provider anthropic --model claude-sonnet-4-5-20250929 "What does this code
 | Context / REPL | Python `context` variable | `$CONTEXT` file + bash |
 | Sub-call function | `llm_query("prompt")` | `rlm_query "prompt"` |
 
-### Recursion
-
-`rlm_query` spawns a child Pi process with the same system prompt and tools. The child can call `rlm_query` too, creating a recursive tree:
+**Recursion:** `rlm_query` spawns a child Pi process with the same system prompt and tools. The child can call `rlm_query` too:
 
 ```
 Depth 0 (root)    → full Pi with bash + rlm_query
@@ -74,14 +79,7 @@ Depth 0 (root)    → full Pi with bash + rlm_query
     Depth 2 (leaf) → plain LM call, no tools (RLM_MAX_DEPTH reached)
 ```
 
-### File Isolation with jj
-
-Each recursive child gets its own [jj workspace](https://martinvonz.github.io/jj/latest/working-copy/):
-
-- Child edits files in isolation — parent's working copy is untouched
-- Parent reviews child's work via `jj diff -r <change-id>`
-- Parent absorbs useful edits via `jj squash --from <change-id>`
-- Workspace is automatically cleaned up when the child exits
+**File isolation with jj:** Each recursive child gets its own [jj workspace](https://martinvonz.github.io/jj/latest/working-copy/). The parent's working copy is untouched. Review child work with `jj diff -r <change-id>`, absorb with `jj squash --from <change-id>`.
 
 ### Guardrails
 
@@ -94,19 +92,45 @@ Each recursive child gets its own [jj workspace](https://martinvonz.github.io/jj
 | jj disable | `RLM_JJ=0` | Skip workspace isolation |
 | Tracing | `PI_TRACE_FILE=/tmp/trace.log` | Log all calls with timing |
 
-## Files
+---
 
-| File | What |
-|---|---|
-| `ypi` | Launcher — sets up env, starts Pi as a recursive agent |
-| `rlm_query` | The recursive sub-call function (Pi's `llm_query()`) |
-| `SYSTEM_PROMPT.md` | Teaches the LLM to be recursive + edit code |
-| `pi-mono/` | Git submodule — upstream [Pi coding agent](https://github.com/badlogic/pi-mono) |
-| `tests/` | 54 tests: unit (mock pi), guardrails, e2e (real LLM) |
-| `AGENTS.md` | Instructions for the agent (read by ypi itself) |
-| `ARCHITECTURE.md` | Technical deep-dive, bugs found, design decisions |
+## Contributing
 
-## Testing
+### Project Structure
+
+```
+ypi/
+├── ypi                    # Launcher: sets up env, starts Pi as recursive agent
+├── rlm_query              # The recursive sub-call function (Pi's llm_query())
+├── SYSTEM_PROMPT.md       # Teaches the LLM to be recursive + edit code
+├── AGENTS.md              # Meta-instructions for the agent (read by ypi itself)
+├── Makefile               # test targets
+├── tests/
+│   ├── test_unit.sh       # Mock pi, test bash logic (no LLM, fast)
+│   ├── test_guardrails.sh # Test guardrails (no LLM, fast)
+│   └── test_e2e.sh        # Real LLM calls (slow, costs ~$0.05)
+├── .githooks/pre-commit   # Gitleaks + sops encryption check
+├── .sops.yaml             # Age encryption rules for private/
+├── private/               # Sops-encrypted notes (safe to commit)
+├── pi-mono/               # Git submodule: upstream Pi coding agent
+└── README.md
+```
+
+### Version Control
+
+This repo uses **[jj](https://martinvonz.github.io/jj/)** for version control. Git is only for GitHub sync.
+
+```bash
+jj status                    # What's changed
+jj describe -m "message"     # Describe current change
+jj new                       # Start a new change
+jj bookmark set master       # Point master at current change
+jj git push                  # Push to GitHub
+```
+
+**Never use `git add/commit/push` directly.** jj manages git under the hood.
+
+### Testing
 
 ```bash
 make test-fast    # 54 tests, no LLM calls, seconds
@@ -114,20 +138,32 @@ make test-e2e     # Real LLM calls, costs ~$0.05
 make test         # Both
 ```
 
-## Background
+**Before any change to `rlm_query`:** run `make test-fast`. After: run it again. `rlm_query` is a live dependency of the agent's own execution — breaking it breaks the agent.
+
+### Secrets & Encryption
+
+Files in `private/` are encrypted with [sops](https://github.com/getsops/sops) + [age](https://github.com/FiloSottile/age). The pre-commit hook blocks unencrypted files from being committed.
+
+```bash
+sops private/notes.md            # Edit (decrypts → editor → re-encrypts)
+sops encrypt -i private/new.json # Encrypt a new file
+```
+
+### History
 
 ypi went through four approaches before landing on the current design:
 
 1. **Tool-use REPL** (exp 010/012) — Pi's `completeWithTools()`, ReAct loop. 77.6% on LongMemEval.
-2. **Python bridge** (`rlm_bridge/`) — HTTP server between Pi and Python RLM. Too complex.
-3. **Pi extension** (`extension.ts`) — Custom provider with search tools. Not true recursion.
+2. **Python bridge** — HTTP server between Pi and Python RLM. Too complex.
+3. **Pi extension** — Custom provider with search tools. Not true recursion.
 4. **Bash RLM** (`rlm_query` + `SYSTEM_PROMPT.md`) — True recursion via bash. **Current approach.**
 
 The key insight: Pi's bash tool **is** the REPL. `rlm_query` **is** `llm_query()`. No bridge needed.
 
+---
+
 ## See Also
 
 - [Pi coding agent](https://github.com/badlogic/pi-mono) — the underlying agent
-- [Recursive Language Models](https://github.com/SuperAGI/recursive-lm) — the paper/code that inspired this
-- [rlm-cli](https://github.com/rawwerks/rlm-cli) — our Python RLM CLI (budget, timeout, model routing)
-- [DSPy](https://github.com/rawwerks/dspy) — our fork with `dspy.CLI` for optimizable CLI agents
+- [Recursive Language Models](https://github.com/alexzhang13/rlm) — the library that inspired this
+- [rlm-cli](https://github.com/rawwerks/rlm-cli) — Python RLM CLI (budget, timeout, model routing)

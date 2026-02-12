@@ -59,24 +59,25 @@ delegation fails, that's a bug you just found.
 
 ```
 ypi/
-├── rlm_query              # THE recursive bash helper — this is llm_query()
 ├── ypi                    # Launcher: sets up env and starts Pi as RLM
+├── rlm_query              # THE recursive bash helper — this is llm_query()
 ├── SYSTEM_PROMPT.md       # System prompt — teaches the LLM to be recursive
-├── ARCHITECTURE.md        # Deep technical notes, bugs, design decisions
 ├── AGENTS.md              # This file — instructions for YOU, the agent
 ├── Makefile               # test-unit, test-guardrails, test-e2e, test-fast
 ├── tests/
 │   ├── test_unit.sh       # Fast: mock pi, test bash logic (no LLM calls)
 │   ├── test_guardrails.sh # Fast: test new features (timeout, routing, etc.)
 │   └── test_e2e.sh        # Slow: real LLM calls, costs money
-├── extension.ts           # Earlier approach (Approach 3, mostly historical)
-├── rlm_bridge/            # Earlier approach (Approach 2, deprecated)
+├── .githooks/pre-commit   # Gitleaks + sops encryption check
+├── .sops.yaml             # Age encryption rules for private/
+├── private/               # Sops-encrypted notes (safe to commit)
+├── pi-mono/               # Git submodule: upstream Pi coding agent
 └── README.md
 ```
 
 ## Sibling Repos (Reference Implementations)
 
-These repos have features we're porting to bash. Read them for design patterns.
+These repos have features we've ported to bash. Read them for design patterns.
 
 ### rlm-cli (`/home/raw/Documents/GitHub/rlm-cli`)
 Python CLI wrapping the RLM library. Has:
@@ -86,82 +87,11 @@ Python CLI wrapping the RLM library. Has:
 - **Max errors**: `max_errors` — consecutive error threshold
 - **Model routing**: `other_backends` — use a different (cheaper) model for sub-calls
 - **Graceful exit**: SIGUSR1 handler, returns `_best_partial_answer`
-- **Live tree**: Rich-based real-time execution tree (`--live-tree`)
 - **Structured errors**: `CliError` hierarchy with `why`, `fix`, `try_steps`
 - **Execution summary**: Per-depth stats (calls, cost, duration)
 
 Key files: `rlm/rlm/core/rlm.py` (budget/timeout/subcall logic),
 `src/rlm_cli/rlm_adapter.py` (error handling), `src/rlm_cli/live_tree.py`
-
-### DSPy fork (`/home/raw/Documents/GitHub/dspy`)
-Our fork with `dspy.CLI` — wraps CLI agents as optimizable DSPy modules. Has:
-- **Timeout per call**: `timeout` param, uses `subprocess.run(timeout=...)`
-- **Max retries**: `max_retries` with retry loop on non-zero exit
-- **Sandboxing protocol**: `CLISandbox.wrap_command()` — bwrap, Docker
-- **Async support**: `aforward()` with `asyncio.wait_for(timeout=...)`
-- **Agent presets**: `CLI.from_agent("pi", ...)` for common CLIs
-
-Key file: `dspy/predict/cli.py`
-
-## Implementation Checklist — Guardrails for rlm_query
-
-Priority order. Each depends on the one before it.
-
-### 1. 🔴 Remove `exec`, add cleanup trap
-**Why first**: Everything else needs subprocess control (can't trap after exec).
-```
-- exec pi "${CMD_ARGS[@]}" "$PROMPT"
-+ trap 'rm -f "$CHILD_CONTEXT"' EXIT
-+ pi "${CMD_ARGS[@]}" "$PROMPT"
-```
-**Test**: `make test-unit` — T15 (temp cleanup), G9, G10, G11
-**Borrowed from**: rlm-cli's context manager pattern, DSPy's subprocess.run
-
-### 2. 🔴 Timeout (RLM_TIMEOUT + RLM_START_TIME)
-**Design**: Track wall-clock start at depth 0, compute remaining at each level.
-```bash
-RLM_START_TIME="${RLM_START_TIME:-$(date +%s)}"
-if [ -n "${RLM_TIMEOUT:-}" ]; then
-    REMAINING=$(( RLM_TIMEOUT - ($(date +%s) - RLM_START_TIME) ))
-    [ "$REMAINING" -le 0 ] && { echo "Error: timeout" >&2; exit 124; }
-    timeout "$REMAINING" pi ...
-fi
-```
-**Test**: `make test-guardrails` — G1-G4; `make test-e2e` — E5
-**Borrowed from**: rlm-cli's `_subcall()` remaining_timeout propagation
-
-### 3. 🔴 Max calls (RLM_MAX_CALLS + RLM_CALL_COUNT)
-**Design**: Shared counter via env var, incremented each call.
-```bash
-RLM_CALL_COUNT=$(( ${RLM_CALL_COUNT:-0} + 1 ))
-if [ -n "${RLM_MAX_CALLS:-}" ] && [ "$RLM_CALL_COUNT" -ge "$RLM_MAX_CALLS" ]; then
-    echo "Error: max calls exceeded" >&2; exit 1
-fi
-export RLM_CALL_COUNT
-```
-**Test**: `make test-guardrails` — G7, G8; `make test-e2e` — E6
-**Borrowed from**: rlm-cli's `max_budget` (budget ≈ calls for bash)
-
-### 4. 🔴 Model routing (RLM_CHILD_MODEL + RLM_CHILD_PROVIDER)
-**Design**: At depth > 0, swap in child model for the pi call.
-```bash
-if [ "$DEPTH" -gt 0 ] && [ -n "${RLM_CHILD_MODEL:-}" ]; then
-    MODEL="$RLM_CHILD_MODEL"
-    PROVIDER="${RLM_CHILD_PROVIDER:-$PROVIDER}"
-fi
-```
-**Test**: `make test-guardrails` — G5, G6
-**Borrowed from**: rlm-cli's `other_backends` + `_subcall()` model override
-
-### 5. ✅ Structured error messages
-**Design**: Helper function for consistent error output.
-**Borrowed from**: rlm-cli's `CliError` with why/fix/try_steps
-
-### 6. ✅ Graceful early exit (trap SIGINT/SIGTERM)
-**Borrowed from**: rlm-cli's SIGUSR1 + `_best_partial_answer`
-
-### 7. ✅ Execution summary from trace file
-**Borrowed from**: rlm-cli's `build_execution_summary()`
 
 ## Development Workflow
 
@@ -202,7 +132,6 @@ testing between changes. One variable at a time.
 
 ## Environment Variables
 
-### Current (implemented)
 | Variable | Description | Default |
 |---|---|---|
 | `CONTEXT` | Path to context file on disk | (required for QA) |
@@ -212,16 +141,13 @@ testing between changes. One variable at a time.
 | `RLM_MODEL` | LLM model | `gpt-oss-120b` |
 | `RLM_SYSTEM_PROMPT` | Path to system prompt file | (required) |
 | `PI_TRACE_FILE` | Trace log path | (none) |
-
-### Planned (not yet implemented)
-| Variable | Description | Default |
-|---|---|---|
 | `RLM_TIMEOUT` | Max wall-clock seconds | (none = unlimited) |
 | `RLM_START_TIME` | Epoch timestamp of root call | (auto-set) |
 | `RLM_MAX_CALLS` | Max total rlm_query invocations | (none = unlimited) |
 | `RLM_CALL_COUNT` | Running count of calls so far | `0` |
 | `RLM_CHILD_MODEL` | Model override for depth > 0 | (none = same as parent) |
 | `RLM_CHILD_PROVIDER` | Provider override for depth > 0 | (none = same as parent) |
+| `RLM_JJ` | Enable jj workspace isolation | `1` (set `0` to disable) |
 
 ## Bugs We've Found (and must not re-introduce)
 
