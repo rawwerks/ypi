@@ -1,5 +1,8 @@
 # ypi
 
+[![npm](https://img.shields.io/npm/v/ypi?style=flat-square)](https://www.npmjs.com/package/ypi)
+[![GitHub release](https://img.shields.io/github/v/release/rawwerks/ypi?style=flat-square)](https://github.com/rawwerks/ypi/releases)
+
 **ypi** — a recursive coding agent built on [Pi](https://github.com/badlogic/pi-mono).
 
 Named after the [Y combinator](https://en.wikipedia.org/wiki/Fixed-point_combinator#Y_combinator) from lambda calculus — the fixed-point combinator that enables recursion. `ypi` is Pi that can call itself. (`rpi` already has another connotation.)
