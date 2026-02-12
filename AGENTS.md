@@ -1,5 +1,33 @@
 # Agent Instructions — pi-rlm-extension
 
+## Version Control: Use jj, not git
+
+This repo uses **jj** (Jujutsu) for version control. Git is only for GitHub sync.
+
+```bash
+# Working with changes
+jj status                    # What's changed
+jj diff                      # See the diff
+jj describe -m "message"     # Describe current change
+jj new                       # Start a new change on top
+
+# Pushing to GitHub
+jj bookmark set master       # Point master at current change
+jj git push                  # Push to GitHub
+
+# Reviewing sub-agent work
+jj log                       # See all changes including sub-agent workspaces
+jj diff -r <change-id>       # Review a sub-agent's edits
+jj squash --from <change-id> # Absorb a sub-agent's work into yours
+jj abandon <change-id>       # Discard a sub-agent's work
+```
+
+**Never use `git add`, `git commit`, or `git push` directly.** jj manages git
+under the hood. Using git directly creates confusion and potential conflicts.
+
+Sub-agents get their own jj workspaces automatically (via `rlm_query`). Their
+edits appear as separate changes in `jj log` that you can review and absorb.
+
 ## You Are The Recursion
 
 When you run under `rpi`, **you are a recursive LLM**. You have `rlm_query` on
