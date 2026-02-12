@@ -120,6 +120,7 @@ fi
 # Temporary child context file
 # ----------------------------------------------------------------------
 CHILD_CONTEXT=$(mktemp /tmp/rlm_ctx_d${NEXT_DEPTH}_XXXXXX.txt)
+COMBINED_PROMPT=""
 
 # ----------------------------------------------------------------------
 # jj workspace isolation — give recursive children their own working copy
@@ -140,6 +141,7 @@ fi
 # Cleanup: remove temp context + forget jj workspace
 trap '{
     rm -f "$CHILD_CONTEXT"
+    rm -f "${COMBINED_PROMPT:-}"
     if [ -n "$JJ_WS_NAME" ]; then
         jj workspace forget "$JJ_WS_NAME" 2>/dev/null || true
     fi
@@ -218,8 +220,26 @@ else
     CMD_ARGS+=(--no-session)
 fi
 
+# Build combined system prompt with rlm_query source embedded
+COMBINED_PROMPT=""
 if [ -n "$SYSTEM_PROMPT_FILE" ] && [ -f "$SYSTEM_PROMPT_FILE" ]; then
-    CMD_ARGS+=(--system-prompt "$SYSTEM_PROMPT_FILE")
+    COMBINED_PROMPT=$(mktemp /tmp/rlm_system_prompt_XXXXXX.md)
+    cat "$SYSTEM_PROMPT_FILE" > "$COMBINED_PROMPT"
+    SELF_SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rlm_query"
+    if [ -f "$SELF_SOURCE" ]; then
+        cat >> "$COMBINED_PROMPT" << 'SYSEOF'
+
+## SECTION 6 – rlm_query Implementation
+
+Below is the full source of `rlm_query`. You are running inside this infrastructure.
+Understanding it helps you use recursion effectively and respect guardrails.
+
+```bash
+SYSEOF
+        cat "$SELF_SOURCE" >> "$COMBINED_PROMPT"
+        echo '```' >> "$COMBINED_PROMPT"
+    fi
+    CMD_ARGS+=(--system-prompt "$COMBINED_PROMPT")
 fi
 
 # Timeout wrapper

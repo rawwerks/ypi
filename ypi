@@ -57,5 +57,25 @@ SAFE_PATH="--$(echo "$CWD" | sed 's|^/||; s|[/:\\]|-|g')--"
 export RLM_SESSION_DIR="${HOME}/.pi/agent/sessions/${SAFE_PATH}"
 mkdir -p "$RLM_SESSION_DIR"
 
-# Launch Pi with the RLM system prompt, passing all args through
-exec pi --system-prompt "$SCRIPT_DIR/SYSTEM_PROMPT.md" "$@"
+# Build combined system prompt: SYSTEM_PROMPT.md + rlm_query source
+# This way the agent sees the full implementation, not just usage docs.
+COMBINED_PROMPT=$(mktemp /tmp/ypi_system_prompt_XXXXXX.md)
+trap 'rm -f "$COMBINED_PROMPT"' EXIT
+
+cat "$SCRIPT_DIR/SYSTEM_PROMPT.md" > "$COMBINED_PROMPT"
+cat >> "$COMBINED_PROMPT" << 'EOF'
+
+## SECTION 6 – rlm_query Implementation
+
+Below is the full source of `rlm_query`. You are running inside this infrastructure.
+Understanding it helps you use recursion effectively and respect guardrails.
+
+```bash
+EOF
+cat "$SCRIPT_DIR/rlm_query" >> "$COMBINED_PROMPT"
+cat >> "$COMBINED_PROMPT" << 'EOF'
+```
+EOF
+
+# Launch Pi with the combined system prompt, passing all args through
+exec pi --system-prompt "$COMBINED_PROMPT" "$@"
