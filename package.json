@@ -1,6 +1,6 @@
 {
   "name": "ypi",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ypi — a recursive coding agent. Pi that can call itself via rlm_query.",
   "license": "MIT",
   "author": "Raymond Weitekamp",
@@ -24,11 +24,15 @@
   ],
   "bin": {
     "ypi": "./ypi",
-    "rlm_query": "./rlm_query"
+    "rlm_query": "./rlm_query",
+    "rlm_cost": "./rlm_cost",
+    "rlm_parse_json": "./rlm_parse_json"
   },
   "files": [
     "ypi",
     "rlm_query",
+    "rlm_cost",
+    "rlm_parse_json",
     "SYSTEM_PROMPT.md",
     "install.sh",
     "README.md",
