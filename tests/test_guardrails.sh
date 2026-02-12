@@ -552,6 +552,215 @@ OUTPUT=$(
 assert_contains "G21: call count defaults to 1" "RLM_CALL_COUNT=1" "$OUTPUT"
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SESSION TREE TESTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+echo ""
+echo "=== Session Tree ==="
+
+# Restore a mock pi that also dumps session-related env and args
+cat > "$MOCK_BIN/pi" << 'MOCK_PI'
+#!/bin/bash
+echo "MOCK_PI_CALLED"
+echo "ARGS: $*"
+echo "RLM_DEPTH=$RLM_DEPTH"
+echo "RLM_MODEL=$RLM_MODEL"
+echo "RLM_TRACE_ID=${RLM_TRACE_ID:-unset}"
+echo "RLM_SESSION_DIR=${RLM_SESSION_DIR:-unset}"
+echo "RLM_SESSION_FILE=${RLM_SESSION_FILE:-unset}"
+echo "RLM_CALL_COUNT=${RLM_CALL_COUNT:-unset}"
+MOCK_PI
+chmod +x "$MOCK_BIN/pi"
+
+SESSION_TMP="$TEST_TMP/sessions"
+mkdir -p "$SESSION_TMP"
+
+# G22: trace ID is generated if not set
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    rlm_query "Trace ID test"
+)
+assert_not_contains "G22: trace ID generated" "RLM_TRACE_ID=unset" "$OUTPUT"
+
+# G23: trace ID is propagated from parent
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_TRACE_ID="deadbeef" \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    rlm_query "Trace propagation"
+)
+assert_contains "G23: trace ID propagated" "RLM_TRACE_ID=deadbeef" "$OUTPUT"
+
+# G24: child session file uses --session (not --no-session) when session dir set
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_TRACE_ID="abc12345" \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    rlm_query "Session arg test"
+)
+assert_contains "G24: --session in args" "--session" "$OUTPUT"
+assert_not_contains "G24: no --no-session" "--no-session" "$OUTPUT"
+
+# G25: session filename encodes trace ID, depth, and call count
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_TRACE_ID="abc12345" \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    RLM_CALL_COUNT=0 \
+    rlm_query "Session filename test"
+)
+# Depth 0→1, call count becomes 1: abc12345_d1_c1.jsonl
+assert_contains "G25: session has trace ID" "abc12345" "$OUTPUT"
+assert_contains "G25: session has depth" "_d1_" "$OUTPUT"
+assert_contains "G25: session has call count" "_c1.jsonl" "$OUTPUT"
+
+# G26: session file path is in RLM_SESSION_FILE for children to reference
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_TRACE_ID="abc12345" \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    RLM_CALL_COUNT=0 \
+    rlm_query "Session file env test"
+)
+assert_contains "G26: RLM_SESSION_FILE set" "abc12345_d1_c1.jsonl" "$OUTPUT"
+assert_not_contains "G26: RLM_SESSION_FILE not unset" "RLM_SESSION_FILE=unset" "$OUTPUT"
+
+# G27: leaf nodes still use --no-session (no bash tools, ephemeral)
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=2 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_TRACE_ID="abc12345" \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    rlm_query "Leaf session test"
+)
+assert_contains "G27: leaf uses --no-session" "--no-session" "$OUTPUT"
+
+# G28: without RLM_SESSION_DIR, falls back to --no-session
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    rlm_query "No session dir test"
+)
+assert_contains "G28: no session dir → --no-session" "--no-session" "$OUTPUT"
+
+# G29: --fork flag is parsed (prompt still works after flag)
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    RLM_TRACE_ID="fork0001" \
+    rlm_query --fork "Fork test prompt"
+)
+assert_contains "G29: --fork still calls pi" "MOCK_PI_CALLED" "$OUTPUT"
+assert_contains "G29: prompt passed after --fork" "--session" "$OUTPUT"
+
+# G30: --fork copies parent session file to child session path
+# Create a fake parent session
+PARENT_SESSION="$SESSION_TMP/parent_session.jsonl"
+echo '{"type":"session","version":3,"id":"parent-uuid","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}' > "$PARENT_SESSION"
+echo '{"type":"message","id":"msg1","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":"hello"}}' >> "$PARENT_SESSION"
+
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    RLM_SESSION_FILE="$PARENT_SESSION" \
+    RLM_TRACE_ID="fork0002" \
+    RLM_CALL_COUNT=0 \
+    rlm_query --fork "Fork with parent"
+)
+# Child session file should exist and contain parent's content
+CHILD_FILE="$SESSION_TMP/fork0002_d1_c1.jsonl"
+if [ -f "$CHILD_FILE" ]; then
+    pass "G30: forked session file created"
+    CHILD_CONTENT=$(cat "$CHILD_FILE")
+    assert_contains "G30: forked file has parent content" "parent-uuid" "$CHILD_CONTENT"
+else
+    fail "G30: forked session file created" "file not found: $CHILD_FILE"
+    fail "G30: forked file has parent content" "file not found"
+fi
+
+# G31: without --fork, child session file is NOT pre-populated
+rm -f "$SESSION_TMP/nofork01_d1_c1.jsonl"
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    RLM_SESSION_FILE="$PARENT_SESSION" \
+    RLM_TRACE_ID="nofork01" \
+    RLM_CALL_COUNT=0 \
+    rlm_query "No fork test"
+)
+CHILD_FILE="$SESSION_TMP/nofork01_d1_c1.jsonl"
+if [ -f "$CHILD_FILE" ]; then
+    CHILD_CONTENT=$(cat "$CHILD_FILE")
+    assert_not_contains "G31: no fork → no parent content" "parent-uuid" "$CHILD_CONTENT"
+else
+    pass "G31: no fork → no parent content"
+fi
+
+# G32: trace logging includes trace ID and fork flag
+TRACE_FILE="$TEST_TMP/session_trace.log"
+rm -f "$TRACE_FILE"
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_TRACE_ID="traced01" \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    PI_TRACE_FILE="$TRACE_FILE" \
+    rlm_query --fork "Traced fork"
+)
+if [ -f "$TRACE_FILE" ]; then
+    TRACE_CONTENT=$(cat "$TRACE_FILE")
+    assert_contains "G32: trace has trace ID" "trace=traced01" "$TRACE_CONTENT"
+    assert_contains "G32: trace has fork=true" "fork=true" "$TRACE_CONTENT"
+else
+    fail "G32: trace has trace ID" "trace file not created"
+    fail "G32: trace has fork=true" "trace file not created"
+fi
+
+# G33: multiple calls get distinct session files (different call counts)
+rm -f "$SESSION_TMP/multi001_d1_c1.jsonl" "$SESSION_TMP/multi001_d1_c2.jsonl"
+OUTPUT1=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_TRACE_ID="multi001" \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    RLM_CALL_COUNT=0 \
+    rlm_query "First call"
+)
+OUTPUT2=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test RLM_MODEL=test \
+    RLM_TRACE_ID="multi001" \
+    RLM_SESSION_DIR="$SESSION_TMP" \
+    RLM_CALL_COUNT=1 \
+    rlm_query "Second call"
+)
+assert_contains "G33: first call → c1" "_c1.jsonl" "$OUTPUT1"
+assert_contains "G33: second call → c2" "_c2.jsonl" "$OUTPUT2"
+
+
 # ─── Summary ──────────────────────────────────────────────────────────────
 
 echo ""

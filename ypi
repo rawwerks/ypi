@@ -30,5 +30,17 @@ export RLM_PROVIDER="${RLM_PROVIDER:-cerebras}"
 export RLM_MODEL="${RLM_MODEL:-gpt-oss-120b}"
 export RLM_SYSTEM_PROMPT="$SCRIPT_DIR/SYSTEM_PROMPT.md"
 
+# Session tree tracing — generate a trace ID that links all recursive sessions
+# The trace ID is an 8-char hex string shared by every node in the recursive tree.
+# Child sessions are named <trace_id>_d<depth>_c<call>.jsonl
+export RLM_TRACE_ID="${RLM_TRACE_ID:-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
+
+# Compute Pi's session directory for this CWD so children can write there
+# Mirrors Pi's getDefaultSessionDir(): --<cwd-with-slashes-replaced>--
+CWD="$(pwd)"
+SAFE_PATH="--$(echo "$CWD" | sed 's|^/||; s|[/:\\]|-|g')--"
+export RLM_SESSION_DIR="${HOME}/.pi/agent/sessions/${SAFE_PATH}"
+mkdir -p "$RLM_SESSION_DIR"
+
 # Launch Pi with the RLM system prompt, passing all args through
 exec pi --system-prompt "$SCRIPT_DIR/SYSTEM_PROMPT.md" "$@"

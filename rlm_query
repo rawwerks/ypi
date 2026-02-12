@@ -8,9 +8,14 @@
 #   rlm_query "Analyze this and extract all dates"
 #   echo "some text" | rlm_query "What is the main topic?"
 #   sed -n '100,200p' "$CONTEXT" | rlm_query "Summarize this section"
+#   rlm_query --fork "Continue working on this refactor"
 #
 # If stdin has data (piped), that becomes the child's context.
 # Otherwise, the child inherits the parent's $CONTEXT file.
+#
+# Flags:
+#   --fork             Fork parent session into child (carries conversation history)
+#                      Default: fresh session per child (only data context, no history)
 #
 # Environment:
 #   RLM_DEPTH         — current recursion depth (default: 0)
@@ -27,13 +32,27 @@
 #   RLM_CHILD_MODEL   — model to use for child calls (depth > 0)
 #   RLM_CHILD_PROVIDER— provider to use for child calls (depth > 0)
 #   RLM_JJ            — set to "0" to disable jj workspace isolation
+#   RLM_TRACE_ID      — shared ID linking all sessions in a recursive tree
+#   RLM_SESSION_DIR   — Pi session directory for this project
+#   RLM_SESSION_FILE  — parent's session file (used with --fork)
 
 set -euo pipefail
 
 # Structured error helper
 rlm_error() { echo "✗ $1" >&2; [ -n "${2:-}" ] && echo "  Why: $2" >&2; [ -n "${3:-}" ] && echo "  Fix: $3" >&2; }
 
-PROMPT="${1:?Usage: rlm_query \"your prompt here\"}"
+# ----------------------------------------------------------------------
+# Parse flags
+# ----------------------------------------------------------------------
+FORK=false
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --fork) FORK=true; shift ;;
+        *) break ;;
+    esac
+done
+
+PROMPT="${1:?Usage: rlm_query [--fork] \"your prompt here\"}"
 
 # ----------------------------------------------------------------------
 # Depth handling
@@ -64,10 +83,30 @@ if [ -n "${RLM_MAX_CALLS:-}" ] && [ "$RLM_CALL_COUNT" -ge "$RLM_MAX_CALLS" ]; th
 fi
 
 # ----------------------------------------------------------------------
+# Session tree — each child gets a persisted session file
+# Trace ID groups all sessions from one recursive invocation.
+# ----------------------------------------------------------------------
+if [ -z "${RLM_TRACE_ID:-}" ]; then
+    export RLM_TRACE_ID=$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')
+fi
+
+# Compute child session file path
+CHILD_SESSION_FILE=""
+if [ -n "${RLM_SESSION_DIR:-}" ]; then
+    mkdir -p "$RLM_SESSION_DIR"
+    CHILD_SESSION_FILE="${RLM_SESSION_DIR}/${RLM_TRACE_ID}_d${NEXT_DEPTH}_c${RLM_CALL_COUNT}.jsonl"
+
+    # --fork: copy parent session to give child full conversation history
+    if [ "$FORK" = true ] && [ -n "${RLM_SESSION_FILE:-}" ] && [ -f "${RLM_SESSION_FILE:-}" ]; then
+        cp "$RLM_SESSION_FILE" "$CHILD_SESSION_FILE"
+    fi
+fi
+
+# ----------------------------------------------------------------------
 # Trace logging (optional)
 # ----------------------------------------------------------------------
 if [ -n "${PI_TRACE_FILE:-}" ]; then
-    echo "[$(date +%H:%M:%S.%3N)] depth=$DEPTH→$NEXT_DEPTH PID=$$ PPID=$PPID prompt: ${PROMPT:0:120}" >> "$PI_TRACE_FILE"
+    echo "[$(date +%H:%M:%S.%3N)] depth=$DEPTH→$NEXT_DEPTH PID=$$ PPID=$PPID call=$RLM_CALL_COUNT trace=$RLM_TRACE_ID fork=$FORK prompt: ${PROMPT:0:120}" >> "$PI_TRACE_FILE"
 fi
 
 # ----------------------------------------------------------------------
@@ -131,7 +170,7 @@ if [ "$DEPTH" -gt 0 ] && [ -n "${RLM_CHILD_MODEL:-}" ]; then
 fi
 
 # ----------------------------------------------------------------------
-# Max‑depth handling (plain LM, no bash tools)
+# Max‑depth handling (plain LM, no bash tools) — no session (ephemeral)
 # ----------------------------------------------------------------------
 if [ "$NEXT_DEPTH" -ge "$MAX_DEPTH" ]; then
     CHILD_CONTENT=$(cat "$CHILD_CONTEXT")
@@ -167,7 +206,7 @@ $CHILD_CONTENT"
 fi
 
 # ----------------------------------------------------------------------
-# Below max depth – spawn recursive child Pi with bash tools
+# Below max depth – spawn recursive child Pi with bash tools + session
 # ----------------------------------------------------------------------
 export CONTEXT="$CHILD_CONTEXT"
 export RLM_DEPTH="$NEXT_DEPTH"
@@ -177,8 +216,22 @@ export RLM_MODEL="$MODEL"
 export RLM_SYSTEM_PROMPT="${SYSTEM_PROMPT_FILE:-}"
 export RLM_START_TIME="${RLM_START_TIME}"
 export RLM_TIMEOUT="${RLM_TIMEOUT:-}"
+export RLM_TRACE_ID="${RLM_TRACE_ID}"
+export RLM_SESSION_DIR="${RLM_SESSION_DIR:-}"
 
-CMD_ARGS=(-p --provider "$PROVIDER" --model "$MODEL" --no-session --no-extensions)
+# Pass our session file so children can fork from it
+if [ -n "$CHILD_SESSION_FILE" ]; then
+    export RLM_SESSION_FILE="$CHILD_SESSION_FILE"
+fi
+
+CMD_ARGS=(-p --provider "$PROVIDER" --model "$MODEL" --no-extensions)
+
+# Session: use dedicated file if we have a session dir, otherwise ephemeral
+if [ -n "$CHILD_SESSION_FILE" ]; then
+    CMD_ARGS+=(--session "$CHILD_SESSION_FILE")
+else
+    CMD_ARGS+=(--no-session)
+fi
 
 if [ -n "$SYSTEM_PROMPT_FILE" ] && [ -f "$SYSTEM_PROMPT_FILE" ]; then
     CMD_ARGS+=(--system-prompt "$SYSTEM_PROMPT_FILE")
