@@ -1,8 +1,8 @@
 # ypi
 
-**Y-Combinator Pi** — a recursive coding agent built on [Pi](https://github.com/badlogic/pi-mono).
+**ypi** — a recursive coding agent built on [Pi](https://github.com/badlogic/pi-mono).
 
-Named after the [Y combinator](https://en.wikipedia.org/wiki/Fixed-point_combinator#Y_combinator) from lambda calculus — the fixed-point combinator that enables recursion. `ypi` is Pi that can call itself.
+Named after the [Y combinator](https://en.wikipedia.org/wiki/Fixed-point_combinator#Y_combinator) from lambda calculus — the fixed-point combinator that enables recursion. `ypi` is Pi that can call itself. (`rpi` already has another connotation.)
 
 Inspired by [Recursive Language Models](https://github.com/alexzhang13/rlm) (RLM), which showed that an LLM with a code REPL and a `llm_query()` function can recursively decompose problems, analyze massive contexts, and write code — all through self-delegation.
 

@@ -1,0 +1,26 @@
+# Dev & CI
+tests/
+Makefile
+AGENTS.md
+.githooks/
+
+# Version control
+.jj/
+.git/
+.gitmodules
+
+# Secrets & encryption
+private/
+.sops.yaml
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Env & logs
+.env
+.env.local
+*.log
+/tmp/
