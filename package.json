@@ -32,7 +32,8 @@
     "SYSTEM_PROMPT.md",
     "install.sh",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "dependencies": {
     "@mariozechner/pi-coding-agent": "*"

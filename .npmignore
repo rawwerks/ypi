@@ -2,6 +2,7 @@
 tests/
 Makefile
 AGENTS.md
+RELEASING.md
 .githooks/
 
 # Version control
