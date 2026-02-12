@@ -319,6 +319,8 @@ function createStreamHandler(extensionCtx: { modelRegistry: any; model: any }) {
 					throw new Error(`Backend model ${BACKEND_PROVIDER}/${BACKEND_MODEL} not found. Available models: ${registry.getAll().map((m: any) => `${m.provider}/${m.id}`).join(", ")}`);
 				}
 
+				console.error(`  [rlm] Backend model resolved: ${backendModel.provider}/${backendModel.id} (api: ${backendModel.api})`);
+
 				const apiKey = await registry.getApiKey(backendModel);
 				if (!apiKey) {
 					throw new Error(`No API key for ${BACKEND_PROVIDER}. Run: pi /login ${BACKEND_PROVIDER}`);

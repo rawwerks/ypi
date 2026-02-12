@@ -1,0 +1,96 @@
+#!/bin/bash
+# rlm_query — Recursive Language Model sub-call for Pi.
+#
+# This is the Pi/bash equivalent of Python RLM's llm_query().
+# Each invocation spawns a child Pi that can answer questions about context.
+#
+# Usage:
+#   rlm_query "Analyze this and extract all dates"
+#   echo "some text" | rlm_query "What is the main topic?"
+#   sed -n '100,200p' "$CONTEXT" | rlm_query "Summarize this section"
+#
+# If stdin has data (piped), that becomes the child's context.
+# Otherwise, the child inherits the parent's $CONTEXT file.
+#
+# Environment:
+#   RLM_DEPTH         — current recursion depth (default: 0)
+#   RLM_MAX_DEPTH     — max recursion depth (default: 3)
+#   RLM_PROVIDER      — LLM provider
+#   RLM_MODEL         — LLM model
+#   RLM_SYSTEM_PROMPT — path to the RLM system prompt file
+#   CONTEXT           — path to the current context file
+#   RLM_STDIN         — set to "1" by the calling pattern to indicate piped input
+
+set -euo pipefail
+
+PROMPT="${1:?Usage: rlm_query \"your prompt here\"}"
+
+DEPTH="${RLM_DEPTH:-0}"
+MAX_DEPTH="${RLM_MAX_DEPTH:-3}"
+NEXT_DEPTH=$((DEPTH + 1))
+
+PROVIDER="${RLM_PROVIDER:-cerebras}"
+MODEL="${RLM_MODEL:-gpt-oss-120b}"
+SYSTEM_PROMPT_FILE="${RLM_SYSTEM_PROMPT:-}"
+
+# Trace if enabled
+if [ -n "${PI_TRACE_FILE:-}" ]; then
+    echo "[$(date +%H:%M:%S.%3N)] depth=$DEPTH→$NEXT_DEPTH PID=$$ PPID=$PPID prompt: ${PROMPT:0:120}" >> "$PI_TRACE_FILE"
+fi
+
+# Create the child's context file
+CHILD_CONTEXT=$(mktemp /tmp/rlm_ctx_d${NEXT_DEPTH}_XXXXXX.txt)
+
+# Determine if we have piped input.
+# In subprocess contexts (like Pi's bash tool), stdin is never a terminal,
+# so we can't use `[ -t 0 ]`. Instead, check /proc/self/fd/0 or use
+# a small timeout read to detect actual data.
+HAS_STDIN=false
+if [ -p /dev/stdin ] 2>/dev/null; then
+    # /dev/stdin is a pipe — someone piped data to us
+    HAS_STDIN=true
+elif [ -n "${RLM_STDIN:-}" ]; then
+    # Explicitly told we have stdin (fallback for platforms without /proc)
+    HAS_STDIN=true
+fi
+
+if [ "$HAS_STDIN" = true ]; then
+    cat > "$CHILD_CONTEXT"
+else
+    # No pipe — inherit parent's context
+    if [ -n "${CONTEXT:-}" ] && [ -f "${CONTEXT:-}" ]; then
+        cp "$CONTEXT" "$CHILD_CONTEXT"
+    fi
+fi
+
+# At max depth: plain LM call — no bash tools, just read and answer
+if [ "$NEXT_DEPTH" -ge "$MAX_DEPTH" ]; then
+    CHILD_CONTENT=$(cat "$CHILD_CONTEXT")
+    rm -f "$CHILD_CONTEXT"
+    if [ -n "$CHILD_CONTENT" ]; then
+        FULL_PROMPT="$PROMPT
+
+Context:
+$CHILD_CONTENT"
+    else
+        FULL_PROMPT="$PROMPT"
+    fi
+    exec pi -p --provider "$PROVIDER" --model "$MODEL" --no-session --no-extensions --no-tools "$FULL_PROMPT"
+fi
+
+# Below max depth: spawn a full recursive child Pi with bash tools
+export CONTEXT="$CHILD_CONTEXT"
+export RLM_DEPTH="$NEXT_DEPTH"
+export RLM_MAX_DEPTH="$MAX_DEPTH"
+export RLM_PROVIDER="$PROVIDER"
+export RLM_MODEL="$MODEL"
+export RLM_SYSTEM_PROMPT="${SYSTEM_PROMPT_FILE:-}"
+
+CMD_ARGS=(-p --provider "$PROVIDER" --model "$MODEL" --no-session --no-extensions)
+
+if [ -n "$SYSTEM_PROMPT_FILE" ] && [ -f "$SYSTEM_PROMPT_FILE" ]; then
+    # Pass file path — Pi's resolvePromptInput() reads it via existsSync()
+    CMD_ARGS+=(--system-prompt "$SYSTEM_PROMPT_FILE")
+fi
+
+exec pi "${CMD_ARGS[@]}" "$PROMPT"
