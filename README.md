@@ -86,7 +86,7 @@ ypi --provider anthropic --model claude-sonnet-4-5-20250929 "What does this code
 ```
 Depth 0 (root)    → full Pi with bash + rlm_query
   Depth 1 (child) → full Pi with bash + rlm_query, own jj workspace
-    Depth 2 (leaf) → plain LM call, no tools (RLM_MAX_DEPTH reached)
+    Depth 2 (leaf) → full Pi with bash, but no rlm_query (max depth)
 ```
 
 **File isolation with jj:** Each recursive child gets its own [jj workspace](https://martinvonz.github.io/jj/latest/working-copy/). The parent's working copy is untouched. Review child work with `jj diff -r <change-id>`, absorb with `jj squash --from <change-id>`.
