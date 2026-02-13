@@ -1,0 +1,13 @@
+{
+    "condition": "B",
+    "elapsed_seconds": 7,
+    "parse_ok": "yes",
+    "has_version_flag": "yes",
+    "diff_lines": 16
+0,
+    "original_lines": 219,
+    "modified_lines": 228,
+    "functions_preserved": "yes",
+    "original_functions": 1,
+    "modified_functions": 1
+}
