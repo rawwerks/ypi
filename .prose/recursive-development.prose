@@ -6,6 +6,10 @@
 #
 # Run: rp ypi .prose/recursive-development.prose
 # Input: describe the feature you want to build
+#
+# Monitor from another terminal:
+#   rlm_sessions read --last | tail -30    # see what the agent is doing
+#   rlm_sessions grep "pattern"             # search across all sessions
 
 input feature: "Description of the feature to build"
 
