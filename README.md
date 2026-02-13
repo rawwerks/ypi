@@ -98,6 +98,8 @@ The design has three properties that compound:
 
 3. **Bounded recursion** — Five concentric guardrails (depth limit, PATH scrubbing, call count, budget, timeout) guarantee termination. The system prompt also installs *cognitive* pressure: deeper agents are told to be more conservative, preferring direct action over spawning more children.
 
+4. **Symbolic access** — Anything the agent needs to manipulate precisely is a file, not just tokens in context. `$CONTEXT` holds the data, `$RLM_PROMPT_FILE` holds the original prompt, and hashline provides line-addressed edits. Agents `grep`/`sed`/`cat` instead of copying tokens from memory.
+
 ### Guardrails
 
 | Feature | Env var | What it does |
@@ -129,6 +131,7 @@ ypi is a thin layer on top of Pi. We strive not to break or duplicate what Pi al
 | **System prompt** | Built from `SYSTEM_PROMPT.md` + `rlm_query` source, written to a temp file, passed via `--system-prompt` (file path, never inlined as shell arg). | T8–T9 |
 | **`-p` mode** | All child Pi calls run non-interactive (`-p`). ypi never fakes a terminal. | T3–T4 |
 | **`--session` flag** | Used when `RLM_SESSION_DIR` is set; `--no-session` otherwise. Never both. | G24, G28 |
+| **Provider/model** | Never hardcoded. ypi and `rlm_query` use Pi's defaults unless the user sets `RLM_PROVIDER`/`RLM_MODEL`. | T14, T14c |
 
 If Pi changes how sessions or extensions work, our guardrail tests should catch it.
 

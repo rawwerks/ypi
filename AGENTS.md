@@ -1,5 +1,15 @@
 # Agent Instructions — ypi
 
+## Landing
+
+When the user says **"land it"** or **"land the plane"**, run:
+
+```bash
+rp ypi .prose/land.prose
+```
+
+This runs all tests (fast + e2e), smoke tests `rlm_query`, encrypts private files, pushes to GitHub via jj, and writes a handoff summary. Monitor progress with `rlm_sessions read --last | tail -30`.
+
 ## Version Control: Use jj, not git
 
 This repo uses **jj** (Jujutsu) for version control. Git is only for GitHub sync.
@@ -62,6 +72,7 @@ Three properties make ypi work. All are tested (E7, E8 in test_e2e.sh):
 1. **Self-similarity** — Same prompt, same tools, same agent at every depth. No specialized roles. The intelligence is in decomposition, not specialization.
 2. **Self-hosting** — SYSTEM_PROMPT.md (SECTION 6) contains the full source of `rlm_query`. The agent reads its own recursion machinery. When it modifies `rlm_query`, it's modifying itself.
 3. **Bounded recursion** — 5 guardrails (depth, PATH scrubbing, call count, budget, timeout) guarantee termination. The system prompt adds *cognitive* pressure: deeper agents prefer direct action.
+4. **Symbolic access** — Anything the agent needs to manipulate precisely is a file, not just tokens in context. `$CONTEXT` for data, `$RLM_PROMPT_FILE` for the original prompt, hashline for edits. Agents grep/sed/cat instead of copying tokens from memory. (T14d)
 
 **Don't write static architecture docs.** Encode claims as tests. If a property matters, there should be an E2E test that breaks when it stops being true.
 
@@ -209,8 +220,8 @@ testing between changes. One variable at a time.
 | `CONTEXT` | Path to context file on disk | (required for QA) |
 | `RLM_DEPTH` | Current recursion depth | `0` |
 | `RLM_MAX_DEPTH` | Maximum recursion depth | `3` |
-| `RLM_PROVIDER` | LLM provider | `cerebras` |
-| `RLM_MODEL` | LLM model | `gpt-oss-120b` |
+| `RLM_PROVIDER` | LLM provider for sub-calls | Pi's default |
+| `RLM_MODEL` | LLM model for sub-calls | Pi's default |
 | `RLM_SYSTEM_PROMPT` | Path to system prompt file | (required) |
 | `PI_TRACE_FILE` | Trace log path | (none) |
 | `RLM_TIMEOUT` | Max wall-clock seconds | (none = unlimited) |

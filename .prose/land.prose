@@ -9,11 +9,16 @@
 
 # --- Quality gates ---
 
-let tests = exec "make test-fast 2>&1 | tail -10"
+let fast = exec "make test-fast 2>&1 | tail -10"
 
-gate **all tests pass**:
-  evidence: tests
+gate **all fast tests pass**:
+  evidence: fast
   on-reject: "Fix failing tests before landing."
+let e2e = exec "make test-e2e 2>&1 | tail -20"
+
+gate **all e2e tests pass**:
+  evidence: e2e
+  on-reject: "Fix failing e2e tests before landing."
 
 # --- Smoke test: ypi still works ---
 

@@ -82,6 +82,10 @@ echo "RLM_MAX_DEPTH=$RLM_MAX_DEPTH"
 echo "RLM_PROVIDER=$RLM_PROVIDER"
 echo "RLM_MODEL=$RLM_MODEL"
 echo "RLM_SYSTEM_PROMPT=$RLM_SYSTEM_PROMPT"
+echo "RLM_PROMPT_FILE=$RLM_PROMPT_FILE"
+if [ -n "${RLM_PROMPT_FILE:-}" ] && [ -f "${RLM_PROMPT_FILE:-}" ]; then
+    echo "PROMPT_CONTENT=$(cat "$RLM_PROMPT_FILE")"
+fi
 # If --no-tools is in args, we're a leaf node
 if echo "$*" | grep -q -- "--no-tools"; then
     echo "LEAF_NODE=true"
@@ -96,6 +100,9 @@ chmod +x "$MOCK_BIN/pi"
 # Override PATH so rlm_query finds our mock pi
 export PATH="$MOCK_BIN:$PROJECT_DIR:$PATH"
 
+# Clean environment — unset all RLM_ vars so tests check rlm_query's own defaults,
+# not whatever the parent ypi session exported.
+for var in $(env | grep '^RLM_' | cut -d= -f1); do unset "$var"; done
 # Disable JSON mode in unit tests — mock pi doesn't output JSON
 export RLM_JSON=0
 
@@ -306,8 +313,30 @@ OUTPUT=$(
     rlm_query "Defaults question?"
 )
 assert_contains "T14: default depth=0→1" "RLM_DEPTH=1" "$OUTPUT"
-assert_contains "T14: default provider" "RLM_PROVIDER=cerebras" "$OUTPUT"
-assert_contains "T14: default model" "RLM_MODEL=gpt-oss-120b" "$OUTPUT"
+# T14b: provider/model must NOT be hardcoded — Pi's defaults should be used
+assert_contains "T14: no hardcoded provider" "RLM_PROVIDER=" "$OUTPUT"
+assert_not_contains "T14: no cerebras default" "cerebras" "$OUTPUT"
+assert_not_contains "T14: no gpt-oss default" "gpt-oss" "$OUTPUT"
+assert_not_contains "T14: no --provider in args" "--provider" "$OUTPUT"
+assert_not_contains "T14: no --model in args" "--model" "$OUTPUT"
+
+# T14c: when RLM_PROVIDER/RLM_MODEL ARE set, they pass through
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_PROVIDER=anthropic \
+    RLM_MODEL=claude-opus-4-6 \
+    rlm_query "Provider question?"
+)
+assert_contains "T14c: explicit provider passes through" "--provider anthropic" "$OUTPUT"
+assert_contains "T14c: explicit model passes through" "--model claude-opus-4-6" "$OUTPUT"
+
+# T14d: RLM_PROMPT_FILE is set and contains the original prompt (symbolic access)
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    rlm_query "How many r's in strawberry?"
+)
+assert_contains "T14d: prompt file is set" "RLM_PROMPT_FILE=/tmp/rlm_prompt_" "$OUTPUT"
+assert_contains "T14d: prompt file has content" "PROMPT_CONTENT=How many r's in strawberry?" "$OUTPUT"
 
 # ─── Test Group: Temp File Cleanup ────────────────────────────────────────
 

@@ -11,8 +11,8 @@
 #   ypi --provider anthropic --model claude-sonnet-4-5-20250929 "question"
 #
 # Environment overrides:
-#   RLM_PROVIDER       — LLM provider for root call (default: cerebras)
-#   RLM_MODEL          — LLM model for root call (default: gpt-oss-120b)
+#   RLM_PROVIDER       — LLM provider for sub-calls (default: Pi's default)
+#   RLM_MODEL          — LLM model for sub-calls (default: Pi's default)
 #   RLM_MAX_DEPTH      — max recursion depth (default: 3)
 #   RLM_TIMEOUT        — wall-clock seconds for entire recursive tree (default: none)
 #   RLM_MAX_CALLS      — max total rlm_query invocations (default: none)
@@ -38,8 +38,8 @@ export PATH="$SCRIPT_DIR:$PATH"
 # Initialize RLM environment — pass through all guardrails
 export RLM_DEPTH="${RLM_DEPTH:-0}"
 export RLM_MAX_DEPTH="${RLM_MAX_DEPTH:-3}"
-export RLM_PROVIDER="${RLM_PROVIDER:-cerebras}"
-export RLM_MODEL="${RLM_MODEL:-gpt-oss-120b}"
+[ -n "${RLM_PROVIDER:-}" ]       && export RLM_PROVIDER
+[ -n "${RLM_MODEL:-}" ]          && export RLM_MODEL
 export RLM_SYSTEM_PROMPT="$SCRIPT_DIR/SYSTEM_PROMPT.md"
 
 # Guardrails — pass through if set, don't override
@@ -90,6 +90,30 @@ if [ -f "$SCRIPT_DIR/extensions/ypi.ts" ]; then
     YPI_EXT_ARGS=(-e "$SCRIPT_DIR/extensions/ypi.ts")
 fi
 
+# Parse --append-system-prompt from args so ypi works like pi with rp
+# We append to the combined prompt file rather than passing through,
+# since pi already gets --system-prompt from us.
+PASS_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --append-system-prompt)
+            shift
+            printf '\n%s\n' "$1" >> "$COMBINED_PROMPT"
+            shift
+            ;;
+        --system-prompt)
+            # User overriding ypi's system prompt entirely
+            echo "⚠️  Overriding ypi's system prompt. Did you mean --append-system-prompt?" >&2
+            shift
+            cat "$1" > "$COMBINED_PROMPT" 2>/dev/null || echo "$1" > "$COMBINED_PROMPT"
+            shift
+            ;;
+        *)
+            PASS_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
 # Launch Pi with the combined system prompt, passing all args through
 # User's own extensions (hashline, etc.) are discovered automatically by Pi.
-exec pi --system-prompt "$COMBINED_PROMPT" "${YPI_EXT_ARGS[@]}" "$@"
+exec pi --system-prompt "$COMBINED_PROMPT" "${YPI_EXT_ARGS[@]}" "${PASS_ARGS[@]}"

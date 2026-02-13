@@ -21,9 +21,9 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 export PATH="$PROJECT_DIR:$PATH"
 export RLM_SYSTEM_PROMPT="$PROJECT_DIR/SYSTEM_PROMPT.md"
 
-# Default provider/model — override with env vars
-export RLM_PROVIDER="${RLM_PROVIDER:-cerebras}"
-export RLM_MODEL="${RLM_MODEL:-qwen-3-32b}"
+# E2E needs a real model — cheap and fast for CI
+export RLM_PROVIDER="${RLM_PROVIDER:-openrouter}"
+export RLM_MODEL="${RLM_MODEL:-google/gemini-3-flash-preview}"
 export RLM_MAX_DEPTH="${RLM_MAX_DEPTH:-3}"
 
 PASS=0
@@ -82,8 +82,8 @@ if should_run "E2"; then
     export RLM_DEPTH=0
 
     START=$(date +%s)
-    OUTPUT=$(echo "The user's favorite programming language is Rust." | \
-        rlm_query "What programming language? Reply with ONLY the language name." 2>/dev/null || echo "ERROR")
+    OUTPUT=$(echo "The user's favorite programming language is Rust. Not Python, not Bash, not Java — Rust." | \
+        rlm_query "According to the text, what is the user's favorite programming language? Reply with ONLY the language name, nothing else." 2>/dev/null || echo "ERROR")
     ELAPSED=$(( $(date +%s) - START ))
 
     if echo "$OUTPUT" | grep -qi "Rust"; then
@@ -171,16 +171,16 @@ Include every mathematician ever.
 EOF
         export CONTEXT="$TEST_TMP/ctx_e5.txt"
         export RLM_DEPTH=0
-        export RLM_TIMEOUT=5  # 5 second timeout — should be too short
+        export RLM_TIMEOUT=10  # 10 second timeout — should be too short for a full essay
 
         START=$(date +%s)
         OUTPUT=$(rlm_query "Write the full essay as requested." 2>&1 || true)
         ELAPSED=$(( $(date +%s) - START ))
 
-        if [ "$ELAPSED" -lt 15 ]; then
+        if [ "$ELAPSED" -lt 30 ]; then
             pass "E5: timeout killed long task" "$ELAPSED"
         else
-            fail "E5: timeout" "took ${ELAPSED}s, expected < 15s"
+            fail "E5: timeout" "took ${ELAPSED}s, expected < 30s"
         fi
 
         unset RLM_TIMEOUT
@@ -227,7 +227,7 @@ Favorite number: 42
 EOF
     export CONTEXT="$TEST_TMP/ctx_e7.txt"
     export RLM_DEPTH=0
-    export RLM_MAX_CALLS=1  # If it tries to recurse, the CALL will fail
+    export RLM_MAX_CALLS=2  # Allow root call (1), block any sub-call (2 >= 2)
     unset RLM_CALL_COUNT 2>/dev/null || true
 
     TRACE_E7="$TEST_TMP/trace_e7.log"

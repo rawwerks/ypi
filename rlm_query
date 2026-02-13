@@ -72,8 +72,8 @@ if [ "$NEXT_DEPTH" -gt "$MAX_DEPTH" ]; then
     exit 1
 fi
 
-PROVIDER="${RLM_PROVIDER:-cerebras}"
-MODEL="${RLM_MODEL:-gpt-oss-120b}"
+PROVIDER="${RLM_PROVIDER:-}"
+MODEL="${RLM_MODEL:-}"
 SYSTEM_PROMPT_FILE="${RLM_SYSTEM_PROMPT:-}"
 
 # ----------------------------------------------------------------------
@@ -152,6 +152,11 @@ fi
 CHILD_CONTEXT=$(mktemp /tmp/rlm_ctx_d${NEXT_DEPTH}_XXXXXX.txt)
 COMBINED_PROMPT=""
 
+# Write prompt to a file for symbolic access — agents can grep/sed the original
+# question instead of relying on in-context token copying.
+PROMPT_FILE=$(mktemp /tmp/rlm_prompt_d${NEXT_DEPTH}_XXXXXX.txt)
+echo "$PROMPT" > "$PROMPT_FILE"
+
 # ----------------------------------------------------------------------
 # jj workspace isolation — give recursive children their own working copy
 # ----------------------------------------------------------------------
@@ -170,7 +175,7 @@ fi
 
 # Cleanup: remove temp context + forget jj workspace (updated in run section below)
 trap '{
-    rm -f "$CHILD_CONTEXT"
+    rm -f "$CHILD_CONTEXT" "$PROMPT_FILE"
     rm -f "${COMBINED_PROMPT:-}"
     if [ -n "$JJ_WS_NAME" ]; then
         jj workspace forget "$JJ_WS_NAME" 2>/dev/null || true
@@ -210,6 +215,7 @@ fi
 # Spawn child Pi with tools, extensions, and session
 # ----------------------------------------------------------------------
 export CONTEXT="$CHILD_CONTEXT"
+export RLM_PROMPT_FILE="$PROMPT_FILE"
 export RLM_DEPTH="$NEXT_DEPTH"
 export RLM_MAX_DEPTH="$MAX_DEPTH"
 export RLM_PROVIDER="$PROVIDER"
@@ -236,7 +242,9 @@ if [ -n "$CHILD_SESSION_FILE" ]; then
     export RLM_SESSION_FILE="$CHILD_SESSION_FILE"
 fi
 
-CMD_ARGS=(-p --provider "$PROVIDER" --model "$MODEL")
+CMD_ARGS=(-p)
+[ -n "$PROVIDER" ] && CMD_ARGS+=(--provider "$PROVIDER")
+[ -n "$MODEL" ] && CMD_ARGS+=(--model "$MODEL")
 
 # Extensions: on by default, configurable per-instance like model routing
 CHILD_EXT="${RLM_EXTENSIONS:-1}"
@@ -299,7 +307,7 @@ fi
 # ----------------------------------------------------------------------
 COST_OUT=$(mktemp /tmp/rlm_cost_out_XXXXXX.json)
 trap '{
-    rm -f "$CHILD_CONTEXT"
+    rm -f "$CHILD_CONTEXT" "$PROMPT_FILE"
     rm -f "${COMBINED_PROMPT:-}"
     rm -f "$COST_OUT"
     if [ -n "$JJ_WS_NAME" ]; then

@@ -1,0 +1,175 @@
+# incorporate-insight.prose
+# Systematically incorporate a new insight across the ypi repo.
+#
+# Run: rp ypi .prose/incorporate-insight.prose insight="symbolic access to prompts helps agents manipulate them programmatically"
+#
+# This program updates every place in the repo where knowledge lives,
+# following the obvious/visible/possible framework:
+#
+#   obvious:    SYSTEM_PROMPT.md (every agent sees this)
+#   visible:    AGENTS.md (agents working on this repo), README.md (users)
+#   executable: tests/ (invariants that can't go stale)
+#   possible:   CHANGELOG.md, .prose/ workflows
+
+input insight: "The insight to incorporate across the repo"
+
+# --- Step 1: Understand the insight and plan where it applies ---
+
+agent planner:
+  model: sonnet
+  prompt: """
+    You analyze insights about recursive LLM agents and determine
+    where they should be incorporated in a codebase. You are precise
+    and conservative — not every insight belongs everywhere.
+  """
+
+let plan = session: planner
+  prompt: """
+    Analyze this insight and determine where it should be incorporated
+    in the ypi repo.
+
+    INSIGHT: {insight}
+
+    The repo has these knowledge locations (ordered by visibility):
+
+    1. SYSTEM_PROMPT.md — What every agent sees at every depth.
+       Only add here if agents NEED this to do their job better.
+       Keep additions SHORT (1-3 lines). This file is in every context window.
+
+    2. AGENTS.md — Instructions for agents working on THIS repo.
+       Good for: architectural invariants, design principles, workflow changes.
+       Section "Architectural Invariants" is for claims we test.
+       Section "Bugs We've Found" is for traps to avoid.
+
+    3. README.md — For users and operators.
+       Good for: Pi Compatibility table entries, design philosophy.
+
+    4. tests/ — Executable invariants.
+       Good for: anything that MUST remain true. Encode the insight as an
+       assertion in test_unit.sh or test_guardrails.sh.
+
+    5. Code (rlm_query, ypi, rlm_sessions) — The implementation itself.
+       Good for: when the insight requires a behavior change.
+
+    6. CHANGELOG.md — Only if we're releasing soon.
+
+    For each location, say:
+    - SKIP: insight doesn't apply here
+    - UPDATE: what specifically to add/change and why
+    - CODE: what code change is needed (if any)
+
+    Be conservative. Not every insight touches every file.
+    Prefer executable (tests) over descriptive (docs).
+  """
+
+# --- Step 2: Apply code changes first (if any) ---
+
+let code = session "Apply code changes"
+  prompt: """
+    Based on this plan, apply any CODE changes needed.
+
+    PLAN:
+    {plan}
+
+    INSIGHT: {insight}
+
+    Rules:
+    - Read the relevant files first to understand current state
+    - Make minimal, surgical changes
+    - If no code changes needed, just say "No code changes needed"
+    - Do NOT touch docs yet — that's a later step
+    - After changes, run: make test-fast
+  """
+  context: plan
+
+# --- Step 3: Apply doc changes ---
+
+parallel:
+  system_prompt = session "Update SYSTEM_PROMPT.md (if planned)"
+    prompt: """
+      Based on this plan, update SYSTEM_PROMPT.md if the plan says UPDATE.
+      If the plan says SKIP, just say "Skipped".
+
+      PLAN: {plan}
+      INSIGHT: {insight}
+
+      Rules:
+      - Read SYSTEM_PROMPT.md first
+      - Keep additions to 1-3 lines — this file is in every context window
+      - Find the right section (don't just append)
+      - Preserve the existing style and structure
+    """
+    context: plan
+
+  agents_md = session "Update AGENTS.md (if planned)"
+    prompt: """
+      Based on this plan, update AGENTS.md if the plan says UPDATE.
+      If the plan says SKIP, just say "Skipped".
+
+      PLAN: {plan}
+      INSIGHT: {insight}
+
+      Rules:
+      - Read AGENTS.md first
+      - Find the right section (Architectural Invariants, Bugs, etc.)
+      - Match the existing style
+    """
+    context: plan
+
+  readme = session "Update README.md (if planned)"
+    prompt: """
+      Based on this plan, update README.md if the plan says UPDATE.
+      If the plan says SKIP, just say "Skipped".
+
+      PLAN: {plan}
+      INSIGHT: {insight}
+
+      Rules:
+      - Read README.md first
+      - Pi Compatibility table is the most likely target
+      - Keep it concise
+    """
+    context: plan
+
+# --- Step 4: Add tests ---
+
+let tests = session "Add regression tests"
+  prompt: """
+    Based on this plan, add tests that encode the insight as executable invariants.
+    If the plan says SKIP for tests, just say "Skipped".
+
+    PLAN: {plan}
+    INSIGHT: {insight}
+
+    Rules:
+    - Read tests/test_unit.sh and tests/test_guardrails.sh first
+    - Follow existing test naming conventions (T-series for unit, G-series for guardrails)
+    - Tests use a mock pi that echoes args/env — no real LLM calls
+    - After adding tests, run: make test-fast
+    - ALL tests must pass
+  """
+  context: [plan, code]
+
+# --- Step 5: Verify everything ---
+
+let verify = exec "make test-fast 2>&1 | tail -15"
+
+gate **all tests pass after incorporating insight**:
+  evidence: verify
+  on-reject: "Tests failed. Fix before finishing."
+
+output summary = session "Summarize what was done"
+  prompt: """
+    Summarize what was incorporated and where.
+
+    INSIGHT: {insight}
+    PLAN: {plan}
+    CODE: {code}
+    TESTS: {tests}
+
+    Format as a short bullet list:
+    - What changed in each file
+    - What tests were added
+    - Any follow-up needed
+  """
+  context: [plan, code, tests, verify]
