@@ -6,7 +6,7 @@
  * - On before_agent_start: injects colgrep usage instructions into the system prompt
  *
  * Requirements:
- *   - colgrep binary on PATH
+ *   - colgrep binary on PATH (https://github.com/lightonai/next-plaid/tree/main/colgrep)
  *
  * Install globally:
  *   Place at ~/.pi/agent/extensions/colgrep.ts

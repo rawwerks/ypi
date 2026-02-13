@@ -21,7 +21,7 @@ Runs `dirpack pack` on session start and injects a compact repo index into
 the system prompt. Gives the agent an instant map of the entire codebase —
 file structure, function signatures, key types — without reading every file.
 
-Requires [dirpack](https://github.com/nickarora/dirpack) on PATH.
+Requires [dirpack](https://github.com/rawwerks/dirpack) on PATH.
 
 ```bash
 ln -s "$(pwd)/contrib/extensions/dirpack.ts" ~/.pi/agent/extensions/dirpack.ts
@@ -29,7 +29,7 @@ ln -s "$(pwd)/contrib/extensions/dirpack.ts" ~/.pi/agent/extensions/dirpack.ts
 
 ### colgrep.ts
 
-Adds semantic code search via [colgrep](https://github.com/nickarora/colgrep).
+Adds semantic code search via [colgrep](https://github.com/lightonai/next-plaid/tree/main/colgrep).
 Pre-warms the ColBERT index on session start and injects usage instructions
 into the system prompt so the agent uses `colgrep` as its primary search tool
 instead of grep.

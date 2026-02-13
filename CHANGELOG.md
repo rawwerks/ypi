@@ -3,6 +3,31 @@
 All notable changes to ypi are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0] - 2026-02-13
+
+### Added
+- **`rlm_sessions` command**: inspect, read, and search session logs from sibling and parent agents in the recursive tree (`rlm_sessions --trace`, `rlm_sessions read <file>`, `rlm_sessions grep <pattern>`)
+- **Symbolic prompt access** (`RLM_PROMPT_FILE`): agents can grep/sed the original prompt as a file instead of copying tokens from context memory
+- **Contrib extensions**: `colgrep.ts` (semantic code search via ColBERT), `dirpack.ts` (repository index), `treemap.ts` (visual tree maps) — opt-in extensions in `contrib/extensions/`
+- **Encryption workflow**: `scripts/encrypt-prose` and `scripts/decrypt-prose` for sops/age encryption of private execution state before pushing
+- **`.sops.yaml`**: age encryption rules for `.prose/runs/`, `.prose/agents/`, `experiments/`, `private/`
+- **`.githooks/pre-commit`**: safety net blocking unencrypted private files on direct git push
+- **OpenProse programs**: `release.prose`, `land.prose`, `incorporate-insight.prose`, `recursive-development.prose`, `self-experiment.prose`, `check-upstream.prose`
+- **Experiment infrastructure**: `experiments/` directory with pipe-vs-filename, session-sharing, and tree-awareness experiments with results
+- E2E tests: expanded coverage (+90 lines), gemini-flash as default e2e model
+- Guardrail tests: `rlm_sessions` tests (G48-G51), session sharing toggle
+- Unit tests: `RLM_PROMPT_FILE` tests (T14d)
+
+### Changed
+- **SYSTEM_PROMPT.md**: added symbolic access principle (SECTION 2), refined depth awareness guidance
+- **AGENTS.md**: expanded with experiment workflow (tmux rules), self-experimentation, session history reading, OpenProse program references
+- **README.md**: updated feature list and project description
+- Removed hardcoded provider/model defaults from `rlm_query` — inherits from environment only
+
+### Fixed
+- Kill orphan `rlm_parse_json` processes after timeout in E2E tests
+- Contrib extension GitHub links (dirpack, colgrep) now point to correct URLs
+
 ## [0.3.0] - 2026-02-13
 
 ### Added

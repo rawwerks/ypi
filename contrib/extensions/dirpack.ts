@@ -6,7 +6,7 @@
  * Gives the agent an instant map of the entire codebase structure.
  *
  * Requirements:
- *   - dirpack binary on PATH
+ *   - dirpack binary on PATH (https://github.com/rawwerks/dirpack)
  *
  * Install globally:
  *   Place at ~/.pi/agent/extensions/dirpack.ts
