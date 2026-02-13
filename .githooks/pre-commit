@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pre-commit hook for ypi
-# Handles: gitleaks secret scanning + sops encryption verification
+# Safety net for direct git usage. jj bypasses this entirely.
 #
 # Install: git config core.hooksPath .githooks
 
@@ -16,15 +16,14 @@ else
     echo "⚠️  gitleaks not installed — skipping secret scan" >&2
 fi
 
-# --- Prevent committing unencrypted files in sops-managed paths ---
+# --- Block unencrypted files in sops-managed paths ---
 for file in $(git diff --cached --name-only | grep -E '^(private/|\.prose/runs/|\.prose/agents/)'); do
     if [ ! -f "$file" ]; then
-        continue  # deleted file
+        continue
     fi
     if ! head -1 "$file" | grep -q '"data": "ENC\[' 2>/dev/null && \
        ! head -5 "$file" | grep -q '"sops"' 2>/dev/null; then
-        echo "⛔ $file appears to be unencrypted plaintext!" >&2
-        echo "   Run: sops encrypt -i $file" >&2
+        echo "⛔ $file is unencrypted! Run: scripts/encrypt-prose" >&2
         exit 1
     fi
 done

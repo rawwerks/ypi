@@ -1,0 +1,63 @@
+#!/bin/bash
+# encrypt-prose — Encrypt .prose/runs/ and .prose/agents/ in place
+# decrypt-prose — Decrypt them back (same script, based on name)
+#
+# Usage:
+#   scripts/encrypt-prose          # encrypt all plaintext sops-managed files
+#   scripts/decrypt-prose          # decrypt all encrypted sops-managed files
+#   scripts/encrypt-prose --check  # exit 1 if any are unencrypted (for CI)
+
+set -euo pipefail
+
+SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+MODE="encrypt"
+if [[ "$SCRIPT_NAME" == *decrypt* ]]; then
+    MODE="decrypt"
+fi
+
+CHECK_ONLY=false
+if [[ "${1:-}" == "--check" ]]; then
+    CHECK_ONLY=true
+fi
+
+SOPS_DIRS=(".prose/runs" ".prose/agents" "private")
+COUNT=0
+
+for dir in "${SOPS_DIRS[@]}"; do
+    [ -d "$PROJECT_DIR/$dir" ] || continue
+    while IFS= read -r file; do
+        IS_ENCRYPTED=false
+        if head -5 "$file" | grep -q '"sops"' 2>/dev/null; then
+            IS_ENCRYPTED=true
+        fi
+
+        if [ "$MODE" = "encrypt" ]; then
+            if [ "$IS_ENCRYPTED" = false ]; then
+                if [ "$CHECK_ONLY" = true ]; then
+                    echo "UNENCRYPTED: $file" >&2
+                    COUNT=$((COUNT + 1))
+                else
+                    sops encrypt -i "$file" 2>/dev/null
+                    echo "✓ encrypted $file"
+                    COUNT=$((COUNT + 1))
+                fi
+            fi
+        else
+            if [ "$IS_ENCRYPTED" = true ]; then
+                sops decrypt -i "$file" 2>/dev/null
+                echo "✓ decrypted $file"
+                COUNT=$((COUNT + 1))
+            fi
+        fi
+    done < <(find "$PROJECT_DIR/$dir" -type f 2>/dev/null)
+done
+
+if [ "$CHECK_ONLY" = true ] && [ $COUNT -gt 0 ]; then
+    echo "$COUNT unencrypted files found" >&2
+    exit 1
+fi
+
+[ $COUNT -gt 0 ] || echo "nothing to $MODE"

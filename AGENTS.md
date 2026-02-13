@@ -56,22 +56,35 @@ use that same infrastructure to help. Delegate sub-tasks to `rlm_query`. If the
 delegation fails, that's a bug you just found.
 
 ## Project Layout
-
 ```
 ypi/
 ├── ypi                    # Launcher: sets up env and starts Pi as RLM
 ├── rlm_query              # THE recursive bash helper — this is llm_query()
 ├── SYSTEM_PROMPT.md       # System prompt — teaches the LLM to be recursive
 ├── AGENTS.md              # This file — instructions for YOU, the agent
-├── Makefile               # test-unit, test-guardrails, test-e2e, test-fast
+├── Makefile               # test-unit, test-guardrails, test-extensions, test-e2e
+├── extensions/
+│   └── ypi.ts             # Status bar extension — "ypi ∞ depth 0/3"
 ├── tests/
 │   ├── test_unit.sh       # Fast: mock pi, test bash logic (no LLM calls)
 │   ├── test_guardrails.sh # Fast: test new features (timeout, routing, etc.)
+│   ├── test_extensions.sh # Fast: verify extensions load with installed pi
 │   └── test_e2e.sh        # Slow: real LLM calls, costs money
-├── .githooks/pre-commit   # Gitleaks + sops encryption check
-├── .sops.yaml             # Age encryption rules for private/
-├── private/               # Sops-encrypted notes (safe to commit)
-├── pi-mono/               # Git submodule: upstream Pi coding agent
+├── scripts/
+│   ├── check-upstream     # Test ypi against latest pi release
+│   ├── encrypt-prose      # Encrypt .prose/runs/ and .prose/agents/ before push
+│   └── decrypt-prose      # Decrypt after clone/pull (symlink to encrypt-prose)
+├── .prose/
+│   ├── *.prose            # OpenProse programs (public, committed plaintext)
+│   ├── runs/              # Execution state (private, encrypted before push)
+│   └── agents/            # Persistent agent memory (private, encrypted before push)
+├── .pi-version            # Last known-good pi version
+├── .sops.yaml             # Age encryption rules
+├── .githooks/pre-commit   # Safety net for direct git usage
+├── .github/workflows/     # CI + upstream compat checks
+├── contrib/extensions/    # Extensions not loaded by default (hashline, etc.)
+├── private/               # Sops-encrypted notes (private, encrypted before push)
+├── pi-mono/               # Git submodule: upstream Pi coding agent (reference)
 └── README.md
 ```
 
@@ -170,10 +183,34 @@ testing between changes. One variable at a time.
 **Test**: E1 (small context, should answer directly without sub-calls).
 
 ### Secrets & Encryption
-
-Files in `private/` are encrypted with [sops](https://github.com/getsops/sops) + [age](https://github.com/FiloSottile/age). The pre-commit hook blocks unencrypted files from being committed.
+Files in `private/`, `.prose/runs/`, and `.prose/agents/` are encrypted with
+[sops](https://github.com/getsops/sops) + [age](https://github.com/FiloSottile/age)
+before push. They live **plaintext on disk** so agents and editors can read them.
 
 ```bash
-sops private/notes.md            # Edit (decrypts → editor → re-encrypts)
-sops encrypt -i private/new.json # Encrypt a new file
+# Before pushing (MANDATORY)
+scripts/encrypt-prose
+jj git push
+
+# After cloning or pulling
+scripts/decrypt-prose
+
+# Check if anything needs encrypting
+scripts/encrypt-prose --check
+```
+
+**Never push without encrypting first.** The `.githooks/pre-commit` blocks
+unencrypted files if someone uses git directly, but jj bypasses git hooks.
+
+### OpenProse Programs
+
+`.prose/*.prose` files are public workflow programs committed in plaintext.
+Execution state (`.prose/runs/`, `.prose/agents/`) is private — encrypt before push.
+
+```bash
+# Run a prose program
+rp pi .prose/check-upstream.prose
+
+# Or via the bash script directly
+scripts/check-upstream
 ```
