@@ -1,0 +1,134 @@
+# release.prose
+# Cut a new ypi release.
+#
+# Deterministic steps (tests, version bumps, publish) use exec.
+# Judgment steps (changelog, version decision) use session.
+#
+# Run: rp pi .prose/release.prose
+
+# --- Gather state ---
+
+let current_version = exec "node -p \"require('./package.json').version\""
+let jj_log = exec "jj log --no-graph --limit 30"
+let changelog = exec "cat CHANGELOG.md"
+let diff = exec "jj diff --from 'description(\"release:\")' --stat"
+
+# --- Tests ---
+
+let unit = exec "make test-unit"
+  on-fail: "continue"
+
+let guardrails = exec "make test-guardrails"
+  on-fail: "continue"
+
+let extensions = exec "make test-extensions"
+  on-fail: "continue"
+
+if **any tests failed**:
+  session "Report test failures and stop"
+    prompt: """
+      Tests failed. Cannot release.
+
+      Unit: {unit}
+      Guardrails: {guardrails}
+      Extensions: {extensions}
+
+      Diagnose what's broken.
+    """
+  throw "Tests failed"
+
+# --- Decide version ---
+
+let release_plan = session "Decide version and write changelog"
+  prompt: """
+    Current version: {current_version}
+    
+    Semver rules:
+    - patch: bug fixes, docs
+    - minor: new features, new env vars, new guardrails
+    - major: breaking changes to CLI args, env vars, or rlm_query interface
+
+    Commits since last release:
+    {jj_log}
+
+    Files changed:
+    {diff}
+
+    Current changelog:
+    {changelog}
+
+    Decide the new version number. Then write the changelog entry
+    following the existing format (### Added, ### Changed, ### Fixed, ### Removed).
+
+    Return a JSON object:
+    {{
+      "new_version": "X.Y.Z",
+      "changelog_entry": "## [X.Y.Z] - YYYY-MM-DD\\n\\n### Added\\n- ...\\n"
+    }}
+  """
+
+input confirm_release: ***
+  Release plan:
+
+  {release_plan}
+
+  Approve, edit, or reject.
+***
+
+# --- Apply version + changelog ---
+
+session "Update package.json and CHANGELOG.md"
+  prompt: """
+    Apply this release plan:
+    {release_plan}
+
+    1. Update version in package.json (edit the "version" field only)
+    2. Insert the changelog entry at the top of CHANGELOG.md (after the header)
+
+    Do NOT use npm version. Edit the files directly.
+  """
+
+# --- Encrypt, commit, tag, push ---
+
+exec "scripts/encrypt-prose"
+  on-fail: "continue"
+
+let new_version = exec "node -p \"require('./package.json').version\""
+
+exec """
+jj describe -m "release: v{new_version}"
+jj bookmark set master
+jj bookmark set v{new_version}
+jj git push --bookmark master --bookmark v{new_version}
+"""
+
+# --- Publish ---
+
+let publish = exec "npm publish"
+  on-fail: "continue"
+
+if **publish failed**:
+  session "Diagnose npm publish failure"
+    prompt: "npm publish failed: {publish}"
+  throw "npm publish failed"
+
+# --- Decrypt back to plaintext ---
+
+exec "scripts/decrypt-prose"
+  on-fail: "ignore"
+
+# --- Start next change ---
+
+exec "jj new"
+
+session "Summarize release"
+  prompt: """
+    Release complete.
+
+    Version: {new_version}
+    npm publish: {publish}
+
+    Summarize what was released based on the changelog entry.
+    Remind to create a GitHub Release at:
+    https://github.com/rawwerks/ypi/releases/new
+  """
