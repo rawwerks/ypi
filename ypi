@@ -23,7 +23,6 @@
 #   RLM_CHILD_EXTENSIONS — override extensions for depth > 0 (default: same as parent)
 #   RLM_BUDGET         — max dollar spend for entire recursive tree (default: none)
 #   RLM_JSON           — set to "0" to disable JSON mode / cost tracking (default: 1)
-#   RLM_HASHLINE       — set to "0" to disable hashline edit extension (default: 1)
 #   PI_TRACE_FILE      — path to trace log for all calls with timing (default: none)
 
 set -euo pipefail
@@ -83,13 +82,12 @@ cat >> "$COMBINED_PROMPT" << 'EOF'
 ```
 EOF
 
-# Hashline edit extension — line-addressed edits with content hashes
-# Skip if already loaded globally (e.g. ~/.pi/agent/extensions/hashline.ts)
-HASHLINE_ARGS=()
-GLOBAL_HASHLINE="${HOME}/.pi/agent/extensions/hashline.ts"
-if [ "${RLM_HASHLINE:-1}" != "0" ] && [ -f "$SCRIPT_DIR/extensions/hashline.ts" ] && [ ! -f "$GLOBAL_HASHLINE" ]; then
-    HASHLINE_ARGS=(-e "$SCRIPT_DIR/extensions/hashline.ts")
+# ypi status extension - shows recursive mode indicator in footer
+YPI_EXT_ARGS=()
+if [ -f "$SCRIPT_DIR/extensions/ypi.ts" ]; then
+    YPI_EXT_ARGS=(-e "$SCRIPT_DIR/extensions/ypi.ts")
 fi
 
 # Launch Pi with the combined system prompt, passing all args through
-exec pi --system-prompt "$COMBINED_PROMPT" "${HASHLINE_ARGS[@]}" "$@"
+# User's own extensions (hashline, etc.) are discovered automatically by Pi.
+exec pi --system-prompt "$COMBINED_PROMPT" "${YPI_EXT_ARGS[@]}" "$@"

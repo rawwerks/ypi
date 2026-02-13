@@ -1,0 +1,49 @@
+name: Upstream Pi Compatibility
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Check upstream compatibility
+        id: check
+        run: scripts/check-upstream --install
+
+      - name: Create PR if version bumped
+        if: success()
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "ci: pi $(cat .pi-version) verified compatible"
+          title: "ci: pi $(cat .pi-version) verified compatible"
+          body: |
+            Automated compatibility check passed.
+            See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+          branch: ci/pi-compat
+          delete-branch: true
+
+      - name: Open issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const knownGood = fs.existsSync('.pi-version') ? fs.readFileSync('.pi-version', 'utf8').trim() : 'unknown';
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'upstream-breakage',
+            });
+            if (issues.data.length > 0) return; // already tracked
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title: `Upstream breakage: pi compatibility`,
+              labels: ['upstream-breakage'],
+              body: `Tests fail with latest pi. Last known-good: \`${knownGood}\`.\n\n[Workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+            });

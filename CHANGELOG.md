@@ -3,6 +3,20 @@
 All notable changes to ypi are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.0] - 2026-02-13
+
+### Added
+- **ypi status extension** (`extensions/ypi.ts`): shows `ypi ∞ depth 0/3` in footer status bar and sets terminal title to "ypi" — visual indicator that this is recursive Pi, not vanilla
+- **CI workflows**: GitHub Actions for push/PR testing and upstream Pi compatibility checks every 6 hours
+- **`scripts/check-upstream`**: local script to test ypi against latest Pi version — no GitHub required
+- **`tests/test_extensions.sh`**: verifies `.ts` extensions load cleanly with installed Pi
+- **`.pi-version`**: tracks last known-good Pi version for compatibility monitoring
+- `make test-extensions` and `make check-upstream` targets
+
+### Changed
+- Removed hardcoded hashline extension from `ypi` launcher — user's own Pi extensions (installed at `~/.pi/agent/extensions/`) are discovered automatically by Pi
+- Removed `RLM_HASHLINE` environment variable (no longer needed)
+
 ## [0.2.1] - 2026-02-13
 
 ### Fixed

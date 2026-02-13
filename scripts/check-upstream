@@ -1,0 +1,138 @@
+#!/bin/bash
+# check-upstream — Check ypi compatibility with latest Pi
+#
+# Checks if a new version of @mariozechner/pi-coding-agent is available,
+# installs it, runs all fast tests + extension compatibility, and updates
+# .pi-version on success.
+#
+# Usage:
+#   scripts/check-upstream              # check + test + update .pi-version
+#   scripts/check-upstream --dry-run    # check + test, don't update anything
+#   scripts/check-upstream --install    # also install the new version
+#
+# Exit codes:
+#   0 — compatible (or already up to date)
+#   1 — tests failed (incompatible)
+#   2 — couldn't determine versions
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+DRY_RUN=false
+DO_INSTALL=false
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=true ;;
+        --install) DO_INSTALL=true ;;
+    esac
+done
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+DIM='\033[0;90m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+info()  { echo -e "${GREEN}▸${RESET} $1"; }
+warn()  { echo -e "${RED}▸${RESET} $1"; }
+dim()   { echo -e "${DIM}  $1${RESET}"; }
+
+# ─── Check versions ──────────────────────────────────────────────────────
+
+KNOWN_GOOD="unknown"
+if [ -f "$PROJECT_DIR/.pi-version" ]; then
+    KNOWN_GOOD=$(cat "$PROJECT_DIR/.pi-version" | tr -d '[:space:]')
+fi
+
+INSTALLED="unknown"
+if command -v pi &>/dev/null; then
+    INSTALLED=$(pi --version 2>/dev/null || echo "unknown")
+fi
+
+LATEST=$(npm view @mariozechner/pi-coding-agent version 2>/dev/null || echo "")
+if [ -z "$LATEST" ]; then
+    warn "Couldn't fetch latest version from npm"
+    exit 2
+fi
+
+echo ""
+echo -e "${BOLD}Pi version check${RESET}"
+dim "Known-good:  $KNOWN_GOOD"
+dim "Installed:   $INSTALLED"
+dim "Latest npm:  $LATEST"
+echo ""
+
+if [ "$KNOWN_GOOD" = "$LATEST" ] && [ "$DO_INSTALL" = false ]; then
+    info "Already up to date — $LATEST is known-good"
+    exit 0
+fi
+
+# ─── Install if requested ────────────────────────────────────────────────
+
+if [ "$DO_INSTALL" = true ] && [ "$INSTALLED" != "$LATEST" ]; then
+    info "Installing pi@$LATEST..."
+    if command -v bun &>/dev/null; then
+        bun install -g @mariozechner/pi-coding-agent@"$LATEST"
+    else
+        npm install -g @mariozechner/pi-coding-agent@"$LATEST"
+    fi
+    INSTALLED=$(pi --version 2>/dev/null || echo "unknown")
+    dim "Now installed: $INSTALLED"
+    echo ""
+fi
+
+# ─── Run tests ────────────────────────────────────────────────────────────
+
+info "Running tests against pi $INSTALLED..."
+echo ""
+
+FAILED=false
+
+cd "$PROJECT_DIR"
+
+echo "── Unit tests ──"
+if make test-unit; then
+    info "Unit tests passed"
+else
+    warn "Unit tests FAILED"
+    FAILED=true
+fi
+echo ""
+
+echo "── Guardrail tests ──"
+if make test-guardrails; then
+    info "Guardrail tests passed"
+else
+    warn "Guardrail tests FAILED"
+    FAILED=true
+fi
+echo ""
+
+echo "── Extension tests ──"
+if make test-extensions; then
+    info "Extension tests passed"
+else
+    warn "Extension tests FAILED"
+    FAILED=true
+fi
+echo ""
+
+# ─── Results ──────────────────────────────────────────────────────────────
+
+if [ "$FAILED" = true ]; then
+    echo ""
+    warn "INCOMPATIBLE: pi $INSTALLED fails ypi tests"
+    warn "Last known-good: $KNOWN_GOOD"
+    exit 1
+fi
+
+if [ "$DRY_RUN" = true ]; then
+    info "COMPATIBLE: pi $INSTALLED passes all tests (dry run, .pi-version not updated)"
+else
+    echo "$LATEST" > "$PROJECT_DIR/.pi-version"
+    info "COMPATIBLE: pi $INSTALLED passes all tests"
+    dim "Updated .pi-version → $LATEST"
+fi

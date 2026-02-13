@@ -1,6 +1,6 @@
 {
   "name": "ypi",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "ypi — a recursive coding agent. Pi that can call itself via rlm_query.",
   "license": "MIT",
   "author": "Raymond Weitekamp",
@@ -37,7 +37,8 @@
     "install.sh",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "extensions/ypi.ts"
   ],
   "dependencies": {
     "@mariozechner/pi-coding-agent": "*"
