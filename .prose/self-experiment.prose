@@ -25,23 +25,34 @@ let design = session "Design an A/B experiment"
     4. How many trials? (start small — 1 each, scale if promising)
 
     Write a bash script to experiments/<name>/run.sh that:
-    - Takes A or B as argument
+    - Takes a condition letter as argument (A, B, C, etc.)
     - Uses rlm_query to spawn children
-    - Logs timing and outputs to experiments/<name>/results/
+    - Logs timing and outputs to experiments/<name>/results/<condition>/
+    - Uses Pi's default session dir (never override RLM_SESSION_DIR)
     - Is resumable (skip completed trials)
 
     Keep it simple. We're looking for signal, not statistical significance.
+    Return the path to the run script you created.
   """
 
-# --- Run A ---
+# --- Run conditions concurrently ---
 
-let result_a = exec "bash experiments/*/run.sh A 2>&1 | tail -30"
-  on-fail: "continue"
+session "Run all conditions"
+  prompt: """
+    The experiment script is ready: {design}
 
-# --- Run B ---
+    Launch ALL conditions concurrently in separate tmux windows:
+    ```
+    tmux new-window -t eval -n exp-A; tmux send-keys -t eval:exp-A 'bash <script> A 2>&1 | tee ...' Enter
+    tmux new-window -t eval -n exp-B; tmux send-keys -t eval:exp-B 'bash <script> B 2>&1 | tee ...' Enter
+    ```
 
-let result_b = exec "bash experiments/*/run.sh B 2>&1 | tail -30"
-  on-fail: "continue"
+    Then poll for completion (no sleeping):
+    - Check `tmux capture-pane -t eval:exp-A -p | grep Results` periodically
+    - Once all conditions show results, collect the log files
+
+    Do NOT run conditions sequentially. Do NOT sleep for more than 2 seconds.
+  """
 
 # --- Analyze ---
 
@@ -49,14 +60,10 @@ output analysis = session "Analyze results and decide"
   prompt: """
     Hypothesis: {hypothesis}
 
-    Condition A results:
-    {result_a}
-
-    Condition B results:
-    {result_b}
+    Collect results from all conditions (read the log files).
 
     Analyze:
-    1. Did the measured behavior differ between A and B?
+    1. Did the measured behavior differ between conditions?
     2. Was the hypothesis supported, refuted, or inconclusive?
     3. Recommendation: keep the feature, change it, or kill it?
     4. If inconclusive, what would a better experiment look like?
