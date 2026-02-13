@@ -4,101 +4,103 @@
 # Run: rp ypi .prose/land.prose
 # Or just follow the steps manually — this is a checklist, not automation.
 #
-# Monitor from another terminal:
-#   rlm_sessions read --last | tail -30
+# All deterministic steps use exec (no subagent needed).
+# Sessions only for judgment calls (describe, reflect).
 
-# --- Quality gates ---
+# --- Gate 1: Fast tests ---
 
-let fast = exec "make test-fast 2>&1 | tail -10"
+let fast = exec "cd /home/raw/Documents/GitHub/ypi && make test-fast 2>&1 | tail -15"
 
-gate **all fast tests pass**:
+gate **all fast tests pass (72/72 or more)**:
   evidence: fast
-  on-reject: "Fix failing tests before landing."
-let e2e = exec "make test-e2e 2>&1 | tail -20"
+  on-reject: throw "Fix failing fast tests before landing."
+
+# --- Gate 2: E2E tests ---
+
+let e2e = exec "cd /home/raw/Documents/GitHub/ypi && make test-e2e 2>&1 | tail -25"
 
 gate **all e2e tests pass**:
   evidence: e2e
-  on-reject: "Fix failing e2e tests before landing."
+  on-reject: throw "Fix failing e2e tests before landing."
 
-# --- Smoke test: ypi still works ---
+# --- Gate 3: Smoke test ---
 
-let smoke = exec """
-  echo "2+2=" | rlm_query "What is the answer? Just the number." 2>/dev/null
+let smoke = exec "cd /home/raw/Documents/GitHub/ypi && echo '2+2=' | rlm_query 'What is the answer? Just the number.' 2>/dev/null"
+
+gate **smoke test returns 4**:
+  evidence: smoke
+  on-reject: throw "rlm_query is broken. Fix before landing."
+
+# --- Describe the change (needs judgment) ---
+
+let status = exec "cd /home/raw/Documents/GitHub/ypi && jj diff --stat 2>&1"
+let log = exec "cd /home/raw/Documents/GitHub/ypi && jj log --limit 3 2>&1"
+
+session "Describe this change"
+  prompt: """
+    Look at the jj diff --stat and jj log below. Write a concise commit message
+    and run: jj describe -m "your message"
+
+    The message should summarize what shipped. Use conventional commit style
+    (feat:, fix:, refactor:, etc.). One line, under 80 chars if possible.
+
+    jj diff --stat:
+    {status}
+
+    jj log:
+    {log}
+  """
+  context: [status, log]
+
+# --- Deterministic landing steps ---
+
+let encrypt = exec "cd /home/raw/Documents/GitHub/ypi && bash scripts/encrypt-prose 2>&1 | tail -5"
+
+let push = exec """
+cd /home/raw/Documents/GitHub/ypi
+jj bookmark set master 2>&1
+jj git push 2>&1
 """
 
-gate **smoke test returns a number**:
-  evidence: smoke
-  on-reject: "rlm_query is broken. Fix before landing."
+gate **push succeeded (no errors in output)**:
+  evidence: push
+  on-reject: throw "Push failed. Fix and retry."
 
-# --- Clean up ---
+let decrypt = exec "cd /home/raw/Documents/GitHub/ypi && bash scripts/decrypt-prose 2>&1 | tail -5"
 
-session "Clean up and push"
-  prompt: """
-    End-of-session cleanup. Do ALL of these:
+# --- Clean up stale workspaces ---
 
-    1. **Describe the change** (if working copy has changes):
-       jj describe -m "concise description"
+let workspaces = exec "cd /home/raw/Documents/GitHub/ypi && jj workspace list 2>&1"
+let cleanup = exec """
+cd /home/raw/Documents/GitHub/ypi
+for ws in $(jj workspace list 2>/dev/null | grep 'rlm-d' | awk '{print $1}'); do
+  jj workspace forget "$ws" 2>&1
+done
+echo "Cleanup done"
+"""
 
-    2. **Encrypt before push**:
-       scripts/encrypt-prose
+# --- Verify ---
 
-    3. **Push**:
-       jj bookmark set master
-       jj git push
+let verify = exec "cd /home/raw/Documents/GitHub/ypi && jj log --limit 3 2>&1 && echo '---' && jj status 2>&1"
 
-    4. **Decrypt back to plaintext** (for next session):
-       scripts/decrypt-prose
+gate **master is pushed and working copy is clean**:
+  evidence: verify
+  on-reject: throw "Landing incomplete. Check jj log and jj status."
 
-    5. **Clean up stale workspaces**:
-       jj workspace list
-       jj workspace forget <any rlm-d* workspaces>
-
-    6. **Clean up tmux** (if eval session has stale windows):
-       List windows with: tmux list-windows -t eval
-       Kill stale ones.
-
-    7. **Verify**:
-       jj log --limit 3  (master should be at the top, pushed)
-       jj status          (should be empty or just decrypted files)
-
-    Work is NOT complete until jj git push succeeds.
-    NEVER say "ready to push when you are" — YOU must push.
-  """
-
-# --- Compound what we learned ---
+# --- Reflect (needs judgment) ---
 
 output summary = session "Reflect and hand off"
   prompt: """
-    Before you close out, reflect on this session and compound the learning.
-
-    ypi is a recursive agent that builds itself. Every session is an opportunity
-    to make the next session better — not just through code, but through the
-    instructions, tests, and workflows that future agents will inherit.
+    The landing is complete. Reflect on this session and write a handoff.
 
     Consider:
+    1. What shipped? (check jj log)
+    2. What did we learn? Any surprises or failed experiments?
+    3. Did we encode the learning? (tests > AGENTS.md > SYSTEM_PROMPT.md > README.md)
+    4. What should the next agent try?
+    5. Current version (check package.json)
+    6. Any gotchas or context for the next session?
 
-    1. **What did we learn?** Any surprises, failed experiments, or insights
-       about how agents behave? If we ran an experiment, did it confirm or
-       challenge our assumptions?
-
-    2. **Did we encode the learning?** Insights should live in:
-       - Tests (test_guardrails.sh, test_e2e.sh) — if it's an invariant
-       - AGENTS.md — if it's a workflow or attitude
-       - SYSTEM_PROMPT.md — if agents need it at every depth
-       - README.md — if users need it
-       NOT in a document that will go stale. Prefer executable over descriptive.
-
-    3. **What should the next agent try?** Leave breadcrumbs:
-       - Hypotheses worth testing (via self-experiment.prose)
-       - Features worth building (via recursive-development.prose)
-       - Rough edges you noticed but didn't fix
-
-    4. **Handoff summary:**
-       - What was done this session
-       - Current version (check package.json)
-       - What's in progress or unfinished
-       - Any gotchas or context the next agent needs
-
-    The goal is compounding: each session leaves ypi slightly better at
-    building itself. Code, tests, prompts, workflows — all of it compounds.
+    The goal is compounding: each session leaves ypi slightly better at building itself.
   """
+  context: verify

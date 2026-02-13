@@ -184,6 +184,10 @@ EOF
         fi
 
         unset RLM_TIMEOUT
+
+        # Kill any orphan pi/parser processes left by the timeout
+        pkill -f "rlm_parse_json" 2>/dev/null || true
+        sleep 1  # Let any orphan output drain
     else
         skip "E5: timeout enforcement" "RLM_TIMEOUT not implemented yet"
     fi
@@ -233,10 +237,14 @@ EOF
     TRACE_E7="$TEST_TMP/trace_e7.log"
     export PI_TRACE_FILE="$TRACE_E7"
 
-    START=$(date +%s)
-    OUTPUT=$(rlm_query "What is the user's favorite number? Reply with ONLY the number." 2>/dev/null || echo "ERROR")
-    ELAPSED=$(( $(date +%s) - START ))
-
+    # Retry up to 2 times — openrouter can flake on short responses
+    for ATTEMPT in 1 2; do
+        START=$(date +%s)
+        OUTPUT=$(rlm_query "What is the user's favorite number? Reply with ONLY the number." 2>/dev/null || echo "ERROR")
+        ELAPSED=$(( $(date +%s) - START ))
+        echo "$OUTPUT" | grep -q "42" && break
+        [ "$ATTEMPT" -lt 2 ] && echo "  (retry $ATTEMPT, got: $(echo "$OUTPUT" | head -1))" && sleep 2
+    done
     # Check correct answer
     if echo "$OUTPUT" | grep -q "42"; then
         # Check no sub-calls were made (trace should show only depth 0→1, not 1→2)
