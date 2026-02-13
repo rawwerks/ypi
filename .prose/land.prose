@@ -1,0 +1,99 @@
+# land.prose
+# End-of-session cleanup for ypi.
+#
+# Run: rp ypi .prose/land.prose
+# Or just follow the steps manually — this is a checklist, not automation.
+#
+# Monitor from another terminal:
+#   rlm_sessions read --last | tail -30
+
+# --- Quality gates ---
+
+let tests = exec "make test-fast 2>&1 | tail -10"
+
+gate **all tests pass**:
+  evidence: tests
+  on-reject: "Fix failing tests before landing."
+
+# --- Smoke test: ypi still works ---
+
+let smoke = exec """
+  echo "2+2=" | rlm_query "What is the answer? Just the number." 2>/dev/null
+"""
+
+gate **smoke test returns a number**:
+  evidence: smoke
+  on-reject: "rlm_query is broken. Fix before landing."
+
+# --- Clean up ---
+
+session "Clean up and push"
+  prompt: """
+    End-of-session cleanup. Do ALL of these:
+
+    1. **Describe the change** (if working copy has changes):
+       jj describe -m "concise description"
+
+    2. **Encrypt before push**:
+       scripts/encrypt-prose
+
+    3. **Push**:
+       jj bookmark set master
+       jj git push
+
+    4. **Decrypt back to plaintext** (for next session):
+       scripts/decrypt-prose
+
+    5. **Clean up stale workspaces**:
+       jj workspace list
+       jj workspace forget <any rlm-d* workspaces>
+
+    6. **Clean up tmux** (if eval session has stale windows):
+       List windows with: tmux list-windows -t eval
+       Kill stale ones.
+
+    7. **Verify**:
+       jj log --limit 3  (master should be at the top, pushed)
+       jj status          (should be empty or just decrypted files)
+
+    Work is NOT complete until jj git push succeeds.
+    NEVER say "ready to push when you are" — YOU must push.
+  """
+
+# --- Compound what we learned ---
+
+output summary = session "Reflect and hand off"
+  prompt: """
+    Before you close out, reflect on this session and compound the learning.
+
+    ypi is a recursive agent that builds itself. Every session is an opportunity
+    to make the next session better — not just through code, but through the
+    instructions, tests, and workflows that future agents will inherit.
+
+    Consider:
+
+    1. **What did we learn?** Any surprises, failed experiments, or insights
+       about how agents behave? If we ran an experiment, did it confirm or
+       challenge our assumptions?
+
+    2. **Did we encode the learning?** Insights should live in:
+       - Tests (test_guardrails.sh, test_e2e.sh) — if it's an invariant
+       - AGENTS.md — if it's a workflow or attitude
+       - SYSTEM_PROMPT.md — if agents need it at every depth
+       - README.md — if users need it
+       NOT in a document that will go stale. Prefer executable over descriptive.
+
+    3. **What should the next agent try?** Leave breadcrumbs:
+       - Hypotheses worth testing (via self-experiment.prose)
+       - Features worth building (via recursive-development.prose)
+       - Rough edges you noticed but didn't fix
+
+    4. **Handoff summary:**
+       - What was done this session
+       - Current version (check package.json)
+       - What's in progress or unfinished
+       - Any gotchas or context the next agent needs
+
+    The goal is compounding: each session leaves ypi slightly better at
+    building itself. Code, tests, prompts, workflows — all of it compounds.
+  """
