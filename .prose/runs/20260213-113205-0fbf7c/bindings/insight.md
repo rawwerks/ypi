@@ -1,14 +1,12 @@
-{
-	"data": "ENC[AES256_GCM,data:lHyBI56yComsuBg3Cb7d50UEmK62YAPhL4KJXCxxQfAdgWZa6yaa4oQVkD6P8LlrZ1xgwWNu4KsXIZsPc94+cewAFHq4SNL1TAY+eRuYDE3stAdJdhSu/qSuUT45znolHD1hWwoxyUSEkRBQ3JEFcTsVlZqBn0Ahqg2uxUGZ5if9vkY4C6w8UVvFE0uXOmdYE+tUC+6jSUUdpQYnN7lXltQx3hMQFWArkX614a1BkpwmWvh/75vcVP/cUNhpgN92oEpDxAoQhi7TfEsNuw/VjubapEVfC1PjmQ6isvNUEs7zQfGyokWS6KTAjgFHvhUi78sH9xTvuN+k9j/vecHV/AcMdST13f665rDuX+d8HnjnufNz5mHFRzRF3RVqVzX4uTSS8I/JCq8bNqTJA7g3i1SoA4uPu0b1GPG07tsgt5TL+ZoLS27zxCP4nzfHlFoH3sozCKUo7f+2hkp8u83u3c9I64xglELMQhurYG1GtTHpWynfAkSAu3JQITsCdas/r5y/QCSyD5EcGASw9vdF61n54Gp+nFPoYO9g8bUnmK0Obm/q4OKdpzef/O/4yuH4LOp/HBCIyWljfZCGv/19PJCge/tCG/ylaLOvzJeFICPN2Qj/P6E3CFRe92XRqYs9kVTEd7nkvUmiSrO61g==,iv:w38lgbYGfnIP/dG3VbY7HEBKXVfQVJfXzIKtyXH7g9Q=,tag:byU/Sysiq1lex1V2VpG41g==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA1R3RtUGlOM2Y3S0lkdnhQ\nNm5PMGhYeHZXTEhaNFg0REFOeCtjdGwzR0FRCjB6QkJhOGMvbUpLckkwM2tNbXFP\nbVBCU0ZiZGd0NThtUFBvQ05JVSt4ZWMKLS0tIFVOc1VxN1Z4Q0svTGhYMnRxRHY4\nUHE4L2cxSmV5V0F4a0hUK2VXSVFyWUkKEUXd/XdxJXi1TfrrJuJsFgEFWhecbzXs\nv/wBq6r2iPUxmIpomyG8Rg+zA7P3r+itGtMVeNiwhOQE6HHfPEjPAg==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:QADnOKGrWxzFS3KAlnzOSZFS/MiTKDE5y3I7fp4c2SY0fOErni8XX4rURJ68QWQPkpZSJyZCqlW5hmzpdyf7VKqs8bRI9423Qrw+keAECU7D5u+0eG4XIKK77BvIysEf8XHn0c21fhRA+3ckohNdOLVvcmDZujhP9khDBGNkJ78=,iv:8expxmiutP3PfjU1yceD+cu7gkE8RpBKKj2cwhbxmzY=,tag:3HLtNtcG83AnPYvmjqTtyQ==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# insight
+
+kind: input
+
+source:
+```prose
+input insight: "The insight to incorporate across the repo"
+```
+
+---
+
+Symbolic access to prompts: anything the agent needs to manipulate precisely should be a file, not just tokens in context. Even short prompts benefit from being accessible as files ($RLM_PROMPT_FILE), because agents can grep/sed/cat them programmatically instead of copying tokens from memory. This applies to data ($CONTEXT), prompts ($RLM_PROMPT_FILE), and code edits (hashline).

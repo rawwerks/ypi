@@ -1,14 +1,22 @@
-{
-	"data": "ENC[AES256_GCM,data:O+9NtYY6FjsCDaB5sd18JHwlC+DdtEAEZcXXNmvErXX+MSDWYtgRJ2kCJ7+IrW+SnqahcAUBMK/VkNeay3RL+P+7hFuu/GdY9nrkzPHZrQGOq40BKe66s0lHXxwgURoquuTmE5wdT/3cIqANsORWPVsQNzEA1elfEMvUjlOrOXem9AsWHHKPgv7pQm0w/n5OtBMYZosG4UdAQK4VR2QBW+hQbUN4pZiQz4l99wa425uFAhDzv5Y1LVZmEMtDhLjQqRX6pYrF5Gi5WCjSEaMOdv877aVhkD2w+blcg0X7uVCGc6O7cLnChbYrO+fyISnm7mTG3OZpbSGA+UB5tHyQBxYsPxbduR1ijw+KUFDiGesBO2MPvRDTtn5pKneDYeUaAbs3ZiqsvyUaZdDhv6kbFlF54nuNsr0JZKIHao7qVzZeK7G/uVe/MjTKJqvnPlv8pBHSG3dXDbSp1nDkHY9Js1nr23Ekday7lRw7Ei/UZsJcXUC+KBbRcbepNeYBAifBlEf1TuQvx8JnjXg7aCmJ1TyCTFtRKZXURnKweqr0/SvbnK4c8Us1supROiFvvYj5CPF5u63km0HkG6T30SReldkerrFfMiP7wvk6LAXtCI80AvA3UhhT0nADGzwC5tV/43PLfrqhzM2G5msDLwR0KmNzzj3yD4CrlP4/FPCUzqPFcSV0EWSE2jIpH1Uw8q4tI7ieNwSvRZtCTjFq11SABRCBJnBf60IsH0PAxWvAbrdUcuD0P5C1VzNAGHfzXf0HBhJ+kFjCwD0ZLW7CszipHQ==,iv:xYKPmvU18g5y65vO3lUC7Hky0xYRpTJYvb2eHOdDQLQ=,tag:JjLvdKUZOpTEIzNOK/X/gQ==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBzeGhtMGJyOFFHc3BCZ2hF\ndndjRVQ4RUhFQmFhMHJrbXdLMHl4OXhtTlVzCnJsOE15cjBFWTlVYTJGSUpZOE1M\nSFVYcCtwQVRYRVk3Z1JLeVN0cnVQbTAKLS0tIEVTa1RHNlg3M2pyMnQydTZPOVVB\nYWNQQXNkaEVaZFFVV1FKYVhiUlpWNEkKhIoF4r85Jf+IUE6HTV+gPwdJxQPyQ0Vn\nWaSQFw3j3vlsPUoNhsJudqo2vf98v+HXon6TQi+infGW5pFrB+Yp2A==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:AnaAEE92zFC3KXh+A5iVT6pQjU2hSU3ZOsHv99GYBAIzmAbHoclgF/SwgG7JeUdm8HUeoSKtPMnWdVIvFGK9VJpNVx5OZfh60wZEyMUnhVNjoFkfa3XjmxlXGPzdrz9+ET57AOBSwWN0/s6Q7GwhOKdkyZUR8ymRRdJQ+xxC7R0=,iv:Ok9lT5tO14PNrBQO0v1ibFTma+q/d+aNFkk1qHe3EhA=,tag:DoMq2zKTFpu+N3XyxOoHvw==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# tests
+
+kind: let
+
+source:
+```prose
+let tests = session "Add regression tests"
+```
+
+---
+
+No new tests needed. T14d already covers the symbolic access contract:
+
+```
+T14d: RLM_PROMPT_FILE is set and contains the original prompt (symbolic access)
+```
+
+This test verifies that:
+1. `RLM_PROMPT_FILE` is set to a temp file path (`/tmp/rlm_prompt_*`)
+2. The file contains the exact original prompt text
+
+The "can agents grep/sed it?" property is trivially satisfied if the file exists with correct content — it's a regular file on disk. No additional test provides meaningful value beyond T14d.

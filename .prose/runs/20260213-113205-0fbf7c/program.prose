@@ -1,14 +1,175 @@
-{
-	"data": "ENC[AES256_GCM,data:ekjTMigXLeoZLnqjY6XT+VLatnRkdYtRVcBZrOwFd23LP9tVeEJG/HUuTH/20ugjxoPhLbMxw4FYdqCuTX/I/nNYCnIGKujHUS21Ha2VH9lbKYvtmDGZyiKm0t0HYAUka1/QDjjo+X722Ci9z3v5V7NJd9fzhkEOdSKsdG0LC4qsUalW0Y0L/iFYd1iz0fBqIFHC+13x6/pMaMUTQxzmwiXHbYpByifrx3hac1zH3CtZf1EDfvcPumQfC08UGOnTfShqR7vbqU+easnW19ISY1sTlH1tddMkrHWbHh5gTk3R2ycH8bKsG75p0FPrLoYBGcnN3uUhsm+EBv5zBSaG6biZOxHeFKgb9tguR1KTeXlL9GGOgqFTLhUmAbwYKocA+H32RZedGL7XSY7pHr4HAiYcdwmkAtIEYOfZnbRyxRIXIRh6N9UrAe/BSZoeJUMRSamhTLu7ryGNtp3TW32uSzLfXGPV0GJjqlwPRM4lARQLmwhVElUfbpPHMRLTxKtOz8avU8K/y9WQTW9m7oXEWFZjFpc4mCWOk7j0QMFo4fxJ1j355NE2ohdM/lKV+0KieXzUncIK1xLaIfcmnaLxCW3mrPw3XPRU1Ix3eabyLgBU1E6BpmE3hkKO113KrbOyv46up2IvKR0CADxWZlM1lXUJoTuFKGpxOGly7ytDbaaY2eR9sXoUmG66Z+6VPThhBSRrX6UO3PGxSnbebIVlM30tkw8AcVQjrFN7+OSEnQRVJ+E/DFSVSL/ymV/A9mUfS8N50Px0vFWu8inq596OUvKeH0Ojw19ygpbokVxIv7qnPBBGwZyfMIAr7/ARTO0indsjLgb8BRdzL7rnMdpnZGrh4nSKzGrfuC9TKGpK40ALbUt7QUTUGxdD60SGRfz8JoMfN/ViMGX0lP5Rb/ny4F9gqVHSqGvthxdYluWzanC14OMyr1O/xwr1RIw5gm9UYWNJLRaZjwEIAZQpp+EFJrPrDesM081RLKdxSCNhQScs5ayjzGFG5lHizJ+76eHdl4thJLsLkXPRqi9Qfa/DwWmMgy2zKpMS3Gwanf6VCj8rjuLEVJkXN23oz3U+iYkGaPR8rDEaoWzUCkDY+8dWdhaYvdZN3bCzc1aTwxkVbt7rqIPD3SM+WvO9pSy+8cNlM5dIyUUYdP8PdbwNSHE80zIFaAdlIck1cRJXSDlF1pHk8x6K5R0mEPepCC4lAM+N3nmxyO5P5kXU1RFUn+dVySle82NJKNhXSqqa7tFodQPn0VJ2SWwghXR9JfDxKQyBx2H75YQN6c1qi6uhjVjUZ9JRh6X3ibLcTyTyWuNo6vJQY7yqQfeXGHf6OjQ7snEmhAozyp/YGSG9jVYKjNZZmkniUP/b35RQgMPNQebgENJe0Z2ToLVzlfmQVqEUjwUqguJcJA69TgBs6WMDOLc8vX9Pui5ZBye5qQQDoDt8BkS8ERZbE6w6K4fzssJlcnpYyPouzXk2SdDgqTbEB9lMcdsHcCMPUCf8UAxpCwdxJ4uY91W358ynMZnQ49G61LRPJ41weT3xmn6CztpouUnCNpHMC7ljdt82jsYPC0uxBJsf/EI1+Gn/gD5HHl9sz5jrPvdkVf5UN+sJsCLuksrTMKgI5ZCBT60scBYhdirckL7WNmt0am+XdkebO3XQBrQubYlcG0XchKa4+KNFN60iTHevvjMZxCFUwIz9W+I/AhB5XmfnNQgGcacrL/tpMiBSdIi3vKRssBWriMADLqNI0YHMbmqB+Xb9BMDXYNMyCdmg00u6D7bnwyFDspgBvJxzGnJnRNb6k5MCyqZNrmn7y/o2/zMj9TzZ//4XEdmH6OS2jfJM5KdQDp7qgPKUY01nw05DQ7ue/8qcEXWSsvnWTcgK3u/l+8Oj5lOk3Tu8/j4LA6gfo4NWCaUWxHfw7LEgbX1PPpswkeqfF8zIwN/bYq/RHCnyFbFW9A+tmyZ5DNQOI1bRZkQoOUo/2wFC3X9kWupf2PqmuPRBV1mlb5Cw9K77ixpCyGIoO5y+WJ3q1iBcLBsbAa6Y4AS7Rd8pjycX3GSAjr4NhhH40eF+JG/mt7G6qd1H8B+ckKhOR4OfDAc9jzaspSqQzdm6EfDVBAREKShX2PIAWSTGp4pc3C2s1Pa8tezmUud1QxbR/s1QCoGLX/EpyuYAKsOjBV66326TS9DNPAXy401fK65+av5GxGMoIVAZYWQjA794lER94CrfyVACU/uL8dC6g3H4trJk8lnVJAd4+If1ZYDUGYz9435Z7SWfFPW+MpRY1gXXyTA9g1Qr972va4vGtD3Eqy7fiLM73nKYiHkwNkHuX7h3mREF+7XV4z5GkoZvieFJdLWQ7UbIOnHK4j4ZmEklGizR/ifKpcENtt29Lkw3Dl8B9qkvU6fslTyeaUN1fWXdy34qfjVf9XbfZGJW7yeIepuRcaWMLwynaIlavnUe8/YlHeF8G6MIWnSrplg5ysLGio3dt6tqxt6V4xBMzV4ZGAtOn4DqO/6iHYeQw0EeTkFS97m8wSD24g1RKMEMloGSdrckImTYQpArq+MIYKnN+isEFkHGh7Yao2vDw5MCWoeLqbFRhMsUpXG7snMHaT+H8aXrvvKGn8bfqpm/bkYTp848wD0LDIo1akWWmKdoD+srb4G5HLU3+qMZf92cj6/0QorHLGha/aYrkiUyCXvVi8ERqEWnLZ6ZGAG7mbbDzLEuwkYN56MOubd9AhUN0EhlfvkH+VUIZOSkPSDWV9Q3U3wwCm08u78CxuRYKLdEyTQaZIR9oHPLC0ZwZxe4gyylveyuVzdRjCqdD7fCD1FzstOB6am7588GaUP1c0G4DPxd4QMy8vDZS4G+/r9uqZsbN77xLsa+Wl5vfwdJLLmyCPLRJ19Bk4MbDHH4WUrVD0QLUZWUVZ5uTFjGWEMuuKCVUJFr3UWBxiic3ga8FqLWJusfrrigHag6bWL+DJII4xjcoX1rN4mj8sxlp7lPhDxkS9ThFRTG1DEBb17FLfp7q2ze0Dk/pI3Zv4MCB8OheOff6pqk9HJwd1qrYHhi94BRFTtYFLDLl/rWDfnfwLA45Hm5pXb87fY768I4SLvI+gs6dWFkXkYmRL7fiM2Ag/BT5QezXOTrceNqJMj2fK0aHXAegkughaCJGxJszcHHomOtrlWGRVGxHE8bMZiPiP6LSZ0dT6YVi+AxyiR0PYz8aW2JT4MOFzRYwbahWipXi24XB7DrlZehfMfeoYcS6F27I1og2TWl5g72xrHYlpaHB0q4Hhe4dC/RXO3g0e1hiGQRklC+lr+9bJ0TbXnAQR3qy0aAj75qb/o7D3D2lfsZxwVBNZle+nnsTwQUAR3ZSDQP9yFz2fTjjcri/dRWyQ4TbdjFP2jeLrdwA9LjtNtUpCqt/opbzjjqPlKAPSLFZGGEp55UnVYnEgIhNCeEfEngdbmKhgnTewaOZTM5MFowMcvWOT7/wQEVRMmfe2Vmeu7uLRa59Q4KOtOSWluXX3+qilDwtoNlYTmBZa7rrz7Cujx5dtOjVsdPNlH1FdJ5JCV3mFLLNoeLk3oehL+LEJrnd2iQzPTGXvZyuUqcBDz/eCveH6Jczg4AcPh0Yu4YsT2vhIMrQxBSinuEPYHPgdcgGdBTw8jsCQ9dP7dfbzlUaezW3KRAcCgwjEKqh22oS04a5w3VfagSQ3+w5IUnwGBeYdcuNOCP4GSA0pdHvnRoI/GzoMJE+u0R9tsYREMd84KL7D+Mesxgr/O7gdeUjWj1G0DgXEV8cmPE2l8IZj4L2Ydd+qv5DWk50OuEg1AdRZHBqp0g5piRC9Bx4eUcv0y3Li+/J59Nc6UwtkAlBxFgUh8v9P6b1O1CJ7pA9+bDoBum2mAiOiIsbGHJiMb1qhjXzkgX0nkWQsfsgDDvQs1blH3pPuYveutEkweFy2EM60ZJU1icV5VaivVk4/W3rXDzlIoMStQ67DD3rN4AvNDHUoi1DLAaisyp7vOtXCn/pfjIeifeCpTLx2Trq/l01841C1NluEgBF/E+jLZa4BMWANX3hjBSVbJx93GhlKdhsgesydJwom1bWWiBGOOeC0674kdDyn+uoZpoRyAvYFViy08YNiDjBDoA3+E/uedHun0L5TC0OA8exOdBw4NOpJ+o3b/v7l1P87s2ESDJqL2pFcCaTcBsVC+X3nzdyjr9SD7e14XSPF4xWQeCZ44lepJZkvplIs9X1QDiulivtm8TEUjGaUBtbeoNaAeAqM0Ph37yS4zvIS33VzmHSg7Iq01X1SfmUu/CemgfkXlH1DuGrEUr+YWB+Xx11ouxcUIHGw0RN2qkmAlKvS+fZCIXg0qKbeqjScIjUO4Xg/qxjIq1xvxYRp5DbtDRFpwjO5LpoCJ+1gxjok0Qzg//i1OVEA6cUhfYroFCoLPpZmPFsc1FBZeMgdJoB0Kb6gia1w/3+xGLmXGQo6Uol0mNpfSBGb7BeiD47T1e3Uynu7GyHEFJbE3J9Rua/TXuG3tp2B4NGTtNaw4/AstGtrWgmsSCF/2FclfhMz10Q6poF/ToyjMs+U+9RpAvcK+fW81R1D4TpMJ+1ZLk+xszr5oM6guhuRKfDcEP17n6R9wYmVyI5n2ukUn+xGcc3CoiekIkdkyQROA4Pf2P7HM8haUQYPZZbJHrYLaChtfxB7akAkGHHsPxUBI+c5PGHcSDBYF3TolKXKcwTgWLtSXzLVkTf6SBgQW47nMZhqJF3yf5rAK5anCGXXfkt3PFVsELI6SuHAsjCLZEWa4zyJTC+Tx40pc5L9HpP19ceLm/AkUZ8BTgzH9Lh4RzWK/+Vjjo6pKgGvbK1Aa2nozdTU9VnmdHbHwjtvSdlpuGidTVXpGWhdn0uiWEf4Iy+2TymZLv644Fn5XKwE2z84JqD7ksQ9Ygrdk6IFp1R5B42WTmBS/Wdraqe4c5eag8PjkbCoRJ+XQHpfTZBI0KOV0uFzvEuP8ewwL+zDyywGL0nXzZfR7MSOyQULcph7wLvplDsocTiox4L4w/+ZUQxRZ3e17wK/JjHRSdE32dhMyvx/ClxMS5bwZMEIvzxrS0+ap2JPjhs/sDo9FWfdImMI/4V35sYED+i8AkAI+P1lxplsMvKwD/lWhE2jn0PGDGq2YW2uixykA+5PVM934IfJSPWw3b8Fii+zVs9EoN0vlFsRbM6X6ClZGNcQn6pf9+A1SBZk96RuvBHcGLk/2GgBH4JtqlHc3D11DTsC/iMZz0PXaI5cDKs0HhIPKakENYnMEoiozuCPjL3Ape5FCKERpq1EaU3HxGNzJkVDM7omfjXLmo/hxB9CBDc0Pl1PoixQ5NGe+ztUO6tbNEjcpGuWDx3KNV4SxbK/XkN1N0nLqAsj/28d0cgYO/PxYIHqOLDL4/n84HmScxiEb5rkNBdbwDZVLa1A2QW1EZ1MbU3tGOnUEGNi+b0moN3EQXCgoRlCNlxUV+UEi5211cqADi4W7NRTxIl5wBTzGduNpW1r/DlMOvasIppc/9Hm3rvABcNqNY0/kjdRitIeeywV7RjW4b2a0c7ZZfqs1ywq+oMBa6fnp36UkhgyfOG5Gj5j6ClpjpSmDo5TI/1vNmWz3opl8TH6fdO51VhPo6w1hosPEz+dGdqcgTeS3LAV9+AE6FvB+QQuhvg/vaLjriz99f+edcnBHLvEhPHRXz1V+xl+sE9a8iZ+4T28eH+DdwO5dxEgIcDiVSA/w/VVHRcY9hmPiDgNdvCmJVCVyN0/3JrLu+frmdGD2si4MVvd5822Ise3VW8+jLXCbrWBegh02ElMn7GT7cmRID8ToouGE5LnvXl7fIs4Lr4bTeAti+YmH+LcafpRWjhQbv6J9c7nMF22rs0PQuPJFsoBunjMTyZoa710n8vRbZVrrtRdqfSIj0G+O2fY+Ds6vAh3dcJyBhm8SnI4cOADm+Vlay7IfraGkANoAYeIDVHniyuyK2S42/i1M75oQtmiPKlVDB7HOfN2Q7HeJsAPUxxdrfbZ5MW70CjVU2Izz0qLtPH5FMsPmgmIz7eKs82TT4Eaz4LIQzKq0xP90sJP2TnJlZxSYvsbG9IPfGfKFTaELZ4YuiiBn2+9zd3fElTESrRphMvpTQvlusfNs8ecMe5ROsnf2d3DFaoqptxc2MkRLUJgGqNqlcqI4yU9ds1+rWheNzpohPCjD/UgOQ4OTxh+G36PvdqoM1aHOAU1qvfS6in5b1eU7wHsjLqzmFmcosmduyMEH2fO4D5LObKWNa1MVNv8SDICt/dMjspjBbc0Jn9SaBuCT2S26+t7u9ztPF/qdIHNIIpc51+7pwZyIA6gHO0Vzsf0qEnkcs565R7On6ia4Nda2NVyC7wBdOFCeBKcirIm7U2yLBCjSWKUDNREEil1gkLoDJj2/ZZLhfRzSw/D0dBLCu+pzAfx/8/Tzlm1KzVu+mscgYcm6fcCaq7vYNNm1oEkXbN99W32CkjvEAIdt5oJcjxNLUt923QE1WfuO8xUMwdIU9VCH81G7SEMjBbzsXx206Z7Nw+QRg4wVxp4tT19FTTqKKDBjzCdAIu09AJV48j9RJt7TKJ/EZlDpdOrJLXStFVuPbgq+nkAdskZOM2xEVwPP2aWHDGztDhIP2db63MOnaFntfRB+nM1omF3rNB7ELKxR8ag+x+fOSN894UwaGbazh9uPImQjRxCrS9c7rNXZqifoLLkB2BpzPcf1RULNrC6G0V3RbrYx43oKrVsARBGjRSAbE7Ofb/UeucTd0d+EuIoRy4Dai+MWXDZghCcHWIAQvt9Q3YVXAjvjs7/0wyOzdUo9qJZgByPZWeyZt8sov0HdTE9k6AAiRctUpQWNvRiDIt740ZcNHH+SI5bVInESDHbz23utPYljgm0DXrdtJGh28C46MRDzsjti0fdS642ks9uTzsd3pqzhBn+B3qylgeaf/nQf2VQiKYhQ6ijj5lS+xUSL+rM5XspAYDnXE9wit+EABF6UwT/T17FkgVqMjBhevXG0YHMTSlSXv+6a+EiYmfDvDOCxias3SPzA+eEdujziQwx3sGeB7xGnTsyzv8T0Z6Rn2qR8VUDCsdAifTsfwD4nBzsAU3jhk4/ujGXpnoyrfqIiE9tP1oOgd3pvWKGPK+aNlodUuGo7woUJWmmZzCAKKkU3N0DLWqULzQZTSWJDUVnwCaC381kV+T9h55Gh8QUpvUxhBoSBt7EG6aJgg2k51d1kj1gzGAsgPLbrEeNcwo9rkKRsrqN00n9SfhMdvNNoeYGwIb9MtxYcFurrAJTHU8LXiCAhOSdIiCV3rAtVN4w==,iv:B6Qz/7FQcLsMsRlTga+sB4aHkJRzLPJ8HOxPJ2IZEAo=,tag:uh9YihEh9VbGck5mSQf85A==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBIcGhTQ245TFRuYXFOT0NJ\nd2ZVSlgyODdpSytPZDJTQkFaTFpDY0RXMWdJCko5TzMzdVhpbzkzeU5vRVQrV0g2\ncE8wbHovaVJnWVpWWWNrMy8vd0JTa28KLS0tIDJ6Tm9qN1Nxc1F0UGlSN3dBdk91\nazNYZU5iWUZzUmlEZUFxRTR5RzVzQ3MKJh8uBq2IpgjgpzWu1Aw40uJZnYhjgUfZ\nLcISuWC/EwthHkoyDy4xyN9HdVIjWel2HpdsvpjlVfFjLF6PcQ98DQ==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:X4HVRmyqYKkMCT2ttmryXQv049Sa9bN4/OmTtSWfsT5bCtWdbQPFnrfnCG31TOd79B/4I8nIo+4VBpo466u0mEWm2TbOvx4cySSf87UE7BGsj3GUYbPE2+SefrKn7U4BbkieFSjfVPko6OP+tatb0FEDjCOGmpsGc/LcpGHXrbo=,iv:kr3OsCIT+YrDaKhM7U4jj7l42P4xRrqxhvQhmL0KjwU=,tag:CxouD/GFSGbzQZbGm9i7qA==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# incorporate-insight.prose
+# Systematically incorporate a new insight across the ypi repo.
+#
+# Run: rp ypi .prose/incorporate-insight.prose insight="symbolic access to prompts helps agents manipulate them programmatically"
+#
+# This program updates every place in the repo where knowledge lives,
+# following the obvious/visible/possible framework:
+#
+#   obvious:    SYSTEM_PROMPT.md (every agent sees this)
+#   visible:    AGENTS.md (agents working on this repo), README.md (users)
+#   executable: tests/ (invariants that can't go stale)
+#   possible:   CHANGELOG.md, .prose/ workflows
+
+input insight: "The insight to incorporate across the repo"
+
+# --- Step 1: Understand the insight and plan where it applies ---
+
+agent planner:
+  model: sonnet
+  prompt: """
+    You analyze insights about recursive LLM agents and determine
+    where they should be incorporated in a codebase. You are precise
+    and conservative — not every insight belongs everywhere.
+  """
+
+let plan = session: planner
+  prompt: """
+    Analyze this insight and determine where it should be incorporated
+    in the ypi repo.
+
+    INSIGHT: {insight}
+
+    The repo has these knowledge locations (ordered by visibility):
+
+    1. SYSTEM_PROMPT.md — What every agent sees at every depth.
+       Only add here if agents NEED this to do their job better.
+       Keep additions SHORT (1-3 lines). This file is in every context window.
+
+    2. AGENTS.md — Instructions for agents working on THIS repo.
+       Good for: architectural invariants, design principles, workflow changes.
+       Section "Architectural Invariants" is for claims we test.
+       Section "Bugs We've Found" is for traps to avoid.
+
+    3. README.md — For users and operators.
+       Good for: Pi Compatibility table entries, design philosophy.
+
+    4. tests/ — Executable invariants.
+       Good for: anything that MUST remain true. Encode the insight as an
+       assertion in test_unit.sh or test_guardrails.sh.
+
+    5. Code (rlm_query, ypi, rlm_sessions) — The implementation itself.
+       Good for: when the insight requires a behavior change.
+
+    6. CHANGELOG.md — Only if we're releasing soon.
+
+    For each location, say:
+    - SKIP: insight doesn't apply here
+    - UPDATE: what specifically to add/change and why
+    - CODE: what code change is needed (if any)
+
+    Be conservative. Not every insight touches every file.
+    Prefer executable (tests) over descriptive (docs).
+  """
+
+# --- Step 2: Apply code changes first (if any) ---
+
+let code = session "Apply code changes"
+  prompt: """
+    Based on this plan, apply any CODE changes needed.
+
+    PLAN:
+    {plan}
+
+    INSIGHT: {insight}
+
+    Rules:
+    - Read the relevant files first to understand current state
+    - Make minimal, surgical changes
+    - If no code changes needed, just say "No code changes needed"
+    - Do NOT touch docs yet — that's a later step
+    - After changes, run: make test-fast
+  """
+  context: plan
+
+# --- Step 3: Apply doc changes ---
+
+parallel:
+  system_prompt = session "Update SYSTEM_PROMPT.md (if planned)"
+    prompt: """
+      Based on this plan, update SYSTEM_PROMPT.md if the plan says UPDATE.
+      If the plan says SKIP, just say "Skipped".
+
+      PLAN: {plan}
+      INSIGHT: {insight}
+
+      Rules:
+      - Read SYSTEM_PROMPT.md first
+      - Keep additions to 1-3 lines — this file is in every context window
+      - Find the right section (don't just append)
+      - Preserve the existing style and structure
+    """
+    context: plan
+
+  agents_md = session "Update AGENTS.md (if planned)"
+    prompt: """
+      Based on this plan, update AGENTS.md if the plan says UPDATE.
+      If the plan says SKIP, just say "Skipped".
+
+      PLAN: {plan}
+      INSIGHT: {insight}
+
+      Rules:
+      - Read AGENTS.md first
+      - Find the right section (Architectural Invariants, Bugs, etc.)
+      - Match the existing style
+    """
+    context: plan
+
+  readme = session "Update README.md (if planned)"
+    prompt: """
+      Based on this plan, update README.md if the plan says UPDATE.
+      If the plan says SKIP, just say "Skipped".
+
+      PLAN: {plan}
+      INSIGHT: {insight}
+
+      Rules:
+      - Read README.md first
+      - Pi Compatibility table is the most likely target
+      - Keep it concise
+    """
+    context: plan
+
+# --- Step 4: Add tests ---
+
+let tests = session "Add regression tests"
+  prompt: """
+    Based on this plan, add tests that encode the insight as executable invariants.
+    If the plan says SKIP for tests, just say "Skipped".
+
+    PLAN: {plan}
+    INSIGHT: {insight}
+
+    Rules:
+    - Read tests/test_unit.sh and tests/test_guardrails.sh first
+    - Follow existing test naming conventions (T-series for unit, G-series for guardrails)
+    - Tests use a mock pi that echoes args/env — no real LLM calls
+    - After adding tests, run: make test-fast
+    - ALL tests must pass
+  """
+  context: [plan, code]
+
+# --- Step 5: Verify everything ---
+
+let verify = exec "make test-fast 2>&1 | tail -15"
+
+gate **all tests pass after incorporating insight**:
+  evidence: verify
+  on-reject: "Tests failed. Fix before finishing."
+
+output summary = session "Summarize what was done"
+  prompt: """
+    Summarize what was incorporated and where.
+
+    INSIGHT: {insight}
+    PLAN: {plan}
+    CODE: {code}
+    TESTS: {tests}
+
+    Format as a short bullet list:
+    - What changed in each file
+    - What tests were added
+    - Any follow-up needed
+  """
+  context: [plan, code, tests, verify]

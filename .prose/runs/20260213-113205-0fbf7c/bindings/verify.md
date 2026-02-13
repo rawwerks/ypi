@@ -1,14 +1,29 @@
-{
-	"data": "ENC[AES256_GCM,data:X44GEXacRg0PJX1SOpqbk8+Fy8CydPqy0lbfl0heyP4OzSA8uDvJ0vvxERzhCgAmvU7+rJiEyhpQ06+Y2l/ZarJ18usEMKjjZurgPmiZltp0TEkdZgPEJiGvrGNtm0884eL6niy+xsa462gHFv+S+ziyb8fa+Sv0PGuola35YbijljBkxaEJgNYbZpQhx5JB9HH+FyrG6diF3RhyUFrjKoUzDtYBVYVs/Opeq7+Rdo+Fwhca+6iOBria3d27pfrLGB3JLpk6aK9pYydmG8wcWC1qf0FAzfPMtXrlJENrRJcPW1acK5qBldqKJYE8fCzvd1/QklFu8BF/wXEujAWJWUvZDJo3P1gS5AQtLOMxatoh/5SIl75QyNfAH4R/7mWEK0BoveUDDOTQ7BO2lAablBDM/oDMMuXcAw2lZGe1e0u8BLSZQsPbfpSveZlwsR1pfhU8hof6THOnw33/P8RZJvUVDZ3uSgHil+O0sMZgeR7o/CapzKzqU8c03zJjfbxcgedSiTkJhWG+ryMD9RN+RJNiILxnEZljkJE1Ye0HZtwGwh75TQ0UTraDXFtgje8y1QmfKLkIedvHeFqy2F4LbRs9ADCF+TUWW+URUcaRaaukBQL3kHeVlRP7xsRRrJlUEonCPnvVVyYpyVx1Zz/Pu6IbBmBV+LdcK5uSAS3vel8LLVXS5gsdsoPZq7y04MgxQpBL+h2o3frVrCMxPy0duQkHu1L3528AB7f5LBRZY7SxyFv3N24sJIvbfq341Le3ls53sR6jP7d/iEwLCIZtpjGwrtb9s2dLEXiPsXGzkUsT+nPJQ/j6m+6IQMA2jMbVdNi+VPRNUq8Jna99FBDbLSkbn6LTYFOE9bfpfC1dDnM12cz/PT2UWE8B7Co=,iv:+5KwxvNatKKcBvg1DlqHHb/pLvHumas4CHorNo8KkDU=,tag:rj5e778mF1+adwWGsUv9GQ==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBVWUE3Zndmb2tTRW4wNk1D\nUHFsZXd6VllaWlBXeHFxaDRpUmNZd1dWazNrCjNiY3RZdVBpMTRJNFh0Vmtkc2JM\nZnRYZldnUFJLUVFLclRCV1BtS2grbGsKLS0tIEx0VkFXTmQ5SFlvWTlOZG5Ua29q\neklYaWw3YTdnVFhlK2FLWDFtTW13djQKZPtbs1sOfOs8hu1/n6SFK2WrVqNCXI9m\n3RxXZmrDgINYKnF2Y9x3cRaG3mrAjCGMO9t2dZnxnU8l65EIC2Ruqg==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:x88HarOmsJPO24y1jz6TOv7ljBAcNLr3C4M3BVN5pSKrJvzAtLTaK3m9qafCmZTGZqWNPETWkj14NHZKuBl1CoX/qqeEfLn6b8QjqMMI4yszwMRGiy3olBlKWLzdBL83X42i3bD90Fdm6o/F1bgPtdlUkN891YOKc71z0SdXnTk=,iv:Z75xIU2ewcobEotq6u1e9ugoxgWwyYIXetQ2g01tuzE=,tag:uMWyfWKvpYzRJ+LvVL34uw==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# verify
+
+kind: let
+
+source:
+```prose
+let verify = exec "make test-fast 2>&1 | tail -15"
+```
+
+exit_code: 0
+stderr: (empty)
+
+---
+
+  ✓ G47: RLM_JSON=0 works
+
+=== rlm_sessions ===
+  ✓ G48: lists sessions by default
+  ✓ G49: SHARED_SESSIONS=0 disables
+  ✓ G49: no session listed
+  ✓ G50: SHARED_SESSIONS=1 enables
+  ✓ G51: trace filter includes matching
+  ✓ G51: trace filter excludes other
+
+═══════════════════════════════════
+  Results: 72 passed, 0 failed
+═══════════════════════════════════
+
+All tests passed! ✓

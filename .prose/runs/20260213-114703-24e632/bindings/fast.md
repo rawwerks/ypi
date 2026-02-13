@@ -1,14 +1,29 @@
-{
-	"data": "ENC[AES256_GCM,data:HIC3Y6DX1MF66F1P+5oYcTUur7gmsmVvBPbNC1eQPHoc199yMFZtQkt66ylTS7uqkSAolB3eWW53U97RCKJmdYAALRvBrmO+xxNZYQZ5LIw0IL0H3glG8bz0nnOSa8wrdbDLcTnou3dR9n0lpOPjHaTX0Vy/vxPCyNaVfkMiVG+lviNR84bWAxRq9Yi4adueVsnH2C4zJvtmOpK4hzT25trJljbXkqoSIAZzsDuBK1scCryWFx/tx6V4r6n2vwOJWEOoL+Ewk+kCiKuJjp32JMQhDaZsluDbBCzmtGUzoq8aW7T/dbd25wXEuReDkhirpNml63LiFkEu5rHU8fhnZbf+IIpD6Jve09eWJO0Z0PlXQ1M+Lp4aeOchhp0Q5PkCk/2tErlBO0i4d7CFj9iSlnULpDzvJKovIfmwwpEVDwP7CtE8XwSrCIgAy74G/mtEvkWyN6zVu0H+lo4XrgvRs60IV/VJ92ZIiInrqSwVf5rUmrkDOv/W08iU4xnz6XD5Ang4sp3UVvVepgOTSfwBpeZ7Hu88bGWdnHlvfExS28kcdDrUpvB0fNHACm5g/C0gftF2LIc0DpVz1CUl4mq6x3zQEQkObO2Zw8cn1wTZwPZrEi6jqdC7AgzB8JXMh3K4V+7/xdroi+B+f/FW+MBMjfHia4gSUZeyJOqGh3FQ0svzlce7Hw42iSZpJMvxXRz4u4MyGx/f5lPtT7/ggnU3d4to1vq1IJOlGTuOlA4FMBS1YKpfLkPfiVLl805q5zD2CTe3pFOX+AFRE3rA7/zdB50PXB0UfPisay3S5magiJ2+9LtQHvP6so0/FodT+IG0fOah/Ju0CVsODdJLc4OJyrpi5GAfc4vwfftgHLc4yj9Cs+6cbm1aFYhwskvNbv8i3R45KEbzMM1K9pIN3VacoxeArLDupYzPkRqzCzs=,iv:KziRva1NqmQRYv+Y67jb3l3V/XD86LQvDf5On400uRc=,tag:Onf57Ex+Q6nol7sJCt9hHQ==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA4TVpBSWg4M3Zib0lYTFpG\nZ1ZQMkZYMWxuQ1FKcHF2UnNHNDFkWisvYXdjCkhNNTJHQklRWmV0d1hLNS95MzY3\nZ0tFYXBFa2FqejNBSEtuY3lRUyt4cmMKLS0tIFNZdHlaRnFhRHNZQmlmWkJScElO\nWjNsdFI3UHViZVh2L2U4UjZBNkV6WXMKcy1w433wk7cNf1LEWFzvA1YxKnPzasTM\n3/88LP8AMaj5XA2DXKRUaiP6bRr7DBAu4uvHAdJSe6PqAKHOdbUUPQ==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:+qdS4Wg2BqPhrBx8At+XjzJunks967Zv9EyUH8IaOYGc0akhN4Gp/GaoBswPI7SRh91dJp0DBKhzJKrHDMDQ5KMR+U3FCB0OLdza6VL3GJ1ojTdX7Xx3eMmRnB2i7Y20fRFWbEoVJdT2MyBrGHb23VrdzjhP4Wz6adkNxZ8AoFg=,iv:4poKGdZg5BL5RBCxL3dOj6LdkgrPsQp65sFoI27D7g0=,tag:+LPJgK729WscGnx0ObmBeg==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# fast
+
+kind: let
+
+source:
+```prose
+let fast = exec "cd /home/raw/Documents/GitHub/ypi && make test-fast 2>&1 | tail -15"
+```
+
+exit_code: 0
+stderr: (empty)
+
+---
+
+  ✓ G47: RLM_JSON=0 works
+
+=== rlm_sessions ===
+  ✓ G48: lists sessions by default
+  ✓ G49: SHARED_SESSIONS=0 disables
+  ✓ G49: no session listed
+  ✓ G50: SHARED_SESSIONS=1 enables
+  ✓ G51: trace filter includes matching
+  ✓ G51: trace filter excludes other
+
+═══════════════════════════════════
+  Results: 72 passed, 0 failed
+═══════════════════════════════════
+
+All tests passed! ✓

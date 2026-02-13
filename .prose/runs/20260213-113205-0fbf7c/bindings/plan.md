@@ -1,14 +1,49 @@
-{
-	"data": "ENC[AES256_GCM,data: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,iv:cBiEUXBKr57dBA0KobQ6OUmyAdmFZSLnI+ZBnf0Efnk=,tag:DwI7RAilFhFsIMa5smV9+w==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBTNmJpckFGQmR5SFNvMVJ0\nVkU3UHlpdmMyU1BWNGd5ZG9qVlRhRlROWFIwCjAwNHVzYUgxMXBSdXZaWHFTM3dl\nS2JVckFCclNCc3d1OGl5TWU3MHNIeWcKLS0tIE54dk1KTk5OOVhvVFlZMkJIcjhX\nM0xzd01vTEhFcUlXTkJNTUN2R0V6dUkKsoH1ueEiZXwxGGqdsnPP2hQbhPNMu3Da\n6MRBGr/Q22c9cJhduMmYmUvBykjk61QqyhZtsQCYU284OpOG8bXZlA==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:RuGjpwJWXVrQ1BF3AqEG4iCnvzr86MzcG+qNXE9rZsJfW0igQ2stXBtWsHf+GQJl7cj3zK/9y+29gN4nNfnAoshRA9a+Hyy+3XfNOG/eDP0fO3UuFgs/gY5ZAXe9QdNwrSlMl5/1Ct6SFfrojFTbhgqtKmgOlCC3g0Ew5T5YHqA=,iv:M6x2heD1S5ioHUKluAgz+mHYlvwyYKRVbZKafQbT2dU=,tag:MFXmIk05BuqoQkTgDiTU2g==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# plan
+
+kind: let
+
+source:
+```prose
+let plan = session: planner
+  prompt: "Analyze this insight and determine where it should be incorporated..."
+```
+
+---
+
+## Insight Analysis: Symbolic Access to Prompts
+
+**INSIGHT:** Symbolic access to prompts: anything the agent needs to manipulate precisely should be a file, not just tokens in context. Even short prompts benefit from being accessible as files ($RLM_PROMPT_FILE), because agents can grep/sed/cat them programmatically instead of copying tokens from memory. This applies to data ($CONTEXT), prompts ($RLM_PROMPT_FILE), and code edits (hashline).
+
+## Current State Assessment
+
+This insight is **already well-incorporated** across the repo. It was added as Architectural Invariant #4 and is present in all key locations:
+
+### Where It Already Exists
+
+1. **SYSTEM_PROMPT.md (line 12):** `$RLM_PROMPT_FILE` is documented in Section 2 with guidance on when to use it (extracting exact strings, counting characters).
+
+2. **AGENTS.md (line 65):** Architectural Invariant #4 — "Symbolic access" — covers `$CONTEXT`, `$RLM_PROMPT_FILE`, and hashline. Tagged (T14d).
+
+3. **README.md (line 101):** Design principle #4 — mirrors the AGENTS.md invariant for external users.
+
+4. **rlm_query (lines 155-158):** Implementation — creates `$PROMPT_FILE`, writes the prompt to it, exports as `$RLM_PROMPT_FILE`.
+
+5. **tests/test_unit.sh (T14d):** Tests that `RLM_PROMPT_FILE` is set and contains the original prompt content.
+
+## Per-Location Recommendations
+
+1. **SYSTEM_PROMPT.md** → SKIP. Already has the $RLM_PROMPT_FILE guidance in Section 2. The current text is concise and well-placed.
+
+2. **AGENTS.md** → SKIP. Architectural Invariant #4 already captures this verbatim.
+
+3. **README.md** → SKIP. Design principle #4 already covers this.
+
+4. **tests/** → UPDATE. T14d tests that the file exists and has content, but doesn't test that an agent can actually *use* it programmatically (grep/sed). A stronger test would verify the file is readable and grep-able. However, this is a unit test with a mock pi — the current test is sufficient for the bash-level contract (file exists, has content). The actual "can grep it" property is trivially true if the file exists. **No new test needed.**
+
+5. **Code (rlm_query)** → SKIP. Already implements the feature (lines 155-158, 218).
+
+6. **CHANGELOG.md** → SKIP. No new changes to log.
+
+## Conclusion
+
+**No changes needed.** The insight is already fully incorporated across all layers: specification (SYSTEM_PROMPT.md), documentation (AGENTS.md, README.md), implementation (rlm_query), and tests (T14d). The repo is aligned with this principle.

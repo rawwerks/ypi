@@ -1,14 +1,19 @@
-{
-	"data": "ENC[AES256_GCM,data:QNoTWVayWrccA/3v6727eDMW3YfN3I3kFPOmy4uRzoe7f5pgKUlUfLU+a1TNIO6UimFyIRAIB8ETl+b/3q4o5isQagRD6b6g9Bs4WuQLLp1KjALnxuADW1Jjkb9WXvIx+l9yKZLiu4yMnfI93IvUuhTstXA9aZbGWupw/CWPryhwYQOq2E4u+LPg/M6vsUHL0GbCt505jHtlg0iEvXq6ag5FLkP9CFEm+6X7d/TH0Vj746Pknts7nQmkREIIy8yz33DCSYE86pacw4Yw47VNgz9j79Yn+clu0Gh54nn+9MAWo9CGFol/YtdOiNdxgfSszu8D9EsxsXvq+8OaBKctmjzuyM1i55mZEphzUVv/kpO3EtcNzyCxD/x+JqsIVOvV/x3MuON8SsJvy3D5a9ZwLIaox5ZCcy3M4SSwdiX0PiB6yo1w1crGnSembONu2eM4qxAykxhLYFRqSvXTEqi6oTX6qxx3wkfb1VnY/um7OAGgojubkoKG402nEYi/+0iWbDbcn6k=,iv:x01qJZuYk937KYL2AoLCfQvFAA7lC7L/bgBUD9M2A88=,tag:NF8kWxeuy6C7/oBpSZ8aJw==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSArRHUzeDRTUkhKSXpuZmE0\nU1Z4SzZGNXFUS2hJK0FtM3U2RktZdW5OMERZCkIxSy9hL2NuMm82NlNmc01qS3RO\nMDMvVjJicjZMQ0pIVE5PWXdSaWNEdE0KLS0tIEVtY3M1ejBhYmZ0MGlQWHVET3Nw\nOGpBbk0wWHg3N0RQMTVqaXltMi92cGMKr54SFGLOcxtxszVJM3ILXgVfhMSqTRWw\nHARTse9ajI67e0anAeyHOmoDpYy2aKahMVhmrBllEe4OSeRjs1QqSQ==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:e47SixaUcImaobVOfcsQWn9qehRy7aE/TWkTno964ECIdX1TeMGncCKIFJislL29/27TFuQHhRIb81HpY3W1FRv677lmrXfo7EWFFVzwKIhL9l5P0NSpglf7KuQd4xX/bGb8fXuDpqfoaZfyAEeODvSgLP+1+1bkLy+XTUcici4=,iv:SzYdQ6jFZSAtIWCwKxxVjQiPl9I/KZ29ufJ4GM8pAxg=,tag:xS05RQpUhueo8CMpfm5oLw==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# anon_002
+
+kind: let
+
+source:
+```prose
+session "Summarize success"
+```
+
+---
+
+All tests pass with pi 0.52.10. The .pi-version file remains at 0.52.10 (no change needed — already up to date).
+
+Test results:
+- Unit tests: 27/27 passed
+- Guardrail tests: 66/66 passed  
+- Extension tests: 3/3 passed
+
+Total: 96/96 tests passing. ypi is fully compatible with the latest upstream Pi release.

@@ -13,3 +13,12 @@
 	}
 }
 10→ encrypt ✓
+11→ push ✓
+12→ gate:push ✓
+13→ decrypt ✓
+14→ workspaces ✓
+15→ cleanup ✓
+16→ verify ✓
+17→ gate:verify ✓
+18→ summary ✓
+---end 2026-02-13T12:45:30Z

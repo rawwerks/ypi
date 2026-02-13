@@ -6,8 +6,9 @@
  *      tmux send-keys -t eval:land 'rp ypi .prose/land.prose; echo "72/72 passed" > /tmp/ypi-signal-land' Enter
  *
  *   2. This extension polls /tmp/ypi-signal-* every 5 seconds.
- *      When a sentinel appears, it calls sendMessage() with triggerTurn
- *      to inject a notification and wake the agent.
+ *      When a sentinel appears, it injects a notification:
+ *      - If idle: triggers a new turn immediately (triggerTurn)
+ *      - If streaming: steers the agent (delivered after current tool finishes)
  *
  * Sentinel format: /tmp/ypi-signal-{name}
  *   File contents become the notification body.
@@ -39,7 +40,7 @@ export default function (pi: ExtensionAPI) {
 							{
 								customType: "notify-done",
 								content: `⚡ Background task "${name}" completed: ${content}`,
-								display: "block",
+								display: true,
 							},
 							{ triggerTurn: true },
 						);

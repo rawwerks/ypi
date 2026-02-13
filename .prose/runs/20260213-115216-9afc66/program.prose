@@ -1,14 +1,106 @@
-{
-	"data": "ENC[AES256_GCM,data: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,iv:aNBLM4sn3q4uRyHzNZMmurQgPf/0DvpDhKuA4gRx8bM=,tag:m/KD1uYytqAB6Fr9nrIwhw==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB3ZllQNXpkYmFRR21CWDE1\nYjFXVUp2czZNQXRNTjhqRWFUa0dHdloydkcwCmxob3hURUNPYW1aaU4vUzZqcGxn\nanJzWHVScUFvOWRRR0tRcHRyb0ZiL3MKLS0tIGlSTTNZeE5nMjBiaWluNi8wUnJF\nUHNuaEU2dzFJWStVT3JiVmZjMjI0YjAKDkOgPfWPQ5UtjluL1LIPZ6Xg8+C6sTKt\nQGKWvX3mz6qCobPy52qW3aL58Z+zbdw98KUeHqNQlqDQS4REkQRGeA==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:hAT2rmbUjizJIq98Dpvg3SLCIHcpJeXyyOx6m6WRAHUoe2amxapsj8ZKFXW8IqH8k5nobFUsxt6NNykSd7AsCzbv5gSPGFDVssVsUizCeKJGoyOtEzN99Ghl6J9nN8aml2MUtsc1yPeJii+kJ89aM+5K1DjLHWOuxdq7wZmBck4=,iv:1Y5TiLRF3+gTVkaxOpdGmw2USE+lRcGYmWby7WBWaPA=,tag:4H5dklbP/OjQgGgX8rx5mA==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# land.prose
+# End-of-session cleanup for ypi.
+#
+# Run: rp ypi .prose/land.prose
+# Or just follow the steps manually — this is a checklist, not automation.
+#
+# All deterministic steps use exec (no subagent needed).
+# Sessions only for judgment calls (describe, reflect).
+
+# --- Gate 1: Fast tests ---
+
+let fast = exec "cd /home/raw/Documents/GitHub/ypi && make test-fast 2>&1 | tail -15"
+
+gate **all fast tests pass (72/72 or more)**:
+  evidence: fast
+  on-reject: throw "Fix failing fast tests before landing."
+
+# --- Gate 2: E2E tests ---
+
+let e2e = exec "cd /home/raw/Documents/GitHub/ypi && make test-e2e 2>&1 | tail -25"
+
+gate **all e2e tests pass**:
+  evidence: e2e
+  on-reject: throw "Fix failing e2e tests before landing."
+
+# --- Gate 3: Smoke test ---
+
+let smoke = exec "cd /home/raw/Documents/GitHub/ypi && echo '2+2=' | rlm_query 'What is the answer? Just the number.' 2>/dev/null"
+
+gate **smoke test returns 4**:
+  evidence: smoke
+  on-reject: throw "rlm_query is broken. Fix before landing."
+
+# --- Describe the change (needs judgment) ---
+
+let status = exec "cd /home/raw/Documents/GitHub/ypi && jj diff --stat 2>&1"
+let log = exec "cd /home/raw/Documents/GitHub/ypi && jj log --limit 3 2>&1"
+
+session "Describe this change"
+  prompt: """
+    Look at the jj diff --stat and jj log below. Write a concise commit message
+    and run: jj describe -m "your message"
+
+    The message should summarize what shipped. Use conventional commit style
+    (feat:, fix:, refactor:, etc.). One line, under 80 chars if possible.
+
+    jj diff --stat:
+    {status}
+
+    jj log:
+    {log}
+  """
+  context: [status, log]
+
+# --- Deterministic landing steps ---
+
+let encrypt = exec "cd /home/raw/Documents/GitHub/ypi && bash scripts/encrypt-prose 2>&1 | tail -5"
+
+let push = exec """
+cd /home/raw/Documents/GitHub/ypi
+jj bookmark set master 2>&1
+jj git push 2>&1
+"""
+
+gate **push succeeded (no errors in output)**:
+  evidence: push
+  on-reject: throw "Push failed. Fix and retry."
+
+let decrypt = exec "cd /home/raw/Documents/GitHub/ypi && bash scripts/decrypt-prose 2>&1 | tail -5"
+
+# --- Clean up stale workspaces ---
+
+let workspaces = exec "cd /home/raw/Documents/GitHub/ypi && jj workspace list 2>&1"
+let cleanup = exec """
+cd /home/raw/Documents/GitHub/ypi
+for ws in $(jj workspace list 2>/dev/null | grep 'rlm-d' | awk '{print $1}'); do
+  jj workspace forget "$ws" 2>&1
+done
+echo "Cleanup done"
+"""
+
+# --- Verify ---
+
+let verify = exec "cd /home/raw/Documents/GitHub/ypi && jj log --limit 3 2>&1 && echo '---' && jj status 2>&1"
+
+gate **master is pushed and working copy is clean**:
+  evidence: verify
+  on-reject: throw "Landing incomplete. Check jj log and jj status."
+
+# --- Reflect (needs judgment) ---
+
+output summary = session "Reflect and hand off"
+  prompt: """
+    The landing is complete. Reflect on this session and write a handoff.
+
+    Consider:
+    1. What shipped? (check jj log)
+    2. What did we learn? Any surprises or failed experiments?
+    3. Did we encode the learning? (tests > AGENTS.md > SYSTEM_PROMPT.md > README.md)
+    4. What should the next agent try?
+    5. Current version (check package.json)
+    6. Any gotchas or context for the next session?
+
+    The goal is compounding: each session leaves ypi slightly better at building itself.
+  """
+  context: verify

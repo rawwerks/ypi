@@ -1,14 +1,72 @@
-{
-	"data": "ENC[AES256_GCM,data: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,iv:hT6CJfqPW2yxvcw0fOIu7Dkjfd9cOceh6OWBaNyqRPs=,tag:LlkKF7jhH+7mcun9coKgQQ==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBnOGtYN0VPNk1pbllKbk1s\nZGgyTTVnOEJkWG5TYXhqc2lzbG5vWHZuM0FnCkxZS1Q0Q1NiRTRlODhkMEhjYXVk\nR0ZPSklUR20xMFJYS1dUTVhZWVZ1ck0KLS0tIHdSWlRFZUtMM2g1Zy9GeE00b2JJ\ndzNacjhOK292QmZxMndMcGFiRGtBczQKMGkkJfZq11w/pne1u/s/ZoyA2yzBi3MV\nAMTNE/3gAEvDFzheuYz/SIULQzakwhYCrrXQt/CG6Eg6P9R5fou35w==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:tITFQSsnz6HeMp5FZIUGetgqtBtj5J+HvNZ62TmbSsmXkKzgzKuoYWurKYabpkkUN5cTPAx2BqMY/4YvpijuvGcxI6g0SPD2lotkAfBJgp4aNWKY0clPyM8SG80psNjU0/JFqJWyXpMj47d21ZSUBkE3DRKLWwhBaBZSJkK+was=,iv:yRVavo3Iehgj1DIzjszkdsDWwxej6oc3JCYoiuT+8xY=,tag:vApuMZdCzWKkbrUvCcaoIw==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# self-experiment.prose
+# Test a hypothesis about ypi by running ypi on itself.
+#
+# Run: rp ypi .prose/self-experiment.prose
+#
+# Monitor from another terminal:
+#   rlm_sessions read --last | tail -30
+#   rlm_sessions grep "pattern"
+
+input hypothesis: "What you think will happen and why"
+input task: "A concrete coding task that tests the hypothesis"
+
+# --- Design ---
+
+let design = session "Design an A/B experiment"
+  prompt: """
+    Hypothesis: {hypothesis}
+    Task: {task}
+    Repo: ypi (recursive coding agent — you ARE running inside it)
+
+    Design a minimal experiment:
+    1. What are conditions A and B? (one env var, one prompt change, etc.)
+    2. What task do the agents perform? (must be real work on this repo)
+    3. What do you measure? (time, accuracy, tool usage, errors hit)
+    4. How many trials? (start small — 1 each, scale if promising)
+
+    Write a bash script to experiments/<name>/run.sh that:
+    - Takes a condition letter as argument (A, B, C, etc.)
+    - Uses rlm_query to spawn children
+    - Logs timing and outputs to experiments/<name>/results/<condition>/
+    - Uses Pi's default session dir (never override RLM_SESSION_DIR)
+    - Is resumable (skip completed trials)
+
+    Keep it simple. We're looking for signal, not statistical significance.
+    Return the path to the run script you created.
+  """
+
+# --- Run conditions concurrently ---
+
+session "Run all conditions"
+  prompt: """
+    The experiment script is ready: {design}
+
+    Launch ALL conditions concurrently in separate tmux windows:
+    ```
+    tmux new-window -t eval -n exp-A; tmux send-keys -t eval:exp-A 'bash <script> A 2>&1 | tee ...' Enter
+    tmux new-window -t eval -n exp-B; tmux send-keys -t eval:exp-B 'bash <script> B 2>&1 | tee ...' Enter
+    ```
+
+    Then poll for completion (no sleeping):
+    - Check `tmux capture-pane -t eval:exp-A -p | grep Results` periodically
+    - Once all conditions show results, collect the log files
+
+    Do NOT run conditions sequentially. Do NOT sleep for more than 2 seconds.
+  """
+
+# --- Analyze ---
+
+output analysis = session "Analyze results and decide"
+  prompt: """
+    Hypothesis: {hypothesis}
+
+    Collect results from all conditions (read the log files).
+
+    Analyze:
+    1. Did the measured behavior differ between conditions?
+    2. Was the hypothesis supported, refuted, or inconclusive?
+    3. Recommendation: keep the feature, change it, or kill it?
+    4. If inconclusive, what would a better experiment look like?
+
+    Be honest. Negative results are results.
+  """

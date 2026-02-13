@@ -1,14 +1,15 @@
-{
-	"data": "ENC[AES256_GCM,data:+202X0CsvRoxDqc8BV8FqDSSw3Yne9tW6cejk6mIbEBy9dINFOF3YMqtTMk73w/0RIvSA1yDGZrzhBewjfDKu1GmfV8OHonuXKhZOPN4ENO1f13t9POBs03aj/Dad9UxjSsxPu0TQX1k3kzFrV678/SVMFDcxGFVUP9v3sLSeeFXBy5euWu6zQKi4FFzMASJxWWT5gVVDxoAyPV8Y2NLWwzmoWRK4Q==,iv:uAeCl0sNZVDrwM4qcytSzKrF/prcu4gC/y18mJSoB8A=,tag:Do7tADw7BvJUVPcbpi+OHw==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAyYlc0TmV0c0NSSWxJd3N3\nK0h3YUtzNksxeTVRZk5hVWJFbUFDSDlLdFdVCjM0Q2VXL0VkZ3dnMVpXVkFqMHRG\nYTE4U2dKZ3JUT2xjQlVsZHZCZzhXRTQKLS0tIFFHL3cwQkoxalRCalo4ZXNHREIz\nNlpuNlNwVGRHRWJMT3ZCWU5WYi9TUUkKPN+sFJmMVZ3Lxr2VenuKFcbZOHiyFmFA\nUDwfCo7gIdJZaX29beuQ/G0e+jyDFBkz9JjPCAqD6n8Qg+Z1ZVBv8g==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:05Z",
-		"mac": "ENC[AES256_GCM,data:G+SHjjqNv4lyituuD2gLJxhPsl69VrVNkJEf1AQuXdR04/JFy75Dl7hDmdqPL1MVSVvcXpI8ZJt51UYBDtO1r71o2hRuOwKpedH9CfM4dFUKEX0/6VswkTt70tW8+wHw+ef6saa/aZoUbP7BAgdnpCNcF39lNqL3zWry31KnK7M=,iv:qXCmvQhL2AvHABS+YIPygpZx+yxZGgZDYbU6GnmxQZ0=,tag:Y+E1ob93CHSJLLRV/WRz0Q==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# guardrails
+
+kind: let
+
+source:
+```prose
+let guardrails = exec "make test-guardrails"
+```
+
+exit_code: 0
+stderr: (empty)
+
+---
+
+66 passed, 0 failed. All tests passed.

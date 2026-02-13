@@ -1,14 +1,24 @@
-{
-	"data": "ENC[AES256_GCM,data:2Np0m0Z1wcZGOIADP5LtlzVUVxWUoBnJHHGew85dJO3pxrjmiTmp78kbLseapcOzQELQkVIeA+7T26tyeLS9+RMP7lfsENzuaDSNJKzFO7PhmeQuVDMmft6AjfaBhmJhYBYiRC7lIjS1ylG9mPrgptSzesuaS/FLCi1KlEzuUtq0cPFKg4NkXrq/JZvedWCVa21Oggh49rWgz8ejz8ilEcUbfGfLYAiWQdPr8GI90SXLPaFg7SLFc+zFMqTMRjvDVL1oDAvk5cmKbyyEUVT25ayR7TOHe6dm8AVSXYdx+1NCwjr23spwbNf/sbE4nKvPXKqeAq8nukBBajYR0MwdVwOqzqhqvRbmj6jJeggsjHIq4EgQBDxaCLaaCYjumpL/4DJaqWucenqnwYFlGAs3iMFEHci0mj9benOplZvaSGTR89JtA8TGyf40T8DDXCiAFEulVQECMDi6LKLKBqBjJcWieMJRYuv5aMK6CByAwycqKK338HnLFbmWGoD1Ch47HXKXWCn2Ps7uO042dCzJFXiX5P6mHQTfQSy7jfQhZKgS037WeugNCaXJ/WgEQIZ0adQNhhcuCvqx1jBtMrRCbPiR94uQ9q5Wu+cXTtfxEkfbcAejNA1EdMZHSqS8HI1frcmzjstrkcqCi4CoQ7lO3P0mj1/SoUUN1wTft3igut5zrMzJgKq2kTlLTlnRtJEt8uHej/QbBojtGqc=,iv:CVqBYlKpSo7Z5JouD6hU2ktbC7yAuy32BluWjKuXazk=,tag:guLHZM2eDKFv3ywDcTPoiA==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBVRXZ5Q3M1SjFCR2FtN3Bo\nLzNkd3BzVnRtQ3VpSzZhaG9KQVcybGIxMVEwCm9aN3ZjaldFeW9ianpaZU1DSk55\nckJZTGZxVGNFUEhuZFVGclRwWUNNR0EKLS0tIC9oekVQTy9PTld5WENpbWV5UzB4\nbDNPSElRUGhtVEFRUGw4b3dlQ1FjVm8KIWPYQnwSY1BQx9UhTXcIJXPNu3tuwKF8\ngZ+JypYI+eejXbZcMx8l6cR8eOHlPyji8svll1+lCjBFjM0MmECkEQ==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:hCs4kxRtT+20Nuh2c4iSoP5HQyA49wZXDvG49KxA9u7JMD7SC7+Po+WD/dEkO/pczrmaEfOlqPFO+qlDVY6R0+KFJBCTrD2Ge/+wwgOERPM5rx25l0EdtdDoQ2abuGqYOHOgToNDRwWXsgIB+5DOOBIiMNlxdjB1ZquKRVkMdtQ=,iv:U2yQzqkh0hQai8NKXYtUVGSQARib7sX4MdrgP5lizDE=,tag:/EiuKsboe5THcHk0VgGu9A==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# fast
+
+kind: let
+
+source:
+```prose
+let fast = exec "make test-fast 2>&1 | tail -10"
+```
+
+exit_code: 0
+stderr: (empty)
+
+---
+
+  ✓ G49: no session listed
+  ✓ G50: SHARED_SESSIONS=1 enables
+  ✓ G51: trace filter includes matching
+  ✓ G51: trace filter excludes other
+
+═══════════════════════════════════
+  Results: 72 passed, 0 failed
+═══════════════════════════════════
+
+All tests passed! ✓

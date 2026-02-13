@@ -4,23 +4,30 @@
 Launch long-running tasks in tmux with a sentinel file. The `notify-done` extension
 watches `/tmp/ypi-signal-*` and **injects a message into your conversation** when
 the task finishes — no sleeping, no polling, no `tmux capture-pane` loops.
+**How it works:**
+- Idle → `triggerTurn` fires immediately, you get a new turn
+- Busy (mid-tool-execution) → message is **steered** in, delivered after the current tool finishes
+- Either way, the notification appears in your message history and you respond to it
 ```bash
 # Launch with sentinel (you'll be woken up when it finishes)
 tmux send-keys -t eval:land 'cd ~/Documents/GitHub/ypi && rp ypi .prose/land.prose; echo done > /tmp/ypi-signal-land' Enter
+
 # That's it. Keep working on other things. You'll get a message like:
 #   ⚡ Background task "land" completed: done
 # ...and a new turn is triggered so you can respond to it.
 ```
 **IMPORTANT: Do NOT poll or sleep-loop waiting for background tasks.**
-The extension uses `sendMessage({triggerTurn: true})` to wake you. Just keep
-working on whatever else needs doing — you'll be interrupted when it's ready.
+Do not `sleep && tmux capture-pane` in a loop. Do not check progress unless
+asked. Just keep working — the extension will interrupt you when it's ready.
+
+**Sentinel naming:** `/tmp/ypi-signal-{name}` — the `{name}` part appears in
+the notification. File contents become the notification body. The file is
+deleted after consumption.
 **Key programs:**
 - `rp ypi .prose/land.prose` — "land it" / "land the plane": tests, push, handoff
 - `rp ypi .prose/release.prose confirm_release='Approved.'` — cut an npm release
 - `rp ypi .prose/check-upstream.prose` — verify Pi compatibility
 - `rp ypi .prose/incorporate-insight.prose insight='...'` — propagate an insight across the repo
-
-Prose programs with `input` declarations need values passed as `key=value` args. Without them, the VM pauses (which hangs in `-p` mode).
 
 ## Version Control: Use jj, not git
 

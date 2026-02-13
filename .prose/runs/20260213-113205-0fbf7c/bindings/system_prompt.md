@@ -1,14 +1,12 @@
-{
-	"data": "ENC[AES256_GCM,data:CP2SnT+6sgPDwiWy2HKUJ88pNJTKhEJCuBxjEvsw5+QHMEcPd/tTN540oCaSQt1maesy2tOwH1nKulOyliJhywzD68qHsYdVvaU5zQx5wBqMoeaet8asUN5aXjrp8gQKqvI0nEXxVk7xyH9F71aBbJ83a7leKiop25Y9MJavjOUEo+sB0ZQw0XOas409XbpeIyHQXgcG2q49C9KrQ06KGFtO7KZANo5+RSQith98B0RYQp3hxDM1aDlNfol/q5dV+7AjrWoLUXWOn4LeJLdZRgDEEnjSnenmnoZ/W29SWRzyQUIO49Fcpb6kih7+IMJSbK+eNqWrsT+klS0htq1wogyDvvAxq36YPHAfIBRq1gtTgEyG0Q1k5Xi/llANxLMZZ/OciB+F6/Un0BcHeTJ7XD44GP5JYN/Wl0s/Djl4nT8XD15ubvuIenFVgT07b5f0hBT5gH2ckETcwUpQjUHeEH9YBMF2,iv:kfPEYQtprDmzeDwXnGGI6Dd718w2HA18gSIwUpiaQj8=,tag:F5baKhcOVpNbKVvMD+V/fg==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBYOUduWFloU2tBWHprZUFV\nWHRDS3RzdDFGTzhhS2g2aVp2L3A2MjI4MVFzCjhDamY0VTMyaTBtenlTTldVbGdo\nYzlGOXE2V0MxTk55S3Q0dUpwTVJkZWcKLS0tIHZYeS9kV1E5TGlIR2VFUjVDYXpq\nSWxQaTJHUElsQldpU1R5eHJLZ0gvQ00KUCVMrmOnigc7T2fCXWtFql+7H4K8HpcA\n3Y3jvFXIhNbwM+b2b4f0YJLzXbZOXY6m5qMa/AD8rJL1CJcQbhTZmg==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:ThyPfkl4025Dk5Pr7eaEUW1kdqqlwVIou8KBumf6oWLGPtYcEsISMjOTE6G350RNlFQxqNVUwCdj3Y+2ukYE0YqLwcrGHsJtOOp8wOCSzwYZPIDFyPM/cyvAQmGQSF6YC8GBTBjwkVrYmdBw7OETh6L1OJKPOtOVZ2GaMg5YqzI=,iv:qtf8zsO14BPJ6oJDta6KwU+Q8bRMo/JU9ciuZ59I2iI=,tag:3uBceh9BGSwMMRGnn3pO4w==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# system_prompt
+
+kind: let
+
+source:
+```prose
+system_prompt = session "Update SYSTEM_PROMPT.md (if planned)"
+```
+
+---
+
+Skipped. SYSTEM_PROMPT.md already contains the $RLM_PROMPT_FILE guidance in Section 2, line 12: "Your original prompt is also available as a file at `$RLM_PROMPT_FILE` — use it when you need to manipulate the question programmatically."

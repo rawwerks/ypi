@@ -1,14 +1,38 @@
-{
-	"data": "ENC[AES256_GCM,data:8MkOsfrjt8BPH1m74NWJhZmCNjFs2EfE9gPwcCUk6OG4Ud9DwlVgzwwUMxcZYOFIPTk1MwtKtkweLUzBvVlvbW5u24u+Z6ykc/Sjr6kuSpNnQ7ZUC6BTDJ3TwXUaL1NMMnBPNtNpogYAyI0ItlCioyTtL3es+jSwonDFtV7V3r5TCysulEKWkTmWchoQrTYQFoOBTPB3W3yDBrmsvGXYKqH7mg0fBqcfl9I7CojncVIIOJMnZ91CmRsafgnk4n7MykCwNgCrfqYYzNaACdI1mbSnSjUKNv2M13WMl2dK2klBgRD6jILlqeq2TDUuJ8dDHvCLuBlzBIzQLCWdW4fMl0rt2cM/ad2qc4m+ZJW7aV6DSbx4bXhjR6DIjJ2NfZqHs41VtqfXQh9+Le1IDikFJVL99yZw29bOt6/HPngovrcm2Ewik/cwBuwbm+yIk0YWBGLbBO3xi8gLlpt31Ui1B66vTsw5bUlY17lbAwXWDSCgvA+0QGxYwSzrHmO7bCYNKjnmChjbCfhoQ26Ar7xSyLXRbsG6x4wKU7kH6/to+LcinLTVRh+t8R5w66FX5ukNmJeFcPswDFOZZIJ++3iZtC/cqL/DnqGvxinHZwTvkIwJO2bqkC58HImDuTNttAmoLS9VPUSQ5Vsy9Aluu6hYSKl20ow71MLPkcDk5H/U7bBRXpqvgv78kTdfXTTGeK4Md/cohNc5oZvsBI28ti9NB3WXXvxpZvEw5kPL6LrDP4nJRcqJPZOIdjeIJAERUHYxw0DQ1hDtiRYT2O92MX7aFR28yXqHNHMiw0abxVinv0V2rMyqDip0xqeGsZwxG2315PYsrvnIstmq9Ud2CBof9v1e/2SDtoGILSDYbJJNCOPM5PWfN7UjP8uFNXA8Lg1Qv4fas6mr839N1owY4R8ilOM7qV890VepzThFDYlYnI+Jbi2vX3x8z/1WwLgiroSqaI4gz5OqkqDSdMuTy9CDQ2k5EiLJCS9fZBCJS4oEL47Zhie6sPJfguFPCQQqj6i4l43JdmPJvKWXz8uU4oHYFVQ5aRSBgVqu2igazZh4nImZX9GNqsjCstO3Y7nCzsbGfUuqusJWghRofkrY1d0C3cKpgZzdWCENAzl9Kl9RPV/9rtW681okEWuFw1o24pVwZWcXTY2jvf6V5E3Yc/IychNT8pFcbth3DLQh1gtYWI97XT/b/mzv9RAmmtja1m4AUiiuVCoNuQ7RNOUAsjFteonzVVW/q5bomZazXRk04Ji7VrkBu33t5wQ3r0e0QLdEbz3QjajtuQfqZPYw9WLiUAUfaGXnHdVpkE1fmao6n5StiT8q6T0RpecqpcGqMBA=,iv:2NVZlbOXPGWWKHDw3x3U7B0bjVV3sTEVt1BLxE/dcSE=,tag:zvOBW6CyvUPQULwazPdBNw==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBNWmN6R1VaaHlvWitFMFVU\nR3ZPTHowY2lrdjVHRm9yQW1lT2tNY1ptbkMwCnJvbUJFRVo4ZXU4WHFkTFpPa2dv\nYnpHcS9YUGdkZjdIZjIzeG80bTRReWMKLS0tIG41dk9Bckx3aWQ5eHk5U2JTQWZn\ncXJRYXF2bGF6ZVZlMGxTaWxXcWhjR28Kx/jRlYOE4H1zEUiPwa4R49Q4QmzazODz\nBY8SyJIvsTAPN3t1QwKr/+p+jdZVLv8RUYtNGTIEaTfjp53pTxTGsA==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:vzbrHdHoRinZM+kGeBTdW9jCvEeEiHugUuQjqt/Ygy5/Opd5xrzzGy2jNpDfsG/gRFywy5chx6jzhEV7Y5fNs99dzolEUUrRHv3i5peg/t35Qx2VSnPx0qX2FD68bA5I1t8AN0GMx/HDh5vPZxxS6mefEjBp4SkKhAh5ivpMh/I=,iv:YTNdGdvYGh/H1bIKbXD8hG58iUm0kFiMN403RH4Mi3o=,tag:x3I3/I1r/QlyoLaaLNQYrQ==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# design
+
+kind: let
+
+source:
+```prose
+let design = session "Design an A/B experiment"
+```
+
+---
+
+## Experiment: pipe-vs-filename
+
+**Hypothesis:** Piping source to rlm_query as context produces better edits than telling the child the filename.
+
+**Conditions:**
+- **A (pipe):** Cat the rlm_sessions source into rlm_query via stdin, prompt asks it to add --version flag
+- **B (filename):** Tell rlm_query the path to rlm_sessions, let it read the file itself, same task
+
+**Task:** Add a `--version` flag to `rlm_sessions` that reads version from `.pi-version`
+
+**Measurements:**
+- Time to complete
+- Does the output parse (`bash -n`)?
+- Does it contain a `--version` handler?
+- Diff size (how much changed vs original)
+- Were existing functions preserved?
+- Line count preservation
+
+**Trials:** 1 each (A and B)
+
+**Script:** `experiments/pipe-vs-filename/run.sh`
+
+Usage:
+```bash
+bash experiments/pipe-vs-filename/run.sh A   # Pipe condition
+bash experiments/pipe-vs-filename/run.sh B   # Filename condition
+```

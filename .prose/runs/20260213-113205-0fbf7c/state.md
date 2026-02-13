@@ -1,14 +1,13 @@
-{
-	"data": "ENC[AES256_GCM,data:kocZ7yjezqJIi0TFaCdxKEKYd8UGH0vHowe9nGQmh0jOCiRP1vC+yaFR4NCRPBuj7SC6crsUD7GIN3OfwUwoLxsCk60r8DfQUkcDgjKcMDlK5R7JtM1mJwVOL9pngk0xsHCJmCWlHAt38CpnDHly0o/FtG0p+O1iUSaFbFjDt6gqinWKZ2HV0fXvB9LlJChGDRAMgBdFf+EtWmuyfGV7pC3oP9jV2yUvTzPhKUZNlblkp0jfEDieM84I7ATiqhVP3pQzyJrMu4qDoqfoWVzaKUs3mHUuRt1LZMkesDryyx33LKuvLrzEGsEONtQejXZwp56MFlIUTMuWurvKjXL4plVwhjWfQnLIdwlHX4jFQMxeDc7xXDas8jG5DOmZELFcdlMgy7VW0+p5KJ2qucS7L3iWbFBZRIY=,iv:RQ17dPQ6svzUf/BgWjtnAWg60npd97x4GYJSeDB5ZjY=,tag:maDim+KhcRh6Ti7PiHOGqA==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBFRFRIbS9Xc1Zad010THpz\nQ05zUHgxRDFSZ3pIUW9jUERlemNWSkpvcjNVCm1LWWIxOG9qbjhNeGhRSjdnWXdj\nT2QrVWZJZUdKaGR3QnNyQTJyci8rS1UKLS0tICt4bHBuZXJydmxrd1JVZmVTN25l\nMkp1clM3NGRKUU1oNHlTaVVISGFWUDAKKI0l6YntzXLwxdkO6YojGlyLOGifyAbW\nNRiJyHJ9NnfwH3HNTFSrSTjn1LIfvWP1BcGbxb0NfI/F4pUXjbEiFQ==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:YdF3IMva39sBmjj+GekgA7tXfc/H1lSCVeWV5MGsI+xomSEISlt98mpv+8sSWP559LxwNx5r62UFYt00kjPvfMHXbzMuA9mWyRGiOt2iprCPAAt3INLh/e09PBYs7Ov5KW8WVYulnuW8zapO4VLpyeAQXnSC9Ka5frM4xN6RwVo=,iv:5OSjzih8G2Ds1RCkfYUHWTBcaNMOKfj0e8MULmGKQP8=,tag:sMUPpspu2d2qscxA7Wef3g==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# run:20260213-113205-0fbf7c incorporate-insight.prose
+1→ plan ✓
+2→ code ✓
+3→ ∥start system_prompt,agents_md,readme
+3a→ system_prompt ✓
+3b→ agents_md ✓
+3c→ readme ✓
+3→ ∥done
+4→ tests ✓
+5→ verify ✓
+6→ gate ✓ (72/72 tests pass)
+7→ summary ✓
+---end 2026-02-13T11:33:01Z

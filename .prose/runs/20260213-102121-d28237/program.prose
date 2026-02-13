@@ -1,14 +1,166 @@
-{
-	"data": "ENC[AES256_GCM,data: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,iv:L6NuId0A1KcMwEPJKH39rjy8ELhmBrGiYvJVItF/csY=,tag:ie5eQh9sBT4JMehfOTVaAg==,type:str]",
-	"sops": {
-		"age": [
-			{
-				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
-				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBiUUhVWkhudWVialFaVXZ2\nUURvZlNIMkRkM1N4LzZYOG5FdHk4LzRYYTNJClJNRTYzR3ExQmQrTzlvKzBLT0dR\nU0tnTFZ1QzA1a2w5cms5SlRCUm52V0kKLS0tIHI4U1RQR280RnZtTzY4bCsvbStD\nWUhrVVJpRnZrbHNsMStKNnBNM1U4ajAK9k/IIud5zonFJRNQAezEdYOTEOtK1Jdd\nKKS3t9irOCE42sPy6OUScnJ3yLznJcqmHi40/eyf3usXcCznrfBcGQ==\n-----END AGE ENCRYPTED FILE-----\n"
-			}
-		],
-		"lastmodified": "2026-02-13T17:44:06Z",
-		"mac": "ENC[AES256_GCM,data:0fSLmFbdRF4QFqaNWfJiyvFCrU+7QI8G1ejOkyIn1HmJBFBCQDUGw5H7WL308GIQHrtRVm9LY132YPy3vkkT9YEvMQUbrD9tBcNfj6FJtLfK0Be1zWUX3GywTKUgIyTrkMaExk7RmJe1jHKcHv6daDppF8xAfnuFfPzknLXqeBc=,iv:m0JHeRqy3OnqGkgv8wTri+w3HvknsqDTMpFySXysYP8=,tag:ePgjWLP4i2kn1qG7J8/1dg==,type:str]",
-		"version": "3.11.0"
-	}
-}
+# recursive-development.prose
+# Use ypi to develop, test, and validate a ypi feature.
+#
+# The recursion is literal: ypi spawns sub-agents that modify ypi's own source,
+# then ypi tests itself with the changes. The repo IS the test environment.
+#
+# Run: rp ypi .prose/recursive-development.prose
+# Input: describe the feature you want to build
+
+input feature: "Description of the feature to build"
+
+# --- Understand current state ---
+
+let tests_before = exec "make test-fast 2>&1 | tail -5"
+let jj_log = exec "jj log --no-graph --limit 10"
+let structure = exec "wc -l ypi rlm_query rlm_sessions SYSTEM_PROMPT.md AGENTS.md"
+
+# Gate: don't start if tests are already broken
+gate **tests pass**:
+  evidence: tests_before
+  on-reject: "Fix existing test failures before starting new work."
+
+# --- Start a feature branch ---
+
+exec "jj new -m 'feat: {feature}'"
+
+# --- Design phase: ypi studies itself ---
+
+let design = session "Design the feature using self-knowledge"
+  prompt: """
+    Feature request: {feature}
+
+    You ARE ypi. Study your own source to design this feature:
+
+    1. Read the files you'd need to change (ypi, rlm_query, SYSTEM_PROMPT.md, etc.)
+    2. Check rlm_sessions for how previous agents approached similar work
+    3. Look at AGENTS.md for architectural invariants that must be preserved
+    4. Look at tests/ to understand what's tested and how
+
+    Produce a design:
+    - Which files change and why
+    - What env vars or CLI flags are needed
+    - What could break (the three invariants: self-similarity, self-hosting, bounded recursion)
+    - What tests to add
+
+    Keep it minimal. Smallest change that works.
+  """
+
+# --- Backup before surgery ---
+
+exec "cp rlm_query rlm_query.bak"
+  on-fail: "continue"
+
+# --- Implement ---
+
+session "Implement the feature"
+  prompt: """
+    Implement this design:
+    {design}
+
+    Rules (from AGENTS.md):
+    - Write files directly, don't just describe changes
+    - One file at a time, test between changes
+    - Never modify rlm_query and SYSTEM_PROMPT.md in the same step
+
+    After each file change, run: make test-unit
+    If tests break, fix immediately before moving to the next file.
+  """
+
+# --- Verify: tests still pass ---
+
+let tests_after = exec "make test-fast 2>&1"
+
+gate **all tests pass**:
+  evidence: tests_after
+  on-reject: """
+    Tests broke. The implementation has a bug.
+    Restore backup: cp rlm_query.bak rlm_query
+    Then diagnose what went wrong.
+  """
+
+# --- The recursive test: can ypi still call itself? ---
+
+let smoke = exec """
+  echo "2+2=" | rlm_query "What is the answer? Just the number." 2>/dev/null
+"""
+
+gate **smoke test returns 4**:
+  evidence: smoke
+  on-reject: """
+    ypi broke itself. The recursive smoke test failed.
+    Restore: cp rlm_query.bak rlm_query
+    This is the most critical failure — rlm_query is a live dependency.
+  """
+
+# --- Dogfood: use the feature ---
+
+let dogfood = session "Dogfood the new feature"
+  prompt: """
+    The feature is implemented and tests pass. Now USE it.
+
+    You are ypi with the new feature. Try it on this repo:
+    - Does it work as designed?
+    - Does it feel natural?
+    - Any rough edges?
+
+    If rlm_sessions is available, check if previous agents left notes
+    about similar features.
+
+    Report: works / works with issues / broken
+  """
+
+gate **dogfood succeeded**:
+  evidence: dogfood
+  on-reject: "Feature doesn't work in practice. Fix before continuing."
+
+# --- Add tests for the new feature ---
+
+session "Write tests for the new feature"
+  prompt: """
+    The feature works. Now make it durable:
+
+    1. Add unit tests to tests/test_unit.sh (mock pi, no LLM calls)
+    2. Add guardrail tests to tests/test_guardrails.sh if there are new env vars
+    3. Add an e2e test to tests/test_e2e.sh if behavior changed (architectural invariant)
+    4. Update AGENTS.md env var table if new variables were added
+
+    Follow existing test patterns. Run make test-fast after adding tests.
+  """
+
+let tests_final = exec "make test-fast 2>&1"
+
+gate **all tests pass including new ones**:
+  evidence: tests_final
+  on-reject: "New tests are failing. Fix them."
+
+# --- Clean up and land ---
+
+exec "rm -f rlm_query.bak"
+  on-fail: "ignore"
+
+session "Describe the change and land"
+  prompt: """
+    Feature complete. Finalize with jj:
+
+    1. jj diff --stat (review what changed)
+    2. jj describe -m "feat: <concise description based on {feature}>"
+    3. jj bookmark set master
+    4. jj git push
+    5. jj new (start fresh change for next work)
+
+    Summarize what was built, what was tested, and any follow-up work needed.
+  """
+
+output summary = session "Final summary"
+  prompt: """
+    Recursive development cycle complete.
+
+    Feature: {feature}
+    Tests before: {tests_before}
+    Tests after: {tests_final}
+    Smoke test: {smoke}
+    Dogfood: {dogfood}
+
+    Summarize in 3 bullets: what was built, what was tested, what's next.
+  """
