@@ -1,0 +1,62 @@
+# check-upstream.prose
+# Verify ypi compatibility with latest upstream Pi release.
+#
+# Deterministic steps (version checks, test runs) use exec.
+# Reasoning steps (diagnosing failures, writing issues) use session.
+#
+# Run: prose run .prose/check-upstream.prose
+
+let known_good = exec "cat .pi-version 2>/dev/null || echo unknown"
+let installed = exec "pi --version 2>/dev/null || echo not-installed"
+let latest = exec "npm view @mariozechner/pi-coding-agent version"
+
+session "Report version state"
+  prompt: """
+    Versions:
+      Known-good: {known_good}
+      Installed:  {installed}
+      Latest npm: {latest}
+
+    If all three match, say "Already up to date" and we're done.
+    Otherwise, summarize what changed.
+  """
+
+if **the installed version is not the latest**:
+  exec "bun install -g @mariozechner/pi-coding-agent@{latest}"
+  let installed = exec "pi --version"
+
+# --- Run tests ---
+
+let unit = exec "make test-unit"
+  on-fail: "continue"
+
+let guardrails = exec "make test-guardrails"
+  on-fail: "continue"
+
+let extensions = exec "make test-extensions"
+  on-fail: "continue"
+
+if **all three tests passed**:
+  exec "echo {latest} > .pi-version"
+  session "Summarize success"
+    prompt: """
+      All tests pass with pi {latest}.
+      Updated .pi-version from {known_good} to {latest}.
+    """
+else:
+  session "Diagnose failures"
+    prompt: """
+      Pi {latest} breaks ypi. Last known-good: {known_good}.
+
+      Unit tests:
+      {unit}
+
+      Guardrail tests:
+      {guardrails}
+
+      Extension tests:
+      {extensions}
+
+      Identify what broke and why. Check if it's a ypi bug or
+      an upstream API change. Suggest a concrete fix.
+    """

@@ -1,17 +1,17 @@
 /**
- * auto-title — Periodically summarizes the session into a short window title.
+ * auto-title — Periodically summarizes the session into a short status label.
  *
  * When you have 8 ypi windows open and can't remember which is which,
  * this extension fixes that. It watches for activity and periodically
  * forks the conversation to a cheap `pi -p` call that returns a 1-line
- * summary. That summary becomes the terminal title and tmux window name.
+ * summary. That summary is shown in the status bar via setStatus().
  *
  * Triggers re-summarization when EITHER:
  *   - 5 user messages since last summary, OR
  *   - 5 minutes elapsed since last summary (only if new activity)
  *
  * The summary call is fire-and-forget — runs in the background,
- * updates the title when it completes. Never blocks the main session.
+ * updates the status when it completes. Never blocks the main session.
  * Stale sessions (no new turns) don't re-summarize on the timer.
  *
  * Usage:
@@ -22,13 +22,13 @@
  *   AUTO_TITLE_INTERVAL=300       Seconds between time-based re-summarizations (default: 300)
  *   AUTO_TITLE_TURNS=5            Turns between turn-based re-summarizations (default: 5)
  *   AUTO_TITLE_INITIAL_TURNS=2    Turns before first summarization (default: 2)
- *   AUTO_TITLE_MODEL              Model for summary calls (default: pi's default)
+ *   AUTO_TITLE_MODEL              Model for summary calls (default: claude-sonnet-4-20250514)
  *   AUTO_TITLE_PROVIDER           Provider for summary calls (default: pi's default)
- *   AUTO_TITLE_PREFIX             Prefix for terminal title (default: "π")
+ *   AUTO_TITLE_DEBUG              Path to debug log file (default: none)
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { execFile, spawn } from "child_process";
+import { spawn } from "child_process";
 
 interface TitleState {
   turnsSinceUpdate: number;
@@ -40,6 +40,7 @@ interface TitleState {
   timer: ReturnType<typeof setInterval> | undefined;
 }
 
+const STATUS_KEY = "auto-title";
 const SUMMARY_PROMPT = 'Write a 5-10 word title describing what this session is working on. Reply with ONLY the title. No quotes, no punctuation, no explanation.';
 
 export default function autoTitle(pi: ExtensionAPI) {
@@ -48,9 +49,9 @@ export default function autoTitle(pi: ExtensionAPI) {
   const intervalSecs = parseInt(process.env.AUTO_TITLE_INTERVAL || "300", 10);
   const turnsThreshold = parseInt(process.env.AUTO_TITLE_TURNS || "5", 10);
   const initialTurns = parseInt(process.env.AUTO_TITLE_INITIAL_TURNS || "2", 10);
-  const prefix = process.env.AUTO_TITLE_PREFIX || "π";
   const model = process.env.AUTO_TITLE_MODEL || "claude-sonnet-4-20250514";
   const provider = process.env.AUTO_TITLE_PROVIDER;
+  const debugFile = process.env.AUTO_TITLE_DEBUG;
 
   const state: TitleState = {
     turnsSinceUpdate: 0,
@@ -62,20 +63,16 @@ export default function autoTitle(pi: ExtensionAPI) {
     timer: undefined,
   };
 
-  function setTitle(title: string, ctx: { ui: { setTitle: (t: string) => void } }) {
-    state.currentTitle = title;
-    const display = `${prefix} - ${title}`;
-    ctx.ui.setTitle(display);
+  function debug(msg: string) {
+    if (!debugFile) return;
+    const fs = require("fs");
+    fs.appendFileSync(debugFile, `[${new Date().toISOString()}] [auto-title] ${msg}\n`);
+  }
 
-    // Also set tmux window name if we're in tmux
-    if (process.env.TMUX) {
-      try {
-        execFile("tmux", ["set-option", "-w", "automatic-rename", "off"], { timeout: 2000 }, () => {});
-        execFile("tmux", ["rename-window", title], { timeout: 2000 }, () => {});
-      } catch {
-        // not in tmux or tmux not available
-      }
-    }
+  function setTitle(title: string, ctx: { ui: { setStatus: (key: string, text: string | undefined) => void } }) {
+    state.currentTitle = title;
+    ctx.ui.setStatus(STATUS_KEY, title);
+    debug(`status set: '${title}'`);
   }
 
   function requestSummary(ctx: any) {
@@ -83,11 +80,12 @@ export default function autoTitle(pi: ExtensionAPI) {
 
     state.pendingUpdate = true;
 
-    const args = ["-p", "--no-extensions", "--session", state.sessionFile];
+    const args = ["-p", "--no-extensions", "--no-session", "--session", state.sessionFile];
     if (model) args.push("--model", model);
     if (provider) args.push("--provider", provider);
     args.push(SUMMARY_PROMPT);
-    const debugFile = process.env.AUTO_TITLE_DEBUG;
+
+    debug(`spawning summary: pi ${args.join(" ")}`);
 
     const child = spawn("pi", args, {
       stdio: ["pipe", "pipe", "pipe"],
@@ -107,10 +105,7 @@ export default function autoTitle(pi: ExtensionAPI) {
     child.on("close", (code: number | null) => {
       clearTimeout(killTimer);
       state.pendingUpdate = false;
-      if (debugFile) {
-        const fs = require("fs");
-        fs.appendFileSync(debugFile, `[auto-title] code=${code} stdout='${stdout.trim()}'\n`);
-      }
+      debug(`pi exited code=${code} stdout='${stdout.trim()}'`);
 
       if (code !== 0 || !stdout.trim()) return;
       // Clean up the response — take first line, strip quotes/periods
@@ -122,10 +117,7 @@ export default function autoTitle(pi: ExtensionAPI) {
       // Sanity check — should be short
       if (title.length > 60) title = title.slice(0, 57) + "...";
       if (title.length < 3) return;
-      if (debugFile) {
-        const fs = require("fs");
-        fs.appendFileSync(debugFile, `[auto-title] setting title='${title}'\n`);
-      }
+
       state.lastUpdateTime = Date.now();
       state.turnsSinceUpdate = 0;
       setTitle(title, ctx);
@@ -162,6 +154,7 @@ export default function autoTitle(pi: ExtensionAPI) {
     state.currentTitle = undefined;
     state.pendingUpdate = false;
     state.sessionFile = ctx.sessionManager.getSessionFile();
+    ctx.ui.setStatus(STATUS_KEY, undefined); // clear until first summary
     startTimer(ctx);
   }
 

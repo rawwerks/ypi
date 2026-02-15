@@ -73,8 +73,7 @@ assert_contains "hooks turn_end event" 'on("turn_end"' "$(cat "$EXT")"
 assert_contains "hooks session_start event" 'on("session_start"' "$(cat "$EXT")"
 assert_contains "hooks session_shutdown event" 'on("session_shutdown"' "$(cat "$EXT")"
 assert_contains "calls pi for summary" '"pi"' "$(cat "$EXT")"
-assert_contains "sets terminal title" "setTitle" "$(cat "$EXT")"
-assert_contains "sets tmux window name" "rename-window" "$(cat "$EXT")"
+assert_contains "uses setStatus for display" "setStatus" "$(cat "$EXT")"
 assert_contains "supports AUTO_TITLE_DISABLE" "AUTO_TITLE_DISABLE" "$(cat "$EXT")"
 assert_contains "supports AUTO_TITLE_INTERVAL" "AUTO_TITLE_INTERVAL" "$(cat "$EXT")"
 assert_contains "supports AUTO_TITLE_TURNS" "AUTO_TITLE_TURNS" "$(cat "$EXT")"
@@ -144,18 +143,17 @@ if [ "$RUN_E2E" = true ]; then
 
     TMUX_SESSION="at-test-$$"
     E2E_DIR=$(mktemp -d /tmp/at_e2e_XXXXXX)
-    CLEANUP_FILES+=("$E2E_DIR")
+    DEBUG_LOG=$(mktemp /tmp/at_debug_XXXXXX.log)
+    CLEANUP_FILES+=("$E2E_DIR" "$DEBUG_LOG")
 
     # Create a tmux session for the test
     tmux new-session -d -s "$TMUX_SESSION" -x 120 -y 30
 
-    # Set initial window name so we can detect when it changes
-    tmux rename-window -t "$TMUX_SESSION" "INITIAL_NAME"
-
     # Launch pi interactively with auto-title, low thresholds for fast test
     # initialTurns=2 so it triggers after 2 messages
+    # AUTO_TITLE_DEBUG writes to a log file we can check
     tmux send-keys -t "$TMUX_SESSION" \
-      "cd $E2E_DIR && AUTO_TITLE_INITIAL_TURNS=2 AUTO_TITLE_TURNS=2 AUTO_TITLE_INTERVAL=9999 pi --no-extensions -e $EXT" Enter
+      "cd $E2E_DIR && AUTO_TITLE_DEBUG=$DEBUG_LOG AUTO_TITLE_INITIAL_TURNS=2 AUTO_TITLE_TURNS=2 AUTO_TITLE_INTERVAL=9999 pi --no-extensions -e $EXT" Enter
     sleep 4
 
     # Send first message and wait for response
@@ -166,34 +164,37 @@ if [ "$RUN_E2E" = true ]; then
     tmux send-keys -t "$TMUX_SESSION" "The scraper should use BeautifulSoup and save to SQLite" Enter
     sleep 8
 
-    # Poll for window name change (summary pi -p call is async)
-    WINDOW_NAME="INITIAL_NAME"
+    # Poll for title to appear in debug log (summary pi -p call is async)
+    TITLE=""
     for i in $(seq 1 12); do
-      WINDOW_NAME=$(tmux list-windows -t "$TMUX_SESSION" -F '#{window_name}' 2>/dev/null | head -1)
-      if [ "$WINDOW_NAME" != "INITIAL_NAME" ] && [ -n "$WINDOW_NAME" ]; then
+      TITLE=$(grep 'status set:' "$DEBUG_LOG" 2>/dev/null | tail -1 | sed "s/.*status set: '//;s/'$//" || true)
+      if [ -n "$TITLE" ]; then
         break
       fi
       sleep 5
     done
 
-    echo "    window name after 2 turns: '$WINDOW_NAME'"
-    if [ "$WINDOW_NAME" != "INITIAL_NAME" ] && [ -n "$WINDOW_NAME" ]; then
+    echo "    title after 2 turns: '$TITLE'"
+    if [ -n "$TITLE" ]; then
       TESTS_RUN=$((TESTS_RUN + 1))
-      echo "  ✓ window name changed from INITIAL_NAME to '$WINDOW_NAME'"
+      echo "  ✓ title was set to '$TITLE'"
       PASS=$((PASS + 1))
     else
       TESTS_RUN=$((TESTS_RUN + 1))
-      echo "  ✗ window name did not change (still '$WINDOW_NAME')"
-      echo "    (summary call may have timed out)"
+      echo "  ✗ no title was set"
+      echo "    debug log:"
+      cat "$DEBUG_LOG" 2>/dev/null | tail -10
       FAIL=$((FAIL + 1))
     fi
     # The title should relate to web scraping / Python / news
-    assert_contains "title relates to the conversation" "scrap\|python\|news\|web\|sqlite\|beautiful\|api\|todo\|fast" "$WINDOW_NAME"
+    assert_contains "title relates to the conversation" "scrap\|python\|news\|web\|sqlite\|beautiful\|api\|todo\|fast" "$TITLE"
 
     # ── T5: Title updates after more turns ──
 
     echo ""
     echo "=== T5: Title updates after conversation shift (pi $PI_VERSION) ==="
+
+    PREV_TITLE="$TITLE"
 
     # Shift the conversation to a completely different topic
     tmux send-keys -t "$TMUX_SESSION" "Actually forget that. Let's deploy a Kubernetes cluster on AWS" Enter
@@ -201,24 +202,24 @@ if [ "$RUN_E2E" = true ]; then
     tmux send-keys -t "$TMUX_SESSION" "I need EKS with 3 worker nodes and an ALB ingress controller" Enter
     sleep 8
 
-    # Poll for window name change
-    NEW_WINDOW_NAME="$WINDOW_NAME"
+    # Poll for a NEW title in the debug log
+    NEW_TITLE="$PREV_TITLE"
     for i in $(seq 1 12); do
-      NEW_WINDOW_NAME=$(tmux list-windows -t "$TMUX_SESSION" -F '#{window_name}' 2>/dev/null | head -1)
-      if [ "$NEW_WINDOW_NAME" != "$WINDOW_NAME" ] && [ -n "$NEW_WINDOW_NAME" ]; then
+      NEW_TITLE=$(grep 'status set:' "$DEBUG_LOG" 2>/dev/null | tail -1 | sed "s/.*status set: '//;s/'$//" || true)
+      if [ "$NEW_TITLE" != "$PREV_TITLE" ] && [ -n "$NEW_TITLE" ]; then
         break
       fi
       sleep 5
     done
 
-    echo "    window name after topic shift: '$NEW_WINDOW_NAME'"
-    if [ "$NEW_WINDOW_NAME" != "$WINDOW_NAME" ] && [ -n "$NEW_WINDOW_NAME" ]; then
+    echo "    title after topic shift: '$NEW_TITLE'"
+    if [ "$NEW_TITLE" != "$PREV_TITLE" ] && [ -n "$NEW_TITLE" ]; then
       TESTS_RUN=$((TESTS_RUN + 1))
-      echo "  ✓ title updated after conversation shift to '$NEW_WINDOW_NAME'"
+      echo "  ✓ title updated after conversation shift to '$NEW_TITLE'"
       PASS=$((PASS + 1))
     else
       TESTS_RUN=$((TESTS_RUN + 1))
-      echo "  ✗ title did not update after shift (still '$NEW_WINDOW_NAME')"
+      echo "  ✗ title did not update after shift (still '$NEW_TITLE')"
       echo "    (may be timing — summary call is async)"
       FAIL=$((FAIL + 1))
     fi
@@ -228,14 +229,14 @@ if [ "$RUN_E2E" = true ]; then
     echo ""
     echo "=== T6: No re-summarization on stale session ==="
 
-    STALE_NAME=$(tmux list-windows -t "$TMUX_SESSION" -F '#{window_name}' 2>/dev/null | head -1)
+    TITLE_COUNT_BEFORE=$(grep -c 'status set:' "$DEBUG_LOG" 2>/dev/null || echo 0)
 
     # Wait without sending any messages — timer should NOT fire
     # (interval is 9999s so timer won't trigger anyway, but this tests the principle)
     sleep 5
 
-    AFTER_WAIT_NAME=$(tmux list-windows -t "$TMUX_SESSION" -F '#{window_name}' 2>/dev/null | head -1)
-    assert_eq "title unchanged when session is idle" "$STALE_NAME" "$AFTER_WAIT_NAME"
+    TITLE_COUNT_AFTER=$(grep -c 'status set:' "$DEBUG_LOG" 2>/dev/null || echo 0)
+    assert_eq "no new title when session is idle" "$TITLE_COUNT_BEFORE" "$TITLE_COUNT_AFTER"
 
     # Clean up — send /exit to pi
     tmux send-keys -t "$TMUX_SESSION" "/exit" Enter
