@@ -359,6 +359,19 @@ AFTER_COUNT=$(ls /tmp/rlm_ctx_d* 2>/dev/null | wc -l || echo 0)
 # For now just verify it created one
 assert_contains "T15: temp context created" "MOCK_PI_CALLED" "$OUTPUT"
 
+# ─── Test Group: ypi Launcher ────────────────────────────────────────────
+
+echo ""
+echo "=== ypi Launcher ==="
+
+# T16: ypi should work with no pass-through args (bash 3.2 + set -u regression)
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    "$PROJECT_DIR/ypi"
+)
+assert_contains "T16: ypi launches pi with no args" "MOCK_PI_CALLED" "$OUTPUT"
+assert_contains "T16: ypi forwards --system-prompt" "--system-prompt" "$OUTPUT"
+
 # ─── Summary ──────────────────────────────────────────────────────────────
 
 echo ""
