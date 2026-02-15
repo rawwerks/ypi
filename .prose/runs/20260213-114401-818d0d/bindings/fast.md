@@ -1,24 +1,14 @@
-# fast
-
-kind: let
-
-source:
-```prose
-let fast = exec "make test-fast 2>&1 | tail -10"
-```
-
-exit_code: 0
-stderr: (empty)
-
----
-
-  ✓ G49: no session listed
-  ✓ G50: SHARED_SESSIONS=1 enables
-  ✓ G51: trace filter includes matching
-  ✓ G51: trace filter excludes other
-
-═══════════════════════════════════
-  Results: 72 passed, 0 failed
-═══════════════════════════════════
-
-All tests passed! ✓
+{
+	"data": "ENC[AES256_GCM,data:yZDRU7rWXC17Xz/KUqCNmrJcKi5A/cqAsotdGRGIO4K0HgFblvnTTZZs0u4S2P3hHCG7dYdjlCo3zWv8RRvRhHsXKY7kUMgorFLzmkUVz8hAjyB8YACvp1aCEnsafru3I09wDBHBpCEEJm3GdoPli4QT/C/OHwRLevpwtlHamopGlkZYv7o5KUAHsufxfOBfrAtmEst4UkohChRq0N7EUOdBts01f3GeAHBTlpdM0O86NLUfonD9PMw7/gSfv5pcPH+kFS0NXeAZbqxPDMBP+Q1K6dEkGd8gRdLnP/i1kPqGwQ/SHWlw/S9T4nlP0vEaSRIQNQEFr/b3XTEA3Cs9096V5kLkMAjAz0Z+zlAtk4IfuPZdLld9dVzcI3iS3Qd9igogvM+Z1IlH9m8SN0C0/QkkgMpaagdJt6yGiziTws5LCBUtDK3jkn3l5Hfd1ZVS37H9Q9sFQpKuwpjlF6fYg/M8SuudNP2X18OreT+ZUh9VKfvRrjncUvLgscufPpTo8mePfVHcGtY/RwBvHvd3qPJvONiMpAyb5INhS0LaTQXf2DFIduNiGRFZ90ShFSH3NAGbARqsbfMh6/P/vRzvNwoU5dT3r7MnXyv4GyleMFmLE2UTh1c3x08eX8nsdDGojWKZ0+FK+928nMy4qLXAsN044MaoxiVL+5HZV+6BTq5kNVaSyJuK32Jr1sRfEW+9x4/i/8tNiTC2TGg=,iv:Y/UGsoZ5wRBZMNMx/F6GmZygnMBTYMKx9p1Ba3VOSEU=,tag:yixj7dV38cTsf46U7C3O3Q==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB6WVY1cU9LcmVEWk5IdEs2\nNk1QcjZTY3FsK1pLZFF4WTVRaDJmYzVyZ0d3CkhxRTZvTmQrUmFCV3hocEZrNUxQ\nb3orM1ZjTXlOZmxqL2dyWGxaaC9HMUUKLS0tIDVKNGphNXUzZGhxTDlkN1d4bUda\nWFpwTE1aZlVCTFVZMUZNenF1cDNMbkkK9PtyCj/NQDdoqDlqdIDXKRIMI7eKrQfD\nCeL7GoNyS9Tr+InSWkBr/T9B4Nokj0nZRpqCAss301PNVDzIT5Ijkg==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:eNeVdAEKLcTxADfRKA5hqL3lAPF71v+vcTATfcsrYGbL4K7YRq/pweQw2Va5nTxbr6qpejSI/977+jFxbk3SuPGQxW0xFRG69b4XdA0vvc55msSnVNz9LH8DijRZMr0pQfxiDkkUXK6Bjy28flAa96Em9R4SFL2PAhU/feQrfA8=,iv:15wPGx248mTJVE/O4D9eb4kceJdo86zcgkNOI6Pi4+c=,tag:mChPNjoJDnjyNkM6WG1ZJg==,type:str]",
+		"version": "3.11.0"
+	}
+}

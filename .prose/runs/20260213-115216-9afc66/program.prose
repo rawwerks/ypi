@@ -1,106 +1,14 @@
-# land.prose
-# End-of-session cleanup for ypi.
-#
-# Run: rp ypi .prose/land.prose
-# Or just follow the steps manually — this is a checklist, not automation.
-#
-# All deterministic steps use exec (no subagent needed).
-# Sessions only for judgment calls (describe, reflect).
-
-# --- Gate 1: Fast tests ---
-
-let fast = exec "cd /home/raw/Documents/GitHub/ypi && make test-fast 2>&1 | tail -15"
-
-gate **all fast tests pass (72/72 or more)**:
-  evidence: fast
-  on-reject: throw "Fix failing fast tests before landing."
-
-# --- Gate 2: E2E tests ---
-
-let e2e = exec "cd /home/raw/Documents/GitHub/ypi && make test-e2e 2>&1 | tail -25"
-
-gate **all e2e tests pass**:
-  evidence: e2e
-  on-reject: throw "Fix failing e2e tests before landing."
-
-# --- Gate 3: Smoke test ---
-
-let smoke = exec "cd /home/raw/Documents/GitHub/ypi && echo '2+2=' | rlm_query 'What is the answer? Just the number.' 2>/dev/null"
-
-gate **smoke test returns 4**:
-  evidence: smoke
-  on-reject: throw "rlm_query is broken. Fix before landing."
-
-# --- Describe the change (needs judgment) ---
-
-let status = exec "cd /home/raw/Documents/GitHub/ypi && jj diff --stat 2>&1"
-let log = exec "cd /home/raw/Documents/GitHub/ypi && jj log --limit 3 2>&1"
-
-session "Describe this change"
-  prompt: """
-    Look at the jj diff --stat and jj log below. Write a concise commit message
-    and run: jj describe -m "your message"
-
-    The message should summarize what shipped. Use conventional commit style
-    (feat:, fix:, refactor:, etc.). One line, under 80 chars if possible.
-
-    jj diff --stat:
-    {status}
-
-    jj log:
-    {log}
-  """
-  context: [status, log]
-
-# --- Deterministic landing steps ---
-
-let encrypt = exec "cd /home/raw/Documents/GitHub/ypi && bash scripts/encrypt-prose 2>&1 | tail -5"
-
-let push = exec """
-cd /home/raw/Documents/GitHub/ypi
-jj bookmark set master 2>&1
-jj git push 2>&1
-"""
-
-gate **push succeeded (no errors in output)**:
-  evidence: push
-  on-reject: throw "Push failed. Fix and retry."
-
-let decrypt = exec "cd /home/raw/Documents/GitHub/ypi && bash scripts/decrypt-prose 2>&1 | tail -5"
-
-# --- Clean up stale workspaces ---
-
-let workspaces = exec "cd /home/raw/Documents/GitHub/ypi && jj workspace list 2>&1"
-let cleanup = exec """
-cd /home/raw/Documents/GitHub/ypi
-for ws in $(jj workspace list 2>/dev/null | grep 'rlm-d' | awk '{print $1}'); do
-  jj workspace forget "$ws" 2>&1
-done
-echo "Cleanup done"
-"""
-
-# --- Verify ---
-
-let verify = exec "cd /home/raw/Documents/GitHub/ypi && jj log --limit 3 2>&1 && echo '---' && jj status 2>&1"
-
-gate **master is pushed and working copy is clean**:
-  evidence: verify
-  on-reject: throw "Landing incomplete. Check jj log and jj status."
-
-# --- Reflect (needs judgment) ---
-
-output summary = session "Reflect and hand off"
-  prompt: """
-    The landing is complete. Reflect on this session and write a handoff.
-
-    Consider:
-    1. What shipped? (check jj log)
-    2. What did we learn? Any surprises or failed experiments?
-    3. Did we encode the learning? (tests > AGENTS.md > SYSTEM_PROMPT.md > README.md)
-    4. What should the next agent try?
-    5. Current version (check package.json)
-    6. Any gotchas or context for the next session?
-
-    The goal is compounding: each session leaves ypi slightly better at building itself.
-  """
-  context: verify
+{
+	"data": "ENC[AES256_GCM,data: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,iv:1cVMBFXmtXVCJZPTBqpFBOVT88HwM2GY0XNKGiK6pTM=,tag:IVKKJp3QSSz6TWrtsgaPDQ==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBjaklKNXFNdjlidW5TM2xO\nUDY0aDR3L0ZaZGN1OHA1UTBSTHRqSVFnTWp3CkliSENsQnMySWl0TE9RdmJmNEFa\nNTVneGdoRCtJN3h4eUlkNkxPK0drNVkKLS0tIEt5cTYvSjNWV2dMa1lHMmpydVlX\nZU9mcS9PVmFTckphRHFvUzF4TkJJREEKIx64r7IdUiASJRBotGQZ8kD6kbfb46fY\nV2R2Y3FkG/bXWF2kIA5e+vTtnklf6DNdQfCJ6F4UmLBhbdy/xqPjJQ==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:wMY2MEYP9Ngw1ne92YJN4TkZaUcy8PQBoYW72cfMKtNckw3N3AYR8NnnYBwCF0JKDsFrbe99A5UhLJ/3gqLw+fpHzn4IFwihX8gCb4ONGsy3JHcCFI7olzR+2THGPnvDYCLZeqwpvMUGlzkRmkiMzuYZwUqDUj4Br70J+Hji7Jc=,iv:TuEnKqgeu5wEGGB+WCNa04ou90KynIeNRL4RaJkC4YA=,tag:pELpRTkJoc5QXqMWEJmMDQ==,type:str]",
+		"version": "3.11.0"
+	}
+}

@@ -1,72 +1,14 @@
-# self-experiment.prose
-# Test a hypothesis about ypi by running ypi on itself.
-#
-# Run: rp ypi .prose/self-experiment.prose
-#
-# Monitor from another terminal:
-#   rlm_sessions read --last | tail -30
-#   rlm_sessions grep "pattern"
-
-input hypothesis: "What you think will happen and why"
-input task: "A concrete coding task that tests the hypothesis"
-
-# --- Design ---
-
-let design = session "Design an A/B experiment"
-  prompt: """
-    Hypothesis: {hypothesis}
-    Task: {task}
-    Repo: ypi (recursive coding agent — you ARE running inside it)
-
-    Design a minimal experiment:
-    1. What are conditions A and B? (one env var, one prompt change, etc.)
-    2. What task do the agents perform? (must be real work on this repo)
-    3. What do you measure? (time, accuracy, tool usage, errors hit)
-    4. How many trials? (start small — 1 each, scale if promising)
-
-    Write a bash script to experiments/<name>/run.sh that:
-    - Takes a condition letter as argument (A, B, C, etc.)
-    - Uses rlm_query to spawn children
-    - Logs timing and outputs to experiments/<name>/results/<condition>/
-    - Uses Pi's default session dir (never override RLM_SESSION_DIR)
-    - Is resumable (skip completed trials)
-
-    Keep it simple. We're looking for signal, not statistical significance.
-    Return the path to the run script you created.
-  """
-
-# --- Run conditions concurrently ---
-
-session "Run all conditions"
-  prompt: """
-    The experiment script is ready: {design}
-
-    Launch ALL conditions concurrently in separate tmux windows:
-    ```
-    tmux new-window -t eval -n exp-A; tmux send-keys -t eval:exp-A 'bash <script> A 2>&1 | tee ...' Enter
-    tmux new-window -t eval -n exp-B; tmux send-keys -t eval:exp-B 'bash <script> B 2>&1 | tee ...' Enter
-    ```
-
-    Then poll for completion (no sleeping):
-    - Check `tmux capture-pane -t eval:exp-A -p | grep Results` periodically
-    - Once all conditions show results, collect the log files
-
-    Do NOT run conditions sequentially. Do NOT sleep for more than 2 seconds.
-  """
-
-# --- Analyze ---
-
-output analysis = session "Analyze results and decide"
-  prompt: """
-    Hypothesis: {hypothesis}
-
-    Collect results from all conditions (read the log files).
-
-    Analyze:
-    1. Did the measured behavior differ between conditions?
-    2. Was the hypothesis supported, refuted, or inconclusive?
-    3. Recommendation: keep the feature, change it, or kill it?
-    4. If inconclusive, what would a better experiment look like?
-
-    Be honest. Negative results are results.
-  """
+{
+	"data": "ENC[AES256_GCM,data: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,iv:OqhkUd04dT/xRAFWDsGX8pTPJfXcQsZEZnZzvi9eaWw=,tag:ftzGJIdPLbsFeMCb6h+w5w==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBxSGFCRjRnVmJFdkVndWNy\nMWs3dkdhN2tGdWRWcUpQeFR6TTd1UlRBOUNBCjNRRm5WS2JQU1J5cUV3azJJU0VG\nZkZsQ0c4OExQTDdwYWNRNHhNelR4eVkKLS0tIFNtS0N4eXk3YThTbTRTSFJmUmZO\nT1J2NE41QzkwbmU4cEdtRzVPcE9qcGcKFqFkckqGmI3nkSkoQsFcHChH61sS4TmS\n8W6vGP4j0A1puQHRku8LGv18T/MqV4ay1mq4b34E8Q6SIAFOiEZVzA==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:U40GKSDWI9HQdfTfWzpbIHdDJlVsmAxWwcjxDUTevi0DLpK+34h1FSz2bZV21RRPlc4do2Bijiq+g6OWL6IqyhXu5I7AuNe+8TgkfsI3mcsdHQVH3mlfwQIBBYTquqMKo9ABKpMX0RZu3j5M2315sEDHMVQfzkSrvVtNRXNMqwU=,iv:3Nilrw1OTk4fCa45Seaw4N3lrFEhhHfGD/T7AiaDmYw=,tag:IXsjr31uXDiyhvDqQWgbuA==,type:str]",
+		"version": "3.11.0"
+	}
+}

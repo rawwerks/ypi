@@ -1,41 +1,14 @@
-# summary
-
-kind: output
-
-source:
-```prose
-output summary = session "Reflect and hand off"
-```
-
----
-
-## Landing Summary — ypi v0.4.0
-
-### What Shipped
-- **notify-done extension** (`contrib/extensions/notify-done.ts`) — watches `/tmp/ypi-signal-*` sentinel files and wakes the agent when background tasks complete. No polling, no sleeping.
-- **Updated AGENTS.md** — new sentinel pattern for launching prose programs in tmux. Agents now use `rp ypi .prose/land.prose; echo done > /tmp/ypi-signal-land` and get woken up automatically.
-- **Private research** — Pi extension API docs gathered for future extension development.
-- **Prose run state** — check-upstream and land run artifacts.
-
-### Quality Gates
-- ✅ 72/72 fast tests (unit + guardrails)
-- ✅ E2E tests pass (E7 flaked once on Gemini Flash — prompt echo bug, passed on retry)
-- ✅ Smoke test: `rlm_query` returns `4` for `2+2=`
-
-### What We Learned
-1. **Gemini Flash e2e flakiness** — E7 ("small context no-recurse") can fail when the model echoes the prompt hundreds of times instead of answering. This is a provider-side issue, not a ypi bug. The test already has a retry mechanism but 1 retry isn't always enough.
-2. **notify-done pattern** — sentinel files + a Pi extension that watches them is a clean way to handle async coordination without blocking the conversation.
-
-### Encoded Learning
-- Sentinel pattern documented in AGENTS.md ✅
-- notify-done extension contributed to `contrib/extensions/` ✅
-
-### Next Session Should Consider
-1. **E7 flakiness** — consider adding a 3rd retry attempt, or switching to a more reliable model for that test
-2. **notify-done extension** — test it in practice with real prose program runs, iterate on UX
-3. **Pi extension API** — private research docs are ready for building more extensions
-4. **Version** — currently v0.4.0, no version bump needed for this change
-
-### Gotchas
-- After `decrypt-prose`, working copy shows many modified `.prose/runs/` files — this is normal (encrypted→decrypted). Not actual code changes.
-- Orphan jj workspace commits from previous rlm_query sub-agents need periodic cleanup (done this session).
+{
+	"data": "ENC[AES256_GCM,data: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,iv:GpKM/8lykr86ULibSO+m2mGRZ76JL1zrBccMjz4pO0I=,tag:4bAqS9N3f8KlHI7I0DDSpw==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBhZitORVR1Vy9PaEhXNjFE\nK1QyMVg0NWdxOXpibm9EZjNNRzBpYWJBQVdrCnZlcmxlalpFellzOHJSR2ZTN0g0\na1hQdVU3amczU3lnT2gvczJleUFVSjQKLS0tIFZYVmFHeEhoRDBrTzVPVjZ5MkIw\nUU1OVllESXJXVFgzZTJYQ3F0bzg3VFUK9VYfM3LltN473ZVqUWJM8830izbavJT9\nMrZyre7ff7v9YPipG8pH48lSQDGUfMoK/HzYXJiwntQIk7oMszpDZQ==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:7vD8BkAf3AWVGMsn+y4JNeCbT+4+r1/72TlTX3C5lxjwrb/B8bdZxFA005Sb/pzq9DxjafL16Nfpm/CocdOuJgc49fWXlQsoSGmAy4wWRgMrB+NRMW9aSK+QCxsoAPVeu80cJBVflEiufhWMAQMM8aTboYuNgVglbzvj03478qI=,iv:ZbLF1o9tCUULnznVI53qCVOspLxSA8oNHG8qrLHxKf4=,tag:pwH/yLtnCz85zUW3LPlyxg==,type:str]",
+		"version": "3.11.0"
+	}
+}

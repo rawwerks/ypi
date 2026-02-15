@@ -1,104 +1,14 @@
-# land.prose
-# End-of-session cleanup for ypi.
-#
-# Run: rp ypi .prose/land.prose
-# Or just follow the steps manually — this is a checklist, not automation.
-#
-# Monitor from another terminal:
-#   rlm_sessions read --last | tail -30
-
-# --- Quality gates ---
-
-let fast = exec "make test-fast 2>&1 | tail -10"
-
-gate **all fast tests pass**:
-  evidence: fast
-  on-reject: "Fix failing tests before landing."
-let e2e = exec "make test-e2e 2>&1 | tail -20"
-
-gate **all e2e tests pass**:
-  evidence: e2e
-  on-reject: "Fix failing e2e tests before landing."
-
-# --- Smoke test: ypi still works ---
-
-let smoke = exec """
-  echo "2+2=" | rlm_query "What is the answer? Just the number." 2>/dev/null
-"""
-
-gate **smoke test returns a number**:
-  evidence: smoke
-  on-reject: "rlm_query is broken. Fix before landing."
-
-# --- Clean up ---
-
-session "Clean up and push"
-  prompt: """
-    End-of-session cleanup. Do ALL of these:
-
-    1. **Describe the change** (if working copy has changes):
-       jj describe -m "concise description"
-
-    2. **Encrypt before push**:
-       scripts/encrypt-prose
-
-    3. **Push**:
-       jj bookmark set master
-       jj git push
-
-    4. **Decrypt back to plaintext** (for next session):
-       scripts/decrypt-prose
-
-    5. **Clean up stale workspaces**:
-       jj workspace list
-       jj workspace forget <any rlm-d* workspaces>
-
-    6. **Clean up tmux** (if eval session has stale windows):
-       List windows with: tmux list-windows -t eval
-       Kill stale ones.
-
-    7. **Verify**:
-       jj log --limit 3  (master should be at the top, pushed)
-       jj status          (should be empty or just decrypted files)
-
-    Work is NOT complete until jj git push succeeds.
-    NEVER say "ready to push when you are" — YOU must push.
-  """
-
-# --- Compound what we learned ---
-
-output summary = session "Reflect and hand off"
-  prompt: """
-    Before you close out, reflect on this session and compound the learning.
-
-    ypi is a recursive agent that builds itself. Every session is an opportunity
-    to make the next session better — not just through code, but through the
-    instructions, tests, and workflows that future agents will inherit.
-
-    Consider:
-
-    1. **What did we learn?** Any surprises, failed experiments, or insights
-       about how agents behave? If we ran an experiment, did it confirm or
-       challenge our assumptions?
-
-    2. **Did we encode the learning?** Insights should live in:
-       - Tests (test_guardrails.sh, test_e2e.sh) — if it's an invariant
-       - AGENTS.md — if it's a workflow or attitude
-       - SYSTEM_PROMPT.md — if agents need it at every depth
-       - README.md — if users need it
-       NOT in a document that will go stale. Prefer executable over descriptive.
-
-    3. **What should the next agent try?** Leave breadcrumbs:
-       - Hypotheses worth testing (via self-experiment.prose)
-       - Features worth building (via recursive-development.prose)
-       - Rough edges you noticed but didn't fix
-
-    4. **Handoff summary:**
-       - What was done this session
-       - Current version (check package.json)
-       - What's in progress or unfinished
-       - Any gotchas or context the next agent needs
-
-    The goal is compounding: each session leaves ypi slightly better at
-    building itself. Code, tests, prompts, workflows — all of it compounds.
-  """
+{
+	"data": "ENC[AES256_GCM,data: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,iv:W/48U8Kj3o6CyHP2KigpV8fDv9y6XOW7UZ1wBxIE46Q=,tag:eTUb2bkHXyVmERJmpLWKtg==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB2TDdpRllkOEZ4VzlzTGNJ\nK2hGc0E3NnEvaU9jYmNpZ3ZTa0U5UkkxTGtjCnY4RklNOS9nTEpwc3JYZ0Vzd3dh\neEhmeFA0Q3JNQVZSNWMwS3JIMDNORm8KLS0tIDBlVDdseWtqVkhnTk9tSk5Pakpm\nclFaWlBHMGZOcVVKZGVCVVluRHBTRVUKo/RVfOUp1fzbcXqlgqE/pEi4E6+vJFzE\n62JqxPlYTRJfh7wQ0do8sZfinWISnh4dLLK5ZM0JfKcvtuiuuTaAMA==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:hn6EzYzXoQ0jUrYvSurQmLvTkqY6j0AWLPJ5C7SD+7YRNuo8sImPYKUgOqiehMbOsF9/r8CrbE7cxgPYFpT72h5e0KOJtCUGOLY/wgqKDp4IkWvQnYwUQlX4PR4jvVOyked5aDMfnO/X83zGGqjRrQnHLuqVxTYmnLg1u/1iMB8=,iv:YdoOIlSHoKCwMaDcFEZasfVj89BM/jVCSeAV4vs4i9Y=,tag:JfaSrwOJpJCDuXMZSP7agg==,type:str]",
+		"version": "3.11.0"
+	}
+}

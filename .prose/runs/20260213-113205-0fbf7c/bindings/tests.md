@@ -1,22 +1,14 @@
-# tests
-
-kind: let
-
-source:
-```prose
-let tests = session "Add regression tests"
-```
-
----
-
-No new tests needed. T14d already covers the symbolic access contract:
-
-```
-T14d: RLM_PROMPT_FILE is set and contains the original prompt (symbolic access)
-```
-
-This test verifies that:
-1. `RLM_PROMPT_FILE` is set to a temp file path (`/tmp/rlm_prompt_*`)
-2. The file contains the exact original prompt text
-
-The "can agents grep/sed it?" property is trivially satisfied if the file exists with correct content — it's a regular file on disk. No additional test provides meaningful value beyond T14d.
+{
+	"data": "ENC[AES256_GCM,data:NittAUeqEA+nwvzSRibyDu3UG2YIgBnC+eDhCL1XoU3MEXJbt6eOzv4KzD9VCUtLVvZcLPC1+MNTVHHhr/7i8ZO6vhnorH2dBhl6glT5narXGy/NbCCOtjvz7cI0IgePMCw9wV0Q5DLdgTcZmGbyw1YjBpOnXTHFQVQxuh0+7RHFj+Ql1Bb7WD40qgxaWNMwx6d9+akCE682kpyvhMg5I6Kg2ctpr2wAUrjxmWw7MPWpjrC1duW4McyqBDA1MLQxqMmU2VIA8W3SDmu9YT+Mprh0UW1/aTarEcjogGWMhOC/rXrDvvdTrhh2m5ufUpek5Jd7dsOHngo5+9du3N28CeNlL3aIqbbonjmx5P6RzxS39fM5G9BA1i391VqoKdYZDN+HTyM00ILP4fGg3NElLhn7EMehExiWJSjuBeByViqMyshLsvhn9jHY2zt/a2BUyLc1vDsuivAJjVSd6i6Z0pzHhdLM8tj4APBhpXDssiSFGq2s9b5lhvJ7tNUUMioGcjmlghWtI+MTQ7o6YilXfNSwsJjKT9YzHlbA8aVqpgH6oL6zjfsIHAqEcwvEDjolLX6unDPXtJLBilT9Osu1FB9AkU86nNS2FA0Kb1kGRqmKtqDDTxWY4OTpKjG0vzX8cf1dna/J2cTGo6r9TY9uvLHQw4K9KwVTqALN906WeA3T1AL0VW6PF4NizvmR7SAxmLsvHeVjeGguCmCjqJXjfJ6P5uQ4epk2irFezQiiueCGv4aDdWAFlgc9A8JA2zjHMT5la0iaemzxeNCZaVM+Pw==,iv:crhSbwdb5d2IwxJIzwxyU9SMsoWo72HLdqoZ7Kp/BWc=,tag:2gEASlB/9+0lzFhadRTZdA==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSArOU5oWnJuL3FlUEJwRWtJ\nTnI2OUF4bEkwdlVGazd0M1IxZmR3UTd2YmxjCmRsSVN5K3FrcDY5Q1BDN1I1RFRF\nNEhmRnJHRCtXNTR0UXVORFRadDFpWEUKLS0tIHduelEwTm5xWjNJQ1dGZGFyM1Ja\naGlVUGhxYk5JL0s3T3QzVTg2OHVUUzgKe46TR2fPXywDYEKyQbPrDL8x7m0ShL8p\nG2Ymke8lm945IW/2EHOH31ydITaBGrY/An8bkL8NLq7keaajj9rtqA==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:ZOye3QbzuUOjvY53xbkFBVaE/b4/MWbiWzVJPL/hcdkseiaOdoEPmnOYmmg1Dz9TXtCLnpbQryRW21LHOAAkN1HSjBTfSYsFmL8AsYxgHa8iSw4jBD6Hx0Ng02yzyXZoVBRdvF0Zl6mls8w6GHii/tlGMHKeuEbALFNMYkLitrM=,iv:fbrBVG7esPCgbFKkDIylJ0WVsp1NKQ2EwMQPMNHb9NM=,tag:uJ65tURL4SGRv/RYhyMroA==,type:str]",
+		"version": "3.11.0"
+	}
+}

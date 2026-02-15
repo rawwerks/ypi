@@ -1,28 +1,14 @@
-# summary
-
-kind: output
-
-source:
-```prose
-output summary = session "Summarize what was done"
-```
-
----
-
-## Incorporation Result: Symbolic Access to Prompts
-
-**Insight:** Anything the agent needs to manipulate precisely should be a file, not just tokens in context. Even short prompts benefit from `$RLM_PROMPT_FILE`.
-
-**Result: Already fully incorporated. No changes made.**
-
-The insight was found in all five knowledge layers:
-
-- **SYSTEM_PROMPT.md** — Section 2 documents `$RLM_PROMPT_FILE` with usage guidance (line 12)
-- **AGENTS.md** — Architectural Invariant #4 "Symbolic access" covers `$CONTEXT`, `$RLM_PROMPT_FILE`, and hashline (line 65)
-- **README.md** — Design principle #4 mirrors the invariant for external users (line 101)
-- **rlm_query** — Implementation creates the temp file and exports `$RLM_PROMPT_FILE` (lines 155-158, 218)
-- **tests/test_unit.sh** — T14d verifies the file is set and contains the original prompt
-
-**Tests:** 72 passed, 0 failed (no changes to verify, but confirmed existing tests cover this)
-
-**Follow-up:** None needed. This insight has reached saturation in the repo.
+{
+	"data": "ENC[AES256_GCM,data:5jmzhgSoM7TB6DLrTlsZnmvcAedak2wFVJ5BKnnc4jsXGhge/nzRnfJinsGwtcnz+VfN6I5dW1z5uU7j3RTaiKmWzjxapjy7/ANVDon/j7tq4lMBIzAELh2QWbX1sRfXl5op0/o7AZJxcWsKkaJE7GD8iiVjcRfNKI1BQ5rmvzqB4LpmAkthdTzClYKp3LzItG36HNwI9yvOHbdMT8lDzyD6he3GhkQButt77HQkdfYh4TYUcw3DGnmfWyGdAVfIUAlCbvQiVTqxG0MiGB36uH2LQpg0HOgxa2w67lxfAQhOQuMvIu3mm59FVRv/HTb8pWD8y0hJkd7cv9SuffWbQUSJIQsGL/HT+GOte/HxF6m8sjJ4HtOaefUAQMjurADnFKukwUave/U1CzL8kUVXyo9gFNfIN1UBYxxtDXM9VDBs0uLifAjvu4QigCj9Rx2kZ9WtKRsp3TFAcZeTF+UYbMQEhthPs6k39nFhBsCi67x4bbdjRk/Ev5TTVRkHGkncIFGXu0w83Y+Jd36g7nXp5R+ONQ+HMB2N9g9snwwqij6Pm/CTE671flRDJGfcHojrVnG49jYjWxkrW1m+uHAtHn7dj5xB77Fjzsy4EL/f2oxP4FO+fDaec1Ld1fMLEVf/0WNjlTfCwimnflpIzWXKtam4jbvkFkdv0QCZUiFVsSURbwjY+TdjnKR6ZQolvzUKavVNM/9frRTOpYw38zXw2Qcr6w2YI1HrBFDUv/9d1ETwz5SQ5zq7EM3ecTv1Li+DqaowJO14yjrp1jLAAOmk/T2y8GJMX/cep20nsv58Bgpc3odwCWqkzWScyDMEed4YypnLBIVb07n8rbXMz/io6yNiv0eGJTl6/RYeSjDqOdeYeSGf46DeQiSXz1kocBA+VRc0QwzxjjzrKGOA16yVIMxdTmpY+NJIC/vgX8zhGyZVsxYnCQe8tVwqCFr5I5lr9Glc0TmmPk+ZXPLgRY7MepElHiAwRoWkvSSu0EEgvOPLxgObkUEYZquh/S1u9jQYCdX6vtM210vpkMAwSuT+cEWODe8mzCBcVbgoeQCGfujkGRfgW9TVulSWW46VlH5mj6Lp7eIvvQ7tjvQqEV62oCgnPQQ5bK7HoriAedychS4zhvwIM5WFe9T6l3zZqFiq5lduQAljEJO2aHu1IZjUcJMf0LAkcgPox8binAAQ5nS5ibXkoERWFR9s0PZ+5MU2gzYv0tPEK37zWWyrN9e0djRXVtna8hRAfEOjEU6XouK9Oy2J5qjCG5AT+YIC74huE6YbdYLvCWyWm80EEdS2sbxI83pkKhO05nopPqwR+yr5q6PTm0BSmotKwDXuWTkXomwsV8pb9HylSBCLmsfp/F+KcCpE8rNlXA2zqHw/MbzMgGYLiW/chSU9X7u5qO4oUUsW48OYe75ZWJ2ngzo5GxFTRJte4HpTO+fJZQZz9g6gcr4JUDgedq5nq1EZB+qXUjzifEy2dhsPOIx+4F8=,iv:1mQkYMY1bwrsFxNysJJAlHm96ScgxKcrxKgq7UEYcfw=,tag:vYZkgcxYjU/eOEzyoUYW0A==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBHTVM4Tm5odjltWGNPdm5s\naVUwbTBWQm5NR3ZQRVdLMlRxb05yT2FxMm1JCm11SnFjeGpoYTZSSitwaGZvMEdu\nTXpSZHZTa1Jta2o4TjBEWWwveldkYzQKLS0tIFNvc0d5MnEvcCtvNWV4ZXRibjJM\nek5tTTZpM2RHNjhPSFRIY3hpN3F3bjQKdv5C/SYRJsMTipPo9lm084L6FkdNrGV8\n30lMxx7Uv0DSCwJlTePIwbrnLtjRFxvhDvJOvIXgqxoUZd3SXCNv9Q==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:pvf5rD4deWwohq86d5r9sor+QEqmTcgEFF2E1TSo+36YeUsjwOMybNF+Dd5mTuAqjY4Xo0Q+/ZKpNQN4xPSy01fvsGu2dA04agl+JDJxauGlO5Qb3iNVvf1/h34ozqsXzkKtDljtNzReELXaUIPVufpSXlNdUb/oeBNHv0pDjb0=,iv:7kdOt6jiafQkZWH1Xxs2ptToERKfgollUMZQspkqFQU=,tag:KYj0xviUegoLmmP3VNpfBw==,type:str]",
+		"version": "3.11.0"
+	}
+}

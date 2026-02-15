@@ -1,29 +1,14 @@
-# verify
-
-kind: let
-
-source:
-```prose
-let verify = exec "make test-fast 2>&1 | tail -15"
-```
-
-exit_code: 0
-stderr: (empty)
-
----
-
-  ✓ G47: RLM_JSON=0 works
-
-=== rlm_sessions ===
-  ✓ G48: lists sessions by default
-  ✓ G49: SHARED_SESSIONS=0 disables
-  ✓ G49: no session listed
-  ✓ G50: SHARED_SESSIONS=1 enables
-  ✓ G51: trace filter includes matching
-  ✓ G51: trace filter excludes other
-
-═══════════════════════════════════
-  Results: 72 passed, 0 failed
-═══════════════════════════════════
-
-All tests passed! ✓
+{
+	"data": "ENC[AES256_GCM,data:VI6kF1veZqurYzOpBOnnHRu/66KHRWHN+/tsymFeG8vOtOvMK5hFmEAgqvuRa1+xw8y0faxV+gmo9cr6lyeeROjRAHUlhAonQtAJv8aHSnxqwGHcK1OUVQtPAXFyCkRPa744Mpgx+axHNJddiTN3l2imCgstTSOE+Oi4f+tcf9rYh8jimddKCyRY5z6nYJwC/dXc9D8Rw4L8kZTVM1y/IWo5HKUef+AO6vRTYfGMJOMHpHw24WMoKy1oK6Kincaj5T744mJhNrA4ueWmsx7kMnJrSZKRUBQ3r5FojhB6SWek7an+ybKVowAucle6bCawl7M0JHKcCbWmFpGNQLhHizQmQ2plvINnDuKVhpY5gHFWin3CRl51u9pKs1vQmDdbG1AXMO7TLLfLHUqLapXp7UMPcA5UMwQ2N5wxDFxeffIcJ6sfVDo23yo0xsA2uIS+1Q8WXXlf3Gvxebans87SP/HYIfGYE1/hF2hDLNudFyJOL7QjJLNSkt3YJJnZTwQ1pHVTtrX7ARL66WHdd3tVXPHf6lQ3w3+zyXEN/vVoCYGweDVtOr0wwcFOPHOqV3ORNhIly5r2gNQtdEydTvk4f/cGKXUpQwBxYGQZlkFb4W8Q8H9ppwN1l4ELuxAlb/lb1mJKnc313p71e2AS0gLZN5YApMlDOoEvhbwzQtBcIC6cVJcjjNRX6tGXem37B2tw3RXyg4xhlN89RNPP2alcaZFxJNtkS2fmZDN4jCp/aNmOnyztpxvS7J2J7ayGC/loH3Cv992hWcw6xqp8zmi97fvATD4hthlTR3PmH+AcYq6Eek/s+K7FQ1tcKbjxqYIO+y9RhMYvO1ZM/46J0rBgLVHVI8AMThQgZzW/lhnxlAVDUj1AWjFQi9mOVE8=,iv:KYXA4cD2lwxRC+bK9bCvA6Aq4ROWZgfIXSceBEa5Ryk=,tag:IN+cuxlX5yRg6WoINGdpuw==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSByd0tiakxTNGlKUi9Fd0F0\nMFUrT3pqZnpGRFI3TDVBSzJ6d1EwUlBUU3lzCkVMamg2RVJuMXNVSjdxcWY3ODNz\ndHhvTUl1cGpmNjd3Z1VoN3U2NHBXVFUKLS0tIDYvMDFoQWx4SldQdWhlOGR5SXBy\nQ3g1c2Vja3R3Tmc3Ym9QNkVycHVUTHMK6TlmdO8mug7bcXw7NleySBSAyDZAr1hd\nLEtOZ/Ups/Z1F4sDCMXQyPdHL/T4amp+YHC0IrSgrownuCu4Sog/FQ==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:k72Pnlt/09/Y/l/2Rkmz0l3W2a2ZQT4mCoBKrrk6q5I8h1IctyxkFB6yzY81ZGDT5K3+vKTN47bsDQF4oEC8yMcVHtjDQwETtegckO8K1d13Pq96To7cZ38hp8LkGmML1KGB8biDLHZ1pkT9/MJc8WM86S75saV1x6mlYdWusNs=,iv:+1ArOO+OdNMFbEwEVCckV9sicdvysgiyu6JddFWgrYg=,tag:Ag1SvcwMFqAlXuJitxh3TA==,type:str]",
+		"version": "3.11.0"
+	}
+}

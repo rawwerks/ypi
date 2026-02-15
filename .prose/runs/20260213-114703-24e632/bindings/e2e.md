@@ -1,20 +1,14 @@
-# e2e
-
-kind: let
-
-source:
-```prose
-let e2e = exec "cd /home/raw/Documents/GitHub/ypi && make test-e2e 2>&1 | tail -25"
-```
-
-exit_code: 1
-stderr: (empty)
-
----
-
-Failures:
-
-  ✗ E7: small context no-recurse: expected '42', got: 
-  ✗ E8: self-similarity: depth0='What is the user's name? Reply with ONLY the name.What is the history of mathematics? Summarize the history of mathematics in one paragraph.' depth1='Tokyo'
-
-make: *** [Makefile:24: test-e2e] Error 1
+{
+	"data": "ENC[AES256_GCM,data:TvIny10rFLxV/0vjkT1fuO1RTDkonJk/RhSh4pD4pACRVR80cjYzoFFzZ8ZMBIcumQABLrJG4K0xYZlMDZKwEtuRMaKheG11uxrp8bh7WLb3yVQeHHtbNgGJ6ZtoMZxZCkFeZ0KEf915Ei8KdMnEPBfd3VF7TtnJiLNfqNIE/9MC5GQ0F6rf1HJDfjyqqizJqAVBMKagoDbuwKi4nVX4Ewp/mwkqgwj6BKzLo9P2S5190PQ7pqZ9VBozhOB52rTHDkxh1UZ7k7nG6GipqlFBB7FXlgFlAus5raA1qlNiosDFGIrdfS5CznHvgQFzq4T6swaZrjFjMYn8pGmxNT2oXch3HZLr9UAIqgRCu5QyBBwWUcGbPgM/JSOs+cXER8UJZ5sQdo8yUv/Qx8BvEzbTiQSau8l4WakG10BaCgqxlPdD+oPBLsU9Z+TmhJjK6GJSvS3Ak+joMRM4SD8dlcwef0Z8fDSIdEYKur04Tmou3ZEyC6NvGnL+d+27P27uCmhQjsCMVQ3Ty3GeJN/Z4/D59vTEXpSlTRVnqplzmoEwpCLL8CoKUmyh/t9/yANbSsD1behZwSyigfLJI4PCqJkqL4vGkRuv9eD33T/ynwcP,iv:v4Mp9OlxmIYDpDqsx+maVrP2j1xkCoJdzVeFUqPTdqE=,tag:k3w0OdLGnsRZH4mGxI1ByA==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAvUldYR1FvQkx5NGI0SjRM\nbGRDeWh0K1J5a0pIdk1jU2VnZWpyU1pmckYwCnptMmlHR1h3M0F6QVRnOS9PZUhh\naGhYaitOSXowQVZRRjF6UGF4Y1RQaTAKLS0tIEx5T0JwZi9VQVl3a3ZvZ3YxTFgy\nYUtOTDlJeVNVak11emRNQ1p5TmtWRTQKlKXFfllybEHLmy0KQ6P3RVw3YSWAhhyh\nEUgnty+TjwHPwTjsFpSSIrf/dqRi63ZwcahBbswQNR6apAfD6na8zg==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:D4zRIJcdKVW7Qn8ym7ozab/ITbj4rVCK6dPDbb90mQBBEjY3HqPTVAsCnZLnYrHia0OsQD1muH8N0yyCiTU8Szb4qhZc2Lq3D3FFUjf3MzuiIIYZURSo7zo1r6evKSVkZMszvgzn7SeSqJjOOirOTwBSQb2PlblBRNCaZk8lkPk=,iv:i8T513eW3uBqvE3oOhyIt+xMI4Uphgiq3BKUPC/7hjw=,tag:LhumO9asOpoiXH2BN0HBJg==,type:str]",
+		"version": "3.11.0"
+	}
+}

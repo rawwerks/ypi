@@ -1,13 +1,14 @@
-# run:20260213-113205-0fbf7c incorporate-insight.prose
-1→ plan ✓
-2→ code ✓
-3→ ∥start system_prompt,agents_md,readme
-3a→ system_prompt ✓
-3b→ agents_md ✓
-3c→ readme ✓
-3→ ∥done
-4→ tests ✓
-5→ verify ✓
-6→ gate ✓ (72/72 tests pass)
-7→ summary ✓
----end 2026-02-13T11:33:01Z
+{
+	"data": "ENC[AES256_GCM,data:iJffXffYoM8tsdgkroLLshToXN54WSLFvfBbUn4waBoVImHH8M3HHTisRzc6d4mAnKrwqG1JBqshfU8tHAMyQBSdeQWLeO8nYAV90tzDte9vuBv/YnT6/iX/kiTr6REv9GqcH8Fyl3BIUrz5BOevWRdtiAvFd+rZrVakoT3eaj+GDI/7B5KE30d8fcPZeEdX4gSXFulLY4KlVGCxhm6kJfFEE6puJUM07FgZH0koNiqij4btAw3IxwqUuyW2RBpLCfXmrRW4orp9ZSzifKMy/3rHfzDXO4rfEPX6gotWlOv91UhKYCkrIHrbwfeRHsMfAOBTrc8nBS87FtU3uv2eGFVni2Sop2aTCUu3bOGGoBK5zwpxQlwVPnVN/80ghHjdiUgbKr/B02BSSv6KgIUZ1d+jnYpXPvA=,iv:FSIaoBWK81r8fhRuUNykrf2MXONc05zT7ulqWEL9AU8=,tag:Epw5Yufs1fb0M3IFjKeQfA==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBNeEFPbHhFT3FjZUZBSVp2\nL3ByaTZvbFJrMjJ3TFpZaVV0Y1lKU3FPT1QwCkgrVDRNMFFleW4vN0o0eFN4eGVW\nK240UXhLNGN5aGxzM09BVnhyR0Z5R3MKLS0tIDdaRFZZZ0xscDFoNkdKNE8vcEZO\nMmZHMGs1S3IvaEhBNUh6Y29vdjNLVG8K4EXwcE6idqRQtFpmB8VGOSsh/655ZrQc\ns3MFNMLP3T7BOl29zQTBvh7ieuOGEmskfAVNJ1nj7K4ihVNRLSxBEw==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:9CWtIK8Db+dmWY8PKso0OXKZmbECVAlJXgauZYRW8ckFX+vc4MxCNzvyCAqzfbNahUupYxy5I7R0QS72+nc2JT9zEaKohSWD4FffwKhLJq3g/IQ3calr9n3pt5tvEtgJeoULZDshH1ApJebQ+1TE45eW0ExwJdfHLnDOPG1/EB8=,iv:MyZfxpl1Jfq3PkcqKK6tDe6xVW8yNe3ws+ZQRyr1D14=,tag:/dsa2MSEbTv9wmh0/+q7pg==,type:str]",
+		"version": "3.11.0"
+	}
+}

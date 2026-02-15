@@ -1,19 +1,14 @@
-# anon_002
-
-kind: let
-
-source:
-```prose
-session "Summarize success"
-```
-
----
-
-All tests pass with pi 0.52.10. The .pi-version file remains at 0.52.10 (no change needed — already up to date).
-
-Test results:
-- Unit tests: 27/27 passed
-- Guardrail tests: 66/66 passed  
-- Extension tests: 3/3 passed
-
-Total: 96/96 tests passing. ypi is fully compatible with the latest upstream Pi release.
+{
+	"data": "ENC[AES256_GCM,data:oOSUpEfUUO6eTRCjNEaTPw13+Znb72kJ9KoiRaL8Cw928SiXlKCafSMbZaDUgqYvOaN+aYNwEFgH4O1KqwL1sVP/H0zBv2GxF5K4fFFfhjJ9JoRwNBhHySNVqlRlU391fb6kSMSduNiBPVpBgPFuhXDs5rfzhsEpuCGE1PS7XIEtDe9XbeRgQQXFzHwwC2z4prDyn3sC46PlfPptbN5A8bSJE4ftkBZ8tMUY/MDqhwstvsHADdI+PUnhowq55WX/6G0cExXzFfxbhRyq6CJXMPiqj4Re5sGIsVsZnqprXJmC/pSpoKzX/95T2JsAZpuzNQx3D0UECOAPottWtpCoVnxOKSD7RV7pOeNClN6lBkiWCm2Q90PBPC7VUvX6T+d3P8LxnI3cQ1jbwczRkG4Di++hB5nLodPUSZYV/99zTpBt92BcJTJbHLnnlrncB+qQADu1Q4C2mTD3zP0BJrtkWAf0HDS/1t4n3c0NvuIVfC1eLR57O+rcJ8X32SnjSSzyzG6W8Ds=,iv:oPUKsJl0bSlr+iE4c7A2ZJ8JxgrpC2Lu8K9/MC/FV8g=,tag:7lTXc9SAukKKch7WAZ9RMg==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBQYVB0QUxteGd2S3Z4S2lk\nNzZZNEplOWpvQVRobVBmYlBFV2Mzd3lQSHk4CmNieUJXaTA3a052cU52SmlJK3Rm\nNzU5eCsyeHJ6TmQ2WUVrYkw3NzlkQk0KLS0tIGpNRUVXSWNXdUlNdnpidEhpaFdQ\nNmFFdU9UYWVCaGpKVlpnRnVCbDVTVXMKiiHrYmgaWODHpe2E2nKPOlBcCgarnEeC\npWPQIhDzEcbRbFZE0QYtNyuXlUP0/xyLdqFoLo2L/2oJfMN9YOGYtQ==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:09lTHKhXfz8SXSdGBsvabRHZLc4p4Zg9qJPD+3ZCC5iyUAZtym5+rYjPokO6X/YuPiNUZxp9zNHttDCOAFxuy4xMKzgWzcM6NZuZ02gmeU3pg/UPQ3E7F1ALDROxe6STMHZ/juoJOKm676rUeB6A7sHWGktKeY5Q//LCmpf1ovU=,iv:98+NfvgSRJHaNVw23WM5+scb8yST3lSoi93Hd+PP8Dw=,tag:RB0YcpTRmjIZcVK+riU1Qw==,type:str]",
+		"version": "3.11.0"
+	}
+}

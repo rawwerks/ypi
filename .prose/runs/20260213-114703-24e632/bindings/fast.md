@@ -1,29 +1,14 @@
-# fast
-
-kind: let
-
-source:
-```prose
-let fast = exec "cd /home/raw/Documents/GitHub/ypi && make test-fast 2>&1 | tail -15"
-```
-
-exit_code: 0
-stderr: (empty)
-
----
-
-  ✓ G47: RLM_JSON=0 works
-
-=== rlm_sessions ===
-  ✓ G48: lists sessions by default
-  ✓ G49: SHARED_SESSIONS=0 disables
-  ✓ G49: no session listed
-  ✓ G50: SHARED_SESSIONS=1 enables
-  ✓ G51: trace filter includes matching
-  ✓ G51: trace filter excludes other
-
-═══════════════════════════════════
-  Results: 72 passed, 0 failed
-═══════════════════════════════════
-
-All tests passed! ✓
+{
+	"data": "ENC[AES256_GCM,data:p3k9rZPq4yBs9B/PWrURJGo/es2w37TLH33SiGDE/Sqsd59NKcKVc6kF3abjK3LANf2XSvr5JEdxqbIu0lKwVmnItASY0Cxv8MyA2xQssAzQLgpmjX89bZLYPuiHUqhPCF/bu6Q7VC0cqsCxxiF774wRG6ZH6Ll4IIkZWUobMDWJDw4VR2+Gjk3AeJPVhaVGD1BSmqXgFEWzhg1R5Wg6BtFuprjjH3aN0bIx7VCitxeC8MvvEfuoSqa7q6zbOoa1xL0PLpXGLvwxX+z3nnQHwPZoauBykv+wc22urro/5HYqGeMFvkHAPseGqN5kn/S90iHkgZYrbl3UyUCgCzV1TH8aY0KFHhIczKlZcRgmWnLRoBT96hH48T99s20YJo5Qa+4KU854sCwisonst+vG0Jt4PHXczfzr4083by6I01UYVA4I5k4vTO9fD00E2WqP+uldfNDdD0qVkz/rSBsMlQw1UCNW0wqG19ehbLUnwU4nJmZGVO/pDzDyWOQeI8uK43TGJadnzLQIjPs9rXDXRANQ9WTtVZNkZIB9kKNVTzh4+SRl5pwbNwJiQikLAf/KjziywHktbqAbmv4jFDrX2yJ9jMuP3+Yud/KJN+fWugsWcWfguSoypZ3vml6/3LeFWE6D8QQnfnFgeIhHnOhMZrt1CAzrIk8Xt2hhNuSFoZmEGSz2Nark8yXFWuOuiJ3ELjmpbnp7BudhCb/x4QNN44zmaRwy9/1JTq2iG1JYuRX4cH1DeKWakI4vqE8K7+Gcdvlg43e1WMfl8dNUG/83suIPBe3qQJfsyqGoHDzgqNtHHWZdmFvIn2pXCQe0bF+dh8SzZWvHZn/ykj5TwNp17/YLJoopxVKl6+kVhvzVOyRCG3b7Zyv7EMVPBJ2+i6wXDyUEmvPs3vQxOw/9gs191+luSsIEqNQy6I4zfs8=,iv:24aFjz3Oc69c3+gFDzro66KVyyOvrzsTYsgUwkSJgQ4=,tag:9FLdVfOrb38WZb82FEqIFw==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBzVVlZR3R0dUEvVjRIUUZp\nTUdITVVqcjlyZUdRb3lBV2dPZHFKbzZuZkZjCnQvK09veFhuQWFBbWZ5eGw0U2tk\nM0s4Sm5tOE5Yb2JwMzJBdTVsN2dSRVUKLS0tIHhneTByODZyMGZaSG16ZmZjQUhS\nVlluNTF6Y2FxeUFaWFBrcHpublpXRE0KZO5zRog8joo5PyqJH/lxpfe+p3NZxmwW\n3rJ978PvAPnFoGmYC8K6XATZ39ZonaL6I4uiPZQJHbaBTD5e4ogXlQ==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:rrYen5o2Mtk4UIlf41QM4LGndIbuOAJcgdWk57xjfDyyErgmib67B/ZrpjqV9SWXMrPAOFeiMD5xXzQ291zAD+21TMSd15MdSTDI/3Fe9BuZ14lqpS0EbBWuLLiNYB+9jcJRUluWB6GXwwYxrlmZlEZ5LIrYbQlK+R5Lx0OJtTE=,iv:PGBGc6ctznjz3TDIOHqwM1dRG5e8ePnveXkLKNmFGOU=,tag:87SkaNc5+2lXODpoXBrU1w==,type:str]",
+		"version": "3.11.0"
+	}
+}

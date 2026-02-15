@@ -1,12 +1,14 @@
-# agents_md
-
-kind: let
-
-source:
-```prose
-agents_md = session "Update AGENTS.md (if planned)"
-```
-
----
-
-Skipped. AGENTS.md Architectural Invariant #4 already captures this insight: "Symbolic access — Anything the agent needs to manipulate precisely is a file, not just tokens in context. $CONTEXT for data, $RLM_PROMPT_FILE for the original prompt, hashline for edits. Agents grep/sed/cat instead of copying tokens from memory. (T14d)"
+{
+	"data": "ENC[AES256_GCM,data:ZbDH93E6K8mosF7kRkexJqGm6XuJ6dBVCbGfwLhQbCoJouSkkEhfdfWcxrDM7IdNDH1i0YbmU76xcCfuUNnFKWj1XeeUtxrLa3/Z+eIkRaf+u0PT2xxI5FmvEQdewqfMU06jly7aZQcOgr0q8Lrdqcidd+pmcXQi5JolJnV/+XsYT5eLK5B7mSjf60J7tas0gHK8uLC/andoEYj8UmVXk/8QjVAayAJBq9LhcDyGqwZiafZxxh5Xi42cKA1fckVkRK1F6XtCPdfenYu+xfEZ+iR1HHUInU+sMoOCd9XhOGG4OWj0oP7OO+8+MzBk6J7CFlSYkCaYwPdnZfFiXGJ0sjXR9TxtizptM/BvoREKhcuETtxGYR4kdMgTC0IlWQvu2ilLY/je+B1H61SV54/b/aN1JWXJv0odYVGeN5yPtopg1lBvEKn5FYsgYWwmB3EaP+ZmUEcJgi+FykuVEVsEmLlfJ+baXxm4G/MAoO0/C4nr5FT3qEkQ4tnOep/HMQ21w8o2sUqiUs4T15y1AMBjAUCylk1QFieVg1iGXZK3uWxcA6tT18548nvrKFgSMr5I3kVp3EE=,iv:Km1T6H9yGGdnyQcCHrIaTK6GM9xutcw968JDVLr2sts=,tag:SA6X6EnRn7eDtERcHPsXLw==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBpVktZUlFnbzY4SjY4TElk\nZVBON2d2L1FGdUtUQitHWGVoUzNlUENXQ2hnCkdKaW9aRmhXanRiVDBVQVBONWYw\nNXBXK2JLSml5QWpIc0hnL0t6ZnhlUGsKLS0tIGZZOWZkZ0JTM1hPb3JEY2hMMFZO\nb0VTZmNwb1NqVGFiWHJLaVptUWtVYzAKKOQyu4aUBbNkdoqOCJGjBR2Xl0qY1Uqb\nX6KXIReOk+VenCCPpq5hfGb+OnTAZyvQN3xc7qk1OZ3sFodIMVHehA==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:MB2U8C+9GnITFx5dVtyJOOPxNzxLZaDolNFDgt3PwXAYbi2uDukgca3Arc9lkv2SjT903EoMsGxHTQeve4rTNcOxlXCNO0eJ9Q3YYuR8ezgFveRBab2q20AXTcbLDknA2JraCjCBDZlUbLZj3Eky1Xv4Vp9omLPp1d5RRRyGDwc=,iv:JmG2ECsmL9QtTNOfk8X1Oo7AlUV6HbYWWLnEbD6Xnpg=,tag:tWkpvU7QdTuC9GZ0NREuVA==,type:str]",
+		"version": "3.11.0"
+	}
+}

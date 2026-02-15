@@ -1,38 +1,14 @@
-# design
-
-kind: let
-
-source:
-```prose
-let design = session "Design an A/B experiment"
-```
-
----
-
-## Experiment: pipe-vs-filename
-
-**Hypothesis:** Piping source to rlm_query as context produces better edits than telling the child the filename.
-
-**Conditions:**
-- **A (pipe):** Cat the rlm_sessions source into rlm_query via stdin, prompt asks it to add --version flag
-- **B (filename):** Tell rlm_query the path to rlm_sessions, let it read the file itself, same task
-
-**Task:** Add a `--version` flag to `rlm_sessions` that reads version from `.pi-version`
-
-**Measurements:**
-- Time to complete
-- Does the output parse (`bash -n`)?
-- Does it contain a `--version` handler?
-- Diff size (how much changed vs original)
-- Were existing functions preserved?
-- Line count preservation
-
-**Trials:** 1 each (A and B)
-
-**Script:** `experiments/pipe-vs-filename/run.sh`
-
-Usage:
-```bash
-bash experiments/pipe-vs-filename/run.sh A   # Pipe condition
-bash experiments/pipe-vs-filename/run.sh B   # Filename condition
-```
+{
+	"data": "ENC[AES256_GCM,data:gvmeb1sw6sXRQjDWgqWEbQiOgKJk4Wy2CLkQGy/DGBI0PCsSzb7jafLX9HKbuNYkX89JReEJoZuhoSERMqpGOsEosOb0/CQ+4DDk1lLYovxbYnzEik+yh/sHuvKDEFnDeXiuHtaEIYylb4UZQLHug3FAS3Nb700y3lplInkua5o8qicD42HJtj63QfLX10KZDsyGZ/5sOwT5AZVvCC8sE9WVIlKmVj4KIAcfPnacyPTFWF95oX4zOQEm19gIys6wVp7g5uA18uAIri9CHH+KU6xmcbF1hUGW/6D6glEtyOvoCCHpIZNsZly0iyxYerOZ90WjzutHOwWCukBbP3dD+/tZA8gnxvmRdzszzribjqd9pgpaof7U0cGJn0kychUP6t2UPl7cx5kW2HDlryH87f3I9yZC1wYWn1sNS4EdngnZVRKmzPjtI4raCt0Ae2fT2KjpCXEPEwEGvOvooIm+uoT2UBJmjO1EK1nbBJSi9ffNHl+jWZmjF+SVvRPprB3lJmL9wzAYH6X0gZdy1qTa96mJ+bQxQtWe8Scx3SZl9gPZB2g6ML8I1wWcORpXlsXiid+wNF7BXC3ySzZwGlr6P65Cxub45EquVuUocKOb25NLWpu/4gP2+WJi/HckRLKeV0hmq3/5a/xUJzMYjg1acgtJ0SSl0KCsfFTj7eaX+9Wfu4MxF3B8EDBpCpMnZY07xxRzeWh4tNiEALDMyDGRI1LotluYw1REPTG9xvc/MPEy5jsiY8JVK9Hf0KQiVPv/93/F6arDLieYm5OBgLoqb78o6VC+yULI974GS6/8ihFhrCe0DhaU/To8rCrPCGDF7e6j2J2yQTjCpelwaZzOT5l7KG32D16qojNhk4OzSfseOh8xabBQ9xeU2fzINA6Ayhd8aGsnMH4NI2Ch0LfzlMHs1mWx+HLlqIjNuRJaEM7wKs36mYxocS5W53Ci8+XaLzKeaLy63wDIEUuwA/Jgr7d0W1AzxFtUNZB9JvJ8YRTmchwcY79NdY7CbCFfAOBh8wcoXl9cyUpWM35EJTP32L1KrDmcCtJypjRuvJsSqWg2lZYmCJYvj2cEEBP/oWGALPqIFe15/po/df9bF5SolUBL4h/X9T2BHQW0oLJxWq18aobTup8Xll9ctSi36x1xfVqAZInneg/n8kr0nqHWm3gosS++rZINK0OCXQS1qTvWndncX/k5dSlo/nKkbAgPAqlwQHqvrMQQfWnvlFbj5zssdIxdGz1q6Gw7fMhXChnNe6wNnrFPcacuRa/HQVoP9etesf4+HleEVy6dr2Y8cbo91rQsjjReWHOrDeWkBvimgUG4fLpWn0oN0AlfCXE=,iv:0+fIg64VShCliH9f9qZfmuOJYsBcmxG3fHJfXfHESNU=,tag:eqO+bjMEAUWJ4MCQkyDMcg==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBvNXp6ODg0S2l5ZytZRHVH\nZGJhb2d2K3RkdHhzbk9vVW8xd0Ryd2cvZ0RNCkFpT294bXRCcHprSWV4cXNTSlFB\nRDBLSnRIZy9waGlWbzRDcDgxbkVaSVEKLS0tIHVlYWp2MmdBNlRaU2pONGVTSlBO\nUTFLekFjOXRnQVFjNEtxU1hwbzNZWE0Ko6g5wHP9pmQR8L25XLFyNf1FfFGhPhet\nk8B8rueKbHdDCrjR5H8t6H/y75Nc7PG2UKmVE6sRyNduYNmasX1hCw==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:GcNKpumu3v9qnCmBpV/k7MdJ7wfuxjyXuAj0CICWleITzU1whXhx2CGGdahiegarGT4yOPbLaD3/1dYNTpkXYqqfWuqlcD0G4Fidd+Yrk9dmDe1Lg4Xn7zyqZ4zRrGaa92lGMUVbwt+tDaBVekHZCqgcF0KIH2CVyV6q+XsUpVQ=,iv:p6mGYBWSt2b2Fe95gdqcgRsMMz2AMDfhYZwtjjUuaqg=,tag:zZfLdCHiHxkO8VSTq2iieg==,type:str]",
+		"version": "3.11.0"
+	}
+}

@@ -3,6 +3,25 @@
 All notable changes to ypi are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.0] - 2026-02-15
+
+### Added
+- **Notify-done extension** (`contrib/extensions/notify-done.ts`): background task completion notifications via sentinel files — injects messages into conversation when tasks finish, no polling needed
+- **LSP extension** (`contrib/extensions/lsp/`): Language Server Protocol integration for code intelligence (diagnostics, references, definitions, rename, hover, symbols)
+- **Persist-system-prompt extension** (`contrib/extensions/persist-system-prompt.ts`): saves effective system prompt to session files for debugging and reproducibility
+- **Auto-title extension** (`contrib/extensions/auto-title.ts`): automatic session title generation
+- **Cachebro extension** (`contrib/extensions/cachebro.ts`): intelligent file caching with diff-aware invalidation and token estimation
+- **Context window awareness**: SYSTEM_PROMPT.md now teaches agents about finite context budgets and how to manage them
+- Tests for notify-done and persist-system-prompt extensions
+
+### Changed
+- **AGENTS.md**: added sentinel/notify-done workflow pattern, background task instructions
+- **SYSTEM_PROMPT.md**: context window awareness guidance
+- **contrib/README.md**: updated with new extensions documentation
+
+### Fixed
+- Notify-done extension: block broadcast sentinels, use `steer` for busy agents, `display: true` for visibility
+
 ## [0.4.0] - 2026-02-13
 
 ### Added

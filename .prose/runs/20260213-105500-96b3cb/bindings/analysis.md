@@ -1,65 +1,14 @@
-# analysis
-
-kind: output
-
-source:
-```prose
-output analysis = session "Analyze results and decide"
-```
-
----
-
-## Experiment Results: pipe-vs-filename
-
-**Hypothesis:** Piping source to rlm_query as context produces better edits than telling the child the filename.
-
-### Raw Metrics
-
-| Metric | Condition A (pipe) | Condition B (filename) |
-|--------|-------------------|----------------------|
-| Time | 10s | 7s |
-| Parse OK | ✅ yes | ✅ yes |
-| Has --version flag | ✅ yes | ✅ yes |
-| Modified lines | 238 (+19) | 228 (+9) |
-| Functions preserved | ✅ yes | ✅ yes |
-| Diff lines | ~20 | ~16 |
-
-### Qualitative Analysis
-
-**Condition A (pipe — source as context):**
-- Added 19 lines — clean, well-commented `--version` block
-- Placed correctly after the shebang/header, before other logic
-- Used `BASH_SOURCE[0]` for robust path resolution
-- Added extra whitespace handling (`strip newline`)
-- **No regressions** — rest of script perfectly preserved
-
-**Condition B (filename — let child read):**
-- Added 10 lines — minimal, compact `--version` block
-- Also placed correctly (after the shared_sessions gate)
-- Used `dirname "$0"` for path resolution
-- **INTRODUCED A REGRESSION:** Removed `elif isinstance(content, list):` on line 199-200, replacing it with a bare `for part in content:`. This breaks the grep command's Python snippet — it would iterate over characters when `content` is a string instead of only iterating when it's a list.
-
-### Verdict
-
-**Hypothesis: SUPPORTED (weakly)**
-
-Condition A (pipe) produced a **correct, regression-free edit**. Condition B (filename) produced a working `--version` flag but **also introduced an unrelated regression** in the Python code within the grep handler.
-
-The likely explanation: when the child reads the file itself, it may truncate or selectively reproduce parts, introducing copy errors. When the source is piped as context, the child has the exact original text available and is more likely to reproduce it faithfully.
-
-However, this is **weak signal** from n=1. The regression in B could be a random LLM error. Key observations:
-
-1. **Speed:** B was 3s faster (7s vs 10s) — expected, since it can skip reading
-2. **Correctness:** A was more correct — no regressions
-3. **Minimality:** B was more minimal (+9 lines vs +19 lines)
-4. **Reliability:** A preserved the original code exactly; B did not
-
-### Recommendation
-
-**Keep the pipe pattern as the default for edit tasks.** The regression-free behavior is more valuable than the 3s speed improvement. When you need an agent to modify a file, piping the content gives it the exact source of truth rather than trusting it to read and reproduce faithfully.
-
-**Better experiment for next time:**
-- Run 3-5 trials per condition to distinguish signal from noise
-- Use a more complex edit task (the --version flag is too simple)
-- Measure with `shellcheck` for deeper quality analysis
-- Have a human judge score the diffs blindly
+{
+	"data": "ENC[AES256_GCM,data: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,iv:XBsVenE6GIzT+dI5Qs5fyOvjQ/hOlukhr/FnqjZkC88=,tag:MtezlZYS28Ul3uzwkB4Frw==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBBcTd6SXRXOE5yMHNmeUlr\ncytQWUtoTHQxZTdrcFg1V1lGUk5ZdUxwNTFzCjZVeXhUcTFaTHNKcVJrOHQyRTVL\nSzFRcTBaSTJaOHJnOEp0WFAzUXFMT2MKLS0tIE5Uc1dpZWlGall1eFp4dU5jY1hE\nQ0tFeEh4MTVYQzE5Y0EvKzhaaVorU0kKq7vdTSBUVDlyM131Q5BMIxYl/PWEIEEF\n8UbcQwwVYGHoEZodQ1IekxADfvIy5QMSdnF5Hd23JDOtI1Qcqjs62A==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:3T7nyRFZFCohkMXIB/rL1ERRmNjOS2ywbETZzZG28Ho0k9iM26cqKkVBCzi0QL4ZTpAevmfGIzb2oOAEj0W6XIg7oRk7t3k0fCmGyT8uGmFIWWA1sB9KDTNmdskVDTk4HE+0/bsNnTQcoDl6QodwRzA8O6WmuzxfDLY3dK1K62M=,iv:grXtlM9TuEThdEZSOLI5uKdGQf8Oxit8oTOjyxEvX4M=,tag:e8mQsDHxS5MvNqy8XsqoYQ==,type:str]",
+		"version": "3.11.0"
+	}
+}

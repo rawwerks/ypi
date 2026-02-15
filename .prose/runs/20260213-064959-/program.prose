@@ -1,62 +1,14 @@
-# check-upstream.prose
-# Verify ypi compatibility with latest upstream Pi release.
-#
-# Deterministic steps (version checks, test runs) use exec.
-# Reasoning steps (diagnosing failures, writing issues) use session.
-#
-# Run: prose run .prose/check-upstream.prose
-
-let known_good = exec "cat .pi-version 2>/dev/null || echo unknown"
-let installed = exec "pi --version 2>/dev/null || echo not-installed"
-let latest = exec "npm view @mariozechner/pi-coding-agent version"
-
-session "Report version state"
-  prompt: """
-    Versions:
-      Known-good: {known_good}
-      Installed:  {installed}
-      Latest npm: {latest}
-
-    If all three match, say "Already up to date" and we're done.
-    Otherwise, summarize what changed.
-  """
-
-if **the installed version is not the latest**:
-  exec "bun install -g @mariozechner/pi-coding-agent@{latest}"
-  let installed = exec "pi --version"
-
-# --- Run tests ---
-
-let unit = exec "make test-unit"
-  on-fail: "continue"
-
-let guardrails = exec "make test-guardrails"
-  on-fail: "continue"
-
-let extensions = exec "make test-extensions"
-  on-fail: "continue"
-
-if **all three tests passed**:
-  exec "echo {latest} > .pi-version"
-  session "Summarize success"
-    prompt: """
-      All tests pass with pi {latest}.
-      Updated .pi-version from {known_good} to {latest}.
-    """
-else:
-  session "Diagnose failures"
-    prompt: """
-      Pi {latest} breaks ypi. Last known-good: {known_good}.
-
-      Unit tests:
-      {unit}
-
-      Guardrail tests:
-      {guardrails}
-
-      Extension tests:
-      {extensions}
-
-      Identify what broke and why. Check if it's a ypi bug or
-      an upstream API change. Suggest a concrete fix.
-    """
+{
+	"data": "ENC[AES256_GCM,data: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,iv:Pe8Q8uVeRPGKjrkdBzfZ7SAJH2jeQYVSZL2aG2/1Txs=,tag:5Dbys3MFBv1KxDeoern2vQ==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBwRDFIbUhHY2NVTVE4K2Zl\nRVozblF0aVBrT1Qyd3pYVVRpRTNIUVA2STA0CmtYbkF3em5xdEcvbHBCbGlFVnZs\nVzU3YS9FcVJGV2RFRkwyTXVxcmJJTHcKLS0tIHBnQVN2aVMvdGFUWDV1Y0tGWXR3\nZkx5TmY3QkpaUUhpMk5YVCsxdS9XWWsKrUCMa8E6cP+b613/ewKg8m4mEBp+Vy4A\nDm6TARTAzoaJoAciOaLKTiP4bAKoa44o8r/XyVJBTiHe/G6pvYDqVQ==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:14Z",
+		"mac": "ENC[AES256_GCM,data:28R7TsMOs+q9h1qZz2Gmmshf5rxZuKauuhPJiM/jT4meug97j7MVMpou1krZkyL4psyI7DUzTQJqX2gzJ0Z5W3vdBJBoimC2l8FOIurr1tnekHjuuAp+YAUEAPnZn61qcLraVnnL5iU8m1glz9s1q2bavYzzBZds59q/Q4CU+Lw=,iv:92iEKEzWJtvARXHAJKCYchTX9HDlmiwIsN63ATrxxUQ=,tag:VkYpnP2S5VFv8fFl55zYSw==,type:str]",
+		"version": "3.11.0"
+	}
+}

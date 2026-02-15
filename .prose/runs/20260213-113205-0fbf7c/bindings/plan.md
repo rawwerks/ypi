@@ -1,49 +1,14 @@
-# plan
-
-kind: let
-
-source:
-```prose
-let plan = session: planner
-  prompt: "Analyze this insight and determine where it should be incorporated..."
-```
-
----
-
-## Insight Analysis: Symbolic Access to Prompts
-
-**INSIGHT:** Symbolic access to prompts: anything the agent needs to manipulate precisely should be a file, not just tokens in context. Even short prompts benefit from being accessible as files ($RLM_PROMPT_FILE), because agents can grep/sed/cat them programmatically instead of copying tokens from memory. This applies to data ($CONTEXT), prompts ($RLM_PROMPT_FILE), and code edits (hashline).
-
-## Current State Assessment
-
-This insight is **already well-incorporated** across the repo. It was added as Architectural Invariant #4 and is present in all key locations:
-
-### Where It Already Exists
-
-1. **SYSTEM_PROMPT.md (line 12):** `$RLM_PROMPT_FILE` is documented in Section 2 with guidance on when to use it (extracting exact strings, counting characters).
-
-2. **AGENTS.md (line 65):** Architectural Invariant #4 — "Symbolic access" — covers `$CONTEXT`, `$RLM_PROMPT_FILE`, and hashline. Tagged (T14d).
-
-3. **README.md (line 101):** Design principle #4 — mirrors the AGENTS.md invariant for external users.
-
-4. **rlm_query (lines 155-158):** Implementation — creates `$PROMPT_FILE`, writes the prompt to it, exports as `$RLM_PROMPT_FILE`.
-
-5. **tests/test_unit.sh (T14d):** Tests that `RLM_PROMPT_FILE` is set and contains the original prompt content.
-
-## Per-Location Recommendations
-
-1. **SYSTEM_PROMPT.md** → SKIP. Already has the $RLM_PROMPT_FILE guidance in Section 2. The current text is concise and well-placed.
-
-2. **AGENTS.md** → SKIP. Architectural Invariant #4 already captures this verbatim.
-
-3. **README.md** → SKIP. Design principle #4 already covers this.
-
-4. **tests/** → UPDATE. T14d tests that the file exists and has content, but doesn't test that an agent can actually *use* it programmatically (grep/sed). A stronger test would verify the file is readable and grep-able. However, this is a unit test with a mock pi — the current test is sufficient for the bash-level contract (file exists, has content). The actual "can grep it" property is trivially true if the file exists. **No new test needed.**
-
-5. **Code (rlm_query)** → SKIP. Already implements the feature (lines 155-158, 218).
-
-6. **CHANGELOG.md** → SKIP. No new changes to log.
-
-## Conclusion
-
-**No changes needed.** The insight is already fully incorporated across all layers: specification (SYSTEM_PROMPT.md), documentation (AGENTS.md, README.md), implementation (rlm_query), and tests (T14d). The repo is aligned with this principle.
+{
+	"data": "ENC[AES256_GCM,data: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,iv:tFs33vXLwjWxs22GSzFXozm3xaJDtqq2txYRLSEA550=,tag:095J0aOrrxIek9sp9MJ3Nw==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAvTm13ZDUvckpsa2ZqcVpt\nYUk1NDJjUzdjM3pFZ2pIMHFTUWV1RG1hVmtjCjV2OTZ2aHVQL09pV1pBQjFZUG5D\nd0JoV0hTcHJycWg3ck5melB5SVBtZmMKLS0tIDRFTE5XSUdmYTVOQ3pTc1ZtS3ZN\nMWlGY0Uzd0NiU2h2Y1p1dWJZM3hJR2cKxmvEQTiDiWyfYJ7uhXMbq0s47v+Yz5QJ\nPW4spMCSObHovZWPHMGjJ6aQNi/kllooTWVuhwQ9pw8Fx64QcbFo5A==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:4cwyW2cd2Ksp7lyZ1WcLA3SGKlnXUdnsf1n09DDc5R89ii8X8SqATS3Hn4L7k/zcsQbBVcVAqymDGPijBBldEzDwBAmfIsB/hKsFk9RRnGX2BRfYTNBShtouB//8dat42wJ1I2gPdsK8J9Lp5AtlyFx3cruwh0k0nn+jcNT5Fwc=,iv:mFaRltavlzZ06JL2JUlcihu/2SLJYv3t4TbbVoB8eMM=,tag:kboqINjsTO2KKZiNgAay4g==,type:str]",
+		"version": "3.11.0"
+	}
+}

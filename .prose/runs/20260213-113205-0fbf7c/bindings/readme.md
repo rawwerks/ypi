@@ -1,12 +1,14 @@
-# readme
-
-kind: let
-
-source:
-```prose
-readme = session "Update README.md (if planned)"
-```
-
----
-
-Skipped. README.md design principle #4 already covers this: "Symbolic access — Anything the agent needs to manipulate precisely is a file, not just tokens in context. $CONTEXT holds the data, $RLM_PROMPT_FILE holds the original prompt, and hashline provides line-addressed edits."
+{
+	"data": "ENC[AES256_GCM,data:0CY+iinQP2+tWClUrnE0SXDDgfCNySlQKOXV4D50ghVrXOglS0iUpcs+Sa2Uua25qOm3rHmJkaJwN/iJQ5nX64rVCKv5eH7OyoUx1dfpiYyt2WJ/vBvF6OudV5aUVPz+ZDbg54Gl1vhYSWqL4xZ0/GWRBjANEIjpt+bK/D8Kr6WOdUMQr5SnqzKoqHKW205BnpOLLeqFhA+04nT8khwVbn0h44NqDlKT20xXwVz9M0WE4coGTaghyT1LC0VuQR7LpcVWeAaYzo02d+pM4pX4l0C5WWdo+rWNcYZHKbTiKJpGrfy95m7CoOP6ZTEcmlczg6BWztq72ggT5H/kgWfgVfGHh8QJZCm3bkKx8feMaOA4GW9drNSbj3xb4ZYSDH3jLKm7PJL6YQ1CE8L4PXmzMiQTWC4TA3SeRun1K6rOocqZYZVRqEuxX75Zl9YOTpzw0H0XpXL9gRzldq5E808qUJ9ho+yXl2WVGwhlVtuMMBblkp3eNL4NGpdnhB4=,iv:uFyZa2kGA3Dmfr3HpB4RsB0UCQZG2qvclUsy9/lPHt8=,tag:6O4SCHUSfU91W7f5ebzv3Q==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB0U3EvVkNjbEFyOXBaeHJB\nMis3cXVscWIxUkgxUlhQdDZmaXBpcWNkT1dFCkljNmIzWS9pV1dNYW5walE0S2lM\nclA5Wmljc3RjWXVjUnY4akVqNDFDQlkKLS0tIGd6ME9EUE53aTJVd3M1bk9OTmJn\nOEJ6QzlTUjhuNVZyODlHcWJ3aGlaTmsKkIAu7o17ZzBi6a6iqQZlrC5MZ7MaL3WA\nbhgwPcT6CBhtDVKcHFRfThsrzOVWmj9GJ4lRtMQLgesrsybRZEkyCw==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:Zhjaw2a4VqLmieuaUZWd/AQC8GB6fM9SdksXSlIhfCF9afJszwrjOl2xhqD6WzxMnKNCO3PezeO4KuZOLgZ0RQZqgBbCAuxuU1pAxcFoMhV4DtR1N2Wk+UeC+K/ffKbkO2akzCM28KLmgmh9QCMV9McBvCvdmEK3gboI7/kxDZc=,iv:fNp4cs56uR+KXFrCZ1sTBEYzvUidl1HnIs+Yt4mGppU=,tag:WeG3ND+8KBCMdVCq5PwIzw==,type:str]",
+		"version": "3.11.0"
+	}
+}

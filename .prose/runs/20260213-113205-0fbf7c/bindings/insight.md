@@ -1,12 +1,14 @@
-# insight
-
-kind: input
-
-source:
-```prose
-input insight: "The insight to incorporate across the repo"
-```
-
----
-
-Symbolic access to prompts: anything the agent needs to manipulate precisely should be a file, not just tokens in context. Even short prompts benefit from being accessible as files ($RLM_PROMPT_FILE), because agents can grep/sed/cat them programmatically instead of copying tokens from memory. This applies to data ($CONTEXT), prompts ($RLM_PROMPT_FILE), and code edits (hashline).
+{
+	"data": "ENC[AES256_GCM,data:AIhlK77CobHWRYyc5zkh7Gg0OHhNXMVqAyrFxXt0zbeMF/gwhmu9Pc4y5Z5huM8S2jgD/zS/2pDtSsvXhybbMqL4iR0UdM0VCO7HIKJ9SIyyK6FFHP/1/ZLXuDJTeRwdBhB5myAVQnM9v7JQCBI41zZKIExWKenOrtPIj1FJcqV/0HAmY53ssbI9cLAqPZIXc9NOyU7E2ZAvlbNIN7ReWC4ZFUq/YCTuTXvND1TZdksftKmf6d0ASAtb89pJtTgBRf11ixLLQC+E8TWv24F+qemfc//dTaIAHha2Kr1ej4bCZIPGSiLCTAUF4isDK7ZSlceC2LPn5tWdbhABWRVkBvX+B6Nv9YLetOOhUcEXEzrVR1PvtS7ChhHNpQD2mPCrCc+VatjzEc8s3XTXmvNbyHdp0MpfgTYx//Rb2a5Z/Ag6nZjGMQNocmruWr5wahNLtzgN9pKFhN2lLl4wqWGiZxcCr+Q+WPJPLZm3hUp92FG7g9RpBnZwJB25Nos1srwHF50A+NKsuJc8Z0D4Vh6ZeGv1M49oeQBP+BllTVq2i/U/lPU3Slt3ja6x86tYfuzgPgmsHcrnlV/5hmzabQUUMHmQfJ9zRpsWcH0VIA6OZyu/LEG12ZNXgZDTSRVrLtuhsM3f2SGDZ4Eewm3rwQ==,iv:zG301h2qg5MP0wOodEUaky3fO3AUN7BN8GIBSIJ+dOs=,tag:mmdkd/j1snU4oifLX+Nzgg==,type:str]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA0cjkyN1QzamZsYkU2dlRH\nWk5LNGNHYStlQkZVcHc5MGhUOEkxY2xQTWlnCldCcm1OeE5lemZ0OVVKall4NDdz\neEtVYnJZZDFQb3pkMGNQckF3M054UU0KLS0tIFltc1FoK1drYm1QTmRCWnhoaHBO\ndnVkbzY2SWh5R2IwdDN3c2RucS9lcVEKFLWjJdYZArT/J86ssUl1/ByMiBIq6xge\nwaAPd4jwBjcdkNwXSqHKxKLmxzT6J6BCr4qIhha42NEG+XB+5dDJ8w==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-02-15T11:52:15Z",
+		"mac": "ENC[AES256_GCM,data:p3GFB2LpErc9Zx2c0vTdxMCF2Z+Nj6x881UEidNiBv6dlg8WSmAK2xsDxM0E3/x0cbVY3bwF1jE1APVz09+nbnUsIAFTiqdrD+0eH6ZaDfjurds/5Ho4d3h9bzKWcfu2VAXMGBbWnB+fsbqpUVcwcVSKajWcXaKBkUSVOpmaHsQ=,iv:PnQ4KIJ4b2IqF/Mx7F4j+dV1JWaRqXtzswMrU6BR8aM=,tag:p2QsMSAw3ON3o5orDHS1NA==,type:str]",
+		"version": "3.11.0"
+	}
+}
