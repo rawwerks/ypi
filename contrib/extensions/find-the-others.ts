@@ -25,8 +25,22 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { execSync } from "child_process";
-import { readFileSync, readlinkSync, statSync } from "fs";
+import { execSync, spawn } from "child_process";
+import {
+	readFileSync,
+	readlinkSync,
+	statSync,
+	readdirSync,
+	existsSync,
+	mkdirSync,
+	appendFileSync,
+	writeFileSync,
+	unlinkSync,
+	watchFile,
+	unwatchFile,
+} from "fs";
+import { join, basename } from "path";
+import { randomUUID } from "crypto";
 
 interface PeerInstance {
 	pid: number;
@@ -311,14 +325,492 @@ function formatJSON(forest: PeerTree[], peers: PeerInstance[]): object {
 	};
 }
 
+/**
+ * Find the latest session file in a directory.
+ * Session files are named: <timestamp>_<uuid>.jsonl
+ */
+function findLatestSession(sessionDir: string): string | null {
+	if (!existsSync(sessionDir)) return null;
+
+	const files = readdirSync(sessionDir)
+		.filter((f) => f.endsWith(".jsonl"))
+		.map((f) => ({
+			name: f,
+			path: join(sessionDir, f),
+			mtime: statSync(join(sessionDir, f)).mtime.getTime(),
+		}))
+		.sort((a, b) => b.mtime - a.mtime);
+
+	return files.length > 0 ? files[0].path : null;
+}
+
+/**
+ * Find a peer by PID or project name (fuzzy match).
+ */
+function findPeer(peers: PeerInstance[], target: string): PeerInstance | null {
+	// Filter out internal children
+	const agents = peers.filter((p) => !p.isInternalChild);
+
+	// Try PID match first
+	const pid = parseInt(target, 10);
+	if (!isNaN(pid)) {
+		const byPid = agents.find((p) => p.pid === pid);
+		if (byPid) return byPid;
+	}
+
+	// Try exact project name match
+	const exactMatch = agents.find((p) => p.project === target);
+	if (exactMatch) return exactMatch;
+
+	// Try fuzzy project match (case-insensitive contains)
+	const lower = target.toLowerCase();
+	const fuzzy = agents.filter((p) => p.project.toLowerCase().includes(lower));
+	if (fuzzy.length === 1) return fuzzy[0];
+
+	// Try cwd match
+	const cwdMatch = agents.find((p) => p.cwd === target || p.cwd.endsWith(`/${target}`));
+	if (cwdMatch) return cwdMatch;
+
+	return null;
+}
+
+interface ForkResult {
+	success: boolean;
+	sourceSession: string | null;
+	forkedSession: string | null;
+	forkedSessionId?: string;
+	sourceSessionId?: string;
+	peer: PeerInstance | null;
+	spawnedPid?: number;
+	error?: string;
+}
+
+/**
+ * Fork a peer's session context.
+ *
+ * @param target - PID or project name to identify the peer
+ * @param options - Fork options
+ * @returns Fork result with paths and status
+ */
+function forkPeerSession(
+	peers: PeerInstance[],
+	target: string,
+	options: {
+		outputDir?: string;
+		prompt?: string;
+		spawn?: boolean;
+		model?: string;
+		provider?: string;
+	} = {},
+): ForkResult {
+	const peer = findPeer(peers, target);
+	if (!peer) {
+		return {
+			success: false,
+			sourceSession: null,
+			forkedSession: null,
+			peer: null,
+			error: `No peer found matching "${target}". Use \`peers\` to list available instances.`,
+		};
+	}
+
+	if (!peer.sessionDir) {
+		return {
+			success: false,
+			sourceSession: null,
+			forkedSession: null,
+			peer,
+			error: `Peer ${peer.pid} (${peer.project}) has no session directory.`,
+		};
+	}
+
+	const sourceSession = findLatestSession(peer.sessionDir);
+	if (!sourceSession) {
+		return {
+			success: false,
+			sourceSession: null,
+			forkedSession: null,
+			peer,
+			error: `No session files found in ${peer.sessionDir}`,
+		};
+	}
+
+	// Generate new session with proper fork semantics
+	// - New session ID (not a copy of the original)
+	// - parentSession field pointing to source
+	// - Updated cwd if needed
+	const newSessionId = randomUUID();
+	const timestamp = new Date().toISOString();
+	const fileTimestamp = timestamp.replace(/[:.]/g, "-");
+	const forkName = `${fileTimestamp}_${newSessionId}.jsonl`;
+
+	// Use output dir or default to source peer's session dir
+	const outputDir = options.outputDir || peer.sessionDir;
+	if (!existsSync(outputDir)) {
+		mkdirSync(outputDir, { recursive: true });
+	}
+	const forkedSession = join(outputDir, forkName);
+
+	// Read source session and create forked version with new header
+	try {
+		const sourceContent = readFileSync(sourceSession, "utf-8");
+		const lines = sourceContent.trim().split("\n").filter(Boolean);
+
+		if (lines.length === 0) {
+			return {
+				success: false,
+				sourceSession,
+				forkedSession: null,
+				peer,
+				error: `Source session file is empty: ${sourceSession}`,
+			};
+		}
+
+		// Parse original header
+		const originalHeader = JSON.parse(lines[0]);
+		if (originalHeader.type !== "session") {
+			return {
+				success: false,
+				sourceSession,
+				forkedSession: null,
+				peer,
+				error: `Source session has no valid header: ${sourceSession}`,
+			};
+		}
+
+		// Create new header with:
+		// - New session ID (critical for avoiding conflicts)
+		// - parentSession pointing to source (for provenance tracking)
+		// - Preserved cwd (forked agent works in same directory)
+		// - Current timestamp
+		const newHeader = {
+			type: "session",
+			version: originalHeader.version || 3,
+			id: newSessionId,
+			timestamp,
+			cwd: peer.cwd,
+			parentSession: sourceSession,
+		};
+
+		// Write new header
+		appendFileSync(forkedSession, JSON.stringify(newHeader) + "\n");
+
+		// Copy all non-header entries (conversation history, model changes, etc.)
+		for (let i = 1; i < lines.length; i++) {
+			appendFileSync(forkedSession, lines[i] + "\n");
+		}
+
+		const result: ForkResult = {
+			success: true,
+			sourceSession,
+			forkedSession,
+			forkedSessionId: newSessionId,
+			sourceSessionId: originalHeader.id,
+			peer,
+		};
+
+		// Optionally spawn a new pi with the forked session
+		if (options.spawn && options.prompt) {
+			try {
+				const args = ["--session", forkedSession, "-p"];
+				if (options.provider) args.push("--provider", options.provider);
+				if (options.model) args.push("--model", options.model);
+				args.push(options.prompt);
+
+				const child = spawn("pi", args, {
+					cwd: peer.cwd,
+					detached: true,
+					stdio: "ignore",
+				});
+				child.unref();
+				result.spawnedPid = child.pid;
+			} catch (err) {
+				result.error = `Session forked but spawn failed: ${err}`;
+			}
+		}
+
+		return result;
+	} catch (err) {
+		return {
+			success: false,
+			sourceSession,
+			forkedSession: null,
+			peer,
+			error: `Failed to fork session: ${err}`,
+		};
+	}
+}
+
+// ============================================================================
+// PEER REGISTRY + MESSAGING
+//
+// Each agent registers itself at startup in /tmp/ypi-peers/{PID}.json.
+// The registry provides instant discovery without /proc scanning, and
+// each registration includes the agent's inbox path for messaging.
+//
+// Only agents launched with this extension are registered. Older/external
+// pi instances can still be found via /proc scanning (discoverPeers).
+//
+// Registry:
+//   - /tmp/ypi-peers/{PID}.json — one file per registered agent
+//   - Created on session_start, removed on session_shutdown
+//   - Stale entries (dead PIDs) cleaned on read
+//
+// Messaging:
+//   - Inbox: /tmp/ypi-peers/{PID}.inbox.jsonl (co-located with registration)
+//   - Sender looks up target in registry → writes to their inbox
+//   - Receiver polls inbox on turn_end → injects via sendUserMessage
+//   - Messages also auto-delivered via fs.watchFile for near-instant delivery
+// ============================================================================
+
+const PEERS_DIR = "/tmp/ypi-peers";
+const INBOX_SUFFIX = ".inbox.jsonl";
+
+/** Registration entry — what each agent writes to the registry */
+interface PeerRegistration {
+	pid: number;
+	project: string;
+	cwd: string;
+	type: "ypi" | "pi";
+	sessionDir: string | null;
+	traceId: string | null;
+	inboxPath: string;
+	startTime: number; // epoch ms
+	registeredAt: number; // epoch ms
+}
+
+interface PeerMessage {
+	id: string; // unique message ID
+	from_pid: number;
+	from_project: string;
+	to_pid: number;
+	timestamp: number; // epoch ms
+	message: string;
+	reply_to?: string; // message ID this is replying to
+}
+
+/** Ensure the peers directory exists */
+function ensurePeersDir(): void {
+	if (!existsSync(PEERS_DIR)) {
+		mkdirSync(PEERS_DIR, { recursive: true, mode: 0o777 });
+	}
+}
+
+/** Get the registration file path for a PID */
+function getRegistrationPath(pid: number): string {
+	return join(PEERS_DIR, `${pid}.json`);
+}
+
+/** Get the inbox path for a PID */
+function getInboxPath(pid: number): string {
+	return join(PEERS_DIR, `${pid}${INBOX_SUFFIX}`);
+}
+
+/** Register this agent in the peer registry */
+function registerSelf(pid: number, project: string, cwd: string, sessionDir: string | null, traceId: string | null): PeerRegistration {
+	ensurePeersDir();
+
+	const registration: PeerRegistration = {
+		pid,
+		project,
+		cwd,
+		type: process.env.RLM_SYSTEM_PROMPT ? "ypi" : "pi",
+		sessionDir,
+		traceId,
+		inboxPath: getInboxPath(pid),
+		startTime: Date.now(),
+		registeredAt: Date.now(),
+	};
+
+	writeFileSync(getRegistrationPath(pid), JSON.stringify(registration, null, 2));
+	// Create empty inbox
+	writeFileSync(getInboxPath(pid), "");
+
+	return registration;
+}
+
+/** Unregister this agent (cleanup) */
+function unregisterSelf(pid: number): void {
+	try {
+		const regPath = getRegistrationPath(pid);
+		if (existsSync(regPath)) unlinkSync(regPath);
+	} catch {}
+	try {
+		const inboxPath = getInboxPath(pid);
+		if (existsSync(inboxPath)) unlinkSync(inboxPath);
+	} catch {}
+}
+
+/** Check if a PID is alive */
+function isPidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** List all registered peers, cleaning up stale entries */
+function listRegisteredPeers(): PeerRegistration[] {
+	ensurePeersDir();
+	const peers: PeerRegistration[] = [];
+
+	try {
+		const files = readdirSync(PEERS_DIR).filter((f) => f.endsWith(".json"));
+		for (const file of files) {
+			try {
+				const content = readFileSync(join(PEERS_DIR, file), "utf-8");
+				const reg: PeerRegistration = JSON.parse(content);
+
+				if (isPidAlive(reg.pid)) {
+					peers.push(reg);
+				} else {
+					// Clean up stale registration + inbox
+					try { unlinkSync(join(PEERS_DIR, file)); } catch {}
+					try { unlinkSync(getInboxPath(reg.pid)); } catch {}
+				}
+			} catch {
+				// Skip malformed files
+			}
+		}
+	} catch {}
+
+	return peers;
+}
+
+/** Find a registered peer by PID or project name */
+function findRegisteredPeer(target: string): PeerRegistration | null {
+	const peers = listRegisteredPeers();
+
+	// Try PID match
+	const pid = parseInt(target, 10);
+	if (!isNaN(pid)) {
+		const byPid = peers.find((p) => p.pid === pid);
+		if (byPid) return byPid;
+	}
+
+	// Exact project name
+	const exact = peers.find((p) => p.project === target);
+	if (exact) return exact;
+
+	// Fuzzy project match
+	const lower = target.toLowerCase();
+	const fuzzy = peers.filter((p) => p.project.toLowerCase().includes(lower));
+	if (fuzzy.length === 1) return fuzzy[0];
+
+	// CWD match
+	const cwdMatch = peers.find((p) => p.cwd === target || p.cwd.endsWith(`/${target}`));
+	if (cwdMatch) return cwdMatch;
+
+	return null;
+}
+
+/** Read all messages from an inbox, then clear it (atomic read-and-clear) */
+function drainInbox(pid: number): PeerMessage[] {
+	const inboxPath = getInboxPath(pid);
+	if (!existsSync(inboxPath)) return [];
+
+	try {
+		const content = readFileSync(inboxPath, "utf-8");
+		const messages: PeerMessage[] = [];
+
+		for (const line of content.split("\n")) {
+			if (!line.trim()) continue;
+			try {
+				messages.push(JSON.parse(line));
+			} catch {
+				// skip malformed lines
+			}
+		}
+
+		// Clear inbox after reading
+		if (messages.length > 0) {
+			writeFileSync(inboxPath, "");
+		}
+
+		return messages;
+	} catch {
+		return [];
+	}
+}
+
+/** Send a message to another agent's inbox */
+function sendToPeerInbox(
+	fromPid: number,
+	fromProject: string,
+	toPid: number,
+	message: string,
+	replyTo?: string,
+): { success: boolean; messageId: string; error?: string } {
+	const messageId = randomUUID().slice(0, 8);
+
+	// First try to find target in registry
+	const reg = listRegisteredPeers().find((p) => p.pid === toPid);
+	const inboxPath = reg ? reg.inboxPath : getInboxPath(toPid);
+
+	// Verify target PID is alive
+	if (!isPidAlive(toPid)) {
+		return {
+			success: false,
+			messageId,
+			error: `Target PID ${toPid} is not running`,
+		};
+	}
+
+	// Verify target is registered (only registered peers can receive messages)
+	if (!reg) {
+		return {
+			success: false,
+			messageId,
+			error: `PID ${toPid} is running but not registered. Only agents with find-the-others extension can receive messages.`,
+		};
+	}
+
+	const peerMsg: PeerMessage = {
+		id: messageId,
+		from_pid: fromPid,
+		from_project: fromProject,
+		to_pid: toPid,
+		timestamp: Date.now(),
+		message,
+		reply_to: replyTo,
+	};
+
+	try {
+		appendFileSync(inboxPath, JSON.stringify(peerMsg) + "\n");
+		return { success: true, messageId };
+	} catch (err) {
+		return {
+			success: false,
+			messageId,
+			error: `Failed to write to inbox: ${err}`,
+		};
+	}
+}
+
+/** Format incoming messages for display to the agent */
+function formatIncomingMessage(msg: PeerMessage): string {
+	const replyClause = msg.reply_to ? ` (reply to ${msg.reply_to})` : "";
+	return (
+		`📨 Message from ${msg.from_project} (PID ${msg.from_pid})${replyClause}:\n` +
+		msg.message
+	);
+}
+
 export default function findTheOthers(pi: ExtensionAPI) {
 	function updateStatus(ctx: ExtensionContext) {
 		try {
 			const peers = discoverPeers();
 			const counts = countInstances(peers);
+			const registered = listRegisteredPeers();
 			const theme = ctx.ui.theme;
 			if (counts.total > 1) {
-				ctx.ui.setStatus("peers", theme.fg("dim", `👥 ${counts.total}`));
+				const regCount = registered.filter((r) => r.pid !== myPid).length;
+				const label = regCount > 0
+					? `👥 ${counts.total} (${regCount} 💬)`
+					: `👥 ${counts.total}`;
+				ctx.ui.setStatus("peers", theme.fg("dim", label));
 			} else {
 				ctx.ui.setStatus("peers", undefined);
 			}
@@ -383,6 +875,404 @@ export default function findTheOthers(pi: ExtensionAPI) {
 					: formatTree(forest, peers);
 
 			return { content: [{ type: "text", text: content }] };
+		},
+	});
+
+	// /fork-peer command
+	pi.registerCommand("fork-peer", {
+		description: "Fork a peer's session to continue from their context",
+		parameters: [
+			{ name: "target", description: "PID or project name of peer to fork" },
+			{ name: "prompt", description: "Initial prompt for the forked session (optional)" },
+		],
+		handler: async (args, ctx) => {
+			const [target, ...promptParts] = args.trim().split(/\s+/);
+			const prompt = promptParts.join(" ") || undefined;
+
+			if (!target) {
+				ctx.ui.notify("Usage: /fork-peer <pid|project> [prompt]", "error");
+				return;
+			}
+
+			const peers = discoverPeers();
+			const result = forkPeerSession(peers, target, { prompt, spawn: !!prompt });
+
+			if (!result.success) {
+				ctx.ui.notify(result.error || "Fork failed", "error");
+				return;
+			}
+
+			const lines = [
+				`✓ Forked session from ${result.peer?.project} (PID ${result.peer?.pid})`,
+				`  Source: ${result.sourceSession}`,
+				`  Forked: ${result.forkedSession}`,
+			];
+
+			if (result.spawnedPid) {
+				lines.push(`  Spawned new pi (PID ${result.spawnedPid})`);
+			} else if (!prompt) {
+				lines.push(`  To use: pi --session "${result.forkedSession}" -c "your prompt"`);
+			}
+
+			ctx.ui.notify(lines.join("\n"), "info");
+		},
+	});
+
+	// fork_peer tool for LLM
+	pi.registerTool({
+		name: "fork_peer",
+		label: "Fork peer session",
+		description:
+			"Fork another pi/ypi agent's session to create a new agent with their full conversation context. " +
+			"Use this to spawn a helper that continues from where another agent left off, or to branch " +
+			"an agent's work in a new direction. The forked session includes the complete history " +
+			"(messages, tool calls, thinking) from the source agent.",
+		parameters: Type.Object({
+			target: Type.String({
+				description: "PID or project name of the peer to fork (use `peers` tool to find available targets)",
+			}),
+			prompt: Type.Optional(
+				Type.String({
+					description: "Initial prompt for the forked session. If provided, spawns a new pi process.",
+				}),
+			),
+			spawn: Type.Optional(
+				Type.Boolean({
+					description: "Whether to spawn a new pi process with the forked session (default: true if prompt provided)",
+					default: true,
+				}),
+			),
+			model: Type.Optional(
+				Type.String({
+					description: "Model to use for the spawned pi (e.g., 'claude-sonnet-4-5')",
+				}),
+			),
+			provider: Type.Optional(
+				Type.String({
+					description: "Provider for the spawned pi (e.g., 'anthropic', 'openai')",
+				}),
+			),
+		}),
+		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			const peers = discoverPeers();
+			const shouldSpawn = params.spawn !== false && !!params.prompt;
+
+			const result = forkPeerSession(peers, params.target, {
+				prompt: params.prompt,
+				spawn: shouldSpawn,
+				model: params.model,
+				provider: params.provider,
+			});
+
+			if (!result.success) {
+				return {
+					content: [{ type: "text", text: `Error: ${result.error}` }],
+					isError: true,
+				};
+			}
+
+			const info: Record<string, unknown> = {
+				success: true,
+				source_peer: {
+					pid: result.peer?.pid,
+					project: result.peer?.project,
+					cwd: result.peer?.cwd,
+					type: result.peer?.type,
+				},
+				source_session: result.sourceSession,
+				source_session_id: result.sourceSessionId,
+				forked_session: result.forkedSession,
+				forked_session_id: result.forkedSessionId,
+			};
+
+			if (result.spawnedPid) {
+				info.spawned_pid = result.spawnedPid;
+				info.message = `Spawned new pi (PID ${result.spawnedPid}) with forked context from ${result.peer?.project}`;
+			} else {
+				info.message = `Session forked. Use: pi --session "${result.forkedSession}" -c "your prompt"`;
+			}
+
+			return {
+				content: [{ type: "text", text: JSON.stringify(info, null, 2) }],
+			};
+		},
+	});
+
+	// =========================================================================
+	// STEER-AS-RPC: Inter-agent messaging
+	// =========================================================================
+
+	const myPid = process.pid;
+	const myCwd = process.cwd();
+	const myProject = myCwd.split("/").pop() || myCwd;
+	const mySessionDir = process.env.RLM_SESSION_DIR || null;
+	const myTraceId = process.env.RLM_TRACE_ID || null;
+
+	// Register this agent in the peer registry
+	const myRegistration = registerSelf(myPid, myProject, myCwd, mySessionDir, myTraceId);
+
+	// Watch inbox for near-instant message delivery via fs.watchFile
+	let inboxWatcherCtx: ExtensionContext | null = null;
+	watchFile(myRegistration.inboxPath, { interval: 1000 }, (curr, prev) => {
+		if (curr.size > prev.size && inboxWatcherCtx) {
+			// New data written to inbox — deliver immediately
+			checkAndDeliverMessages(inboxWatcherCtx);
+		}
+	});
+
+	/** Check inbox and inject any new messages */
+	function checkAndDeliverMessages(ctx: ExtensionContext): void {
+		const messages = drainInbox(myPid);
+		if (messages.length === 0) return;
+
+		for (const msg of messages) {
+			const formatted = formatIncomingMessage(msg);
+			// Inject as a user message that triggers a turn
+			// NOTE: sendUserMessage is on pi (ExtensionAPI), not ctx (ExtensionContext)
+			pi.sendUserMessage(formatted, { deliverAs: "followUp" });
+		}
+
+		const count = messages.length;
+		const sources = [...new Set(messages.map((m) => m.from_project))].join(", ");
+		ctx.ui.notify(`📨 ${count} message${count > 1 ? "s" : ""} from: ${sources}`, "info");
+	}
+
+	// Poll for messages on turn_end (after agent finishes a response)
+	pi.on("turn_end", async (_event, ctx) => {
+		checkAndDeliverMessages(ctx);
+	});
+
+	// Capture context for the file watcher and check on session_start
+	pi.on("session_start", async (_event, ctx) => {
+		inboxWatcherCtx = ctx;
+		setTimeout(() => checkAndDeliverMessages(ctx), 1000);
+	});
+
+	// Unregister and clean up on shutdown
+	pi.on("session_shutdown", async () => {
+		unwatchFile(myRegistration.inboxPath);
+		unregisterSelf(myPid);
+	});
+
+	// /send command — interactive message sending
+	pi.registerCommand("send", {
+		description: "Send a message to another agent: /send <pid|project> <message>",
+		parameters: [
+			{ name: "target", description: "PID or project name of peer" },
+			{ name: "message", description: "Message to send" },
+		],
+		handler: async (args, ctx) => {
+			const match = args.trim().match(/^(\S+)\s+(.+)$/s);
+			if (!match) {
+				ctx.ui.notify("Usage: /send <pid|project> <message>", "error");
+				return;
+			}
+
+			const [, target, message] = match;
+
+			// Try registry first, fall back to /proc discovery
+			const regPeer = findRegisteredPeer(target);
+			if (regPeer) {
+				const result = sendToPeerInbox(myPid, myProject, regPeer.pid, message);
+				if (result.success) {
+					ctx.ui.notify(
+						`📤 Sent to ${regPeer.project} (PID ${regPeer.pid}) [msg:${result.messageId}]`,
+						"info",
+					);
+				} else {
+					ctx.ui.notify(`Failed: ${result.error}`, "error");
+				}
+				return;
+			}
+
+			// Fall back to /proc — but warn that messaging requires registration
+			const peers = discoverPeers();
+			const peer = findPeer(peers, target);
+			if (peer) {
+				ctx.ui.notify(
+					`Found ${peer.project} (PID ${peer.pid}) via /proc, but it's not registered.\n` +
+					`Only agents with find-the-others extension can receive messages.`,
+					"warning",
+				);
+			} else {
+				ctx.ui.notify(`No peer found matching "${target}"`, "error");
+			}
+		},
+	});
+
+	// /registry command — show registered peers
+	pi.registerCommand("registry", {
+		description: "Show all registered peers (agents with messaging enabled)",
+		handler: async (_args, ctx) => {
+			const peers = listRegisteredPeers();
+			if (peers.length === 0) {
+				ctx.ui.notify("📭 No registered peers", "info");
+				return;
+			}
+
+			const lines = peers.map((p) => {
+				const me = p.pid === myPid ? " ← YOU" : "";
+				const age = Math.round((Date.now() - p.startTime) / 60000);
+				return `  ${p.type} [${p.pid}] ${p.project} (${age}min)${me}`;
+			});
+			ctx.ui.notify(`Registered peers (${peers.length}):\n${lines.join("\n")}`, "info");
+		},
+	});
+
+	// /inbox command — check for messages manually
+	pi.registerCommand("inbox", {
+		description: "Check inbox for messages from other agents",
+		handler: async (_args, ctx) => {
+			const messages = drainInbox(myPid);
+			if (messages.length === 0) {
+				ctx.ui.notify("📭 No messages", "info");
+				return;
+			}
+
+			const lines = messages.map(
+				(m) => `📨 [${m.id}] from ${m.from_project} (${m.from_pid}): ${m.message.slice(0, 100)}`,
+			);
+			ctx.ui.notify(lines.join("\n"), "info");
+
+			// Also inject as messages
+			for (const msg of messages) {
+				const formatted = formatIncomingMessage(msg);
+				pi.sendUserMessage(formatted, { deliverAs: "followUp" });
+			}
+		},
+	});
+
+	// send_to_peer tool — LLM-callable
+	pi.registerTool({
+		name: "send_to_peer",
+		label: "Send message to peer",
+		description:
+			"Send a message to another running pi/ypi agent. The message will appear in their " +
+			"conversation as an incoming message. Use `peers` tool first to find the target's PID. " +
+			"The receiving agent will see the message after their current turn completes. " +
+			"Use reply_to to reference a previous message ID for threaded conversation.",
+		parameters: Type.Object({
+			target: Type.String({
+				description: "PID or project name of the peer to message (use `peers` to find)",
+			}),
+			message: Type.String({
+				description: "Message to send to the peer agent",
+			}),
+			reply_to: Type.Optional(
+				Type.String({
+					description: "Message ID to reply to (for threaded conversation)",
+				}),
+			),
+		}),
+		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			// Try registry first
+			const regPeer = findRegisteredPeer(params.target);
+			if (regPeer) {
+				const result = sendToPeerInbox(
+					myPid,
+					myProject,
+					regPeer.pid,
+					params.message,
+					params.reply_to,
+				);
+
+				if (!result.success) {
+					return {
+						content: [{ type: "text", text: `Error: ${result.error}` }],
+						isError: true,
+					};
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									success: true,
+									message_id: result.messageId,
+									to_pid: regPeer.pid,
+									to_project: regPeer.project,
+									registered: true,
+									message: `Message sent to ${regPeer.project} (PID ${regPeer.pid})`,
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
+
+			// Fall back to /proc discovery — but can't send without registration
+			const peers = discoverPeers();
+			const peer = findPeer(peers, params.target);
+
+			if (peer) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: Found ${peer.project} (PID ${peer.pid}) via /proc, but it's not registered. ` +
+								`Only agents with find-the-others extension can receive messages. ` +
+								`The target agent must be launched with this extension loaded.`,
+						},
+					],
+					isError: true,
+				};
+			}
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Error: No peer found matching "${params.target}". Use \`peers\` tool to list available instances.`,
+					},
+				],
+				isError: true,
+			};
+		},
+	});
+
+	// check_inbox tool — LLM-callable
+	pi.registerTool({
+		name: "check_inbox",
+		label: "Check inbox",
+		description:
+			"Check for messages from other pi/ypi agents. Returns any pending messages " +
+			"and clears the inbox. Messages are also automatically delivered after each turn.",
+		parameters: Type.Object({}),
+		execute: async (_toolCallId, _params, _signal, _onUpdate, _ctx) => {
+			const messages = drainInbox(myPid);
+
+			if (messages.length === 0) {
+				return {
+					content: [{ type: "text", text: "📭 No messages in inbox." }],
+				};
+			}
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								count: messages.length,
+								messages: messages.map((m) => ({
+									id: m.id,
+									from_pid: m.from_pid,
+									from_project: m.from_project,
+									timestamp: new Date(m.timestamp).toISOString(),
+									message: m.message,
+									reply_to: m.reply_to,
+								})),
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
 		},
 	});
 }

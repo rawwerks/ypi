@@ -175,6 +175,26 @@ else
     fail "CWD unreadable for $((PROC_COUNT - CWD_OK)) instances"
 fi
 
+# --- T9: Session files exist for peers ---
+echo ""
+echo "T9: Session files exist for at least one peer"
+HAS_SESSION=false
+for pid in $PROC_PIDS; do
+    session_dir=$(cat /proc/$pid/environ 2>/dev/null | tr '\0' '\n' | grep '^RLM_SESSION_DIR=' | cut -d= -f2 || true)
+    if [ -n "$session_dir" ] && [ -d "$session_dir" ]; then
+        sessions=$(ls "$session_dir"/*.jsonl 2>/dev/null | wc -l)
+        if [ "$sessions" -gt 0 ]; then
+            HAS_SESSION=true
+            echo "    PID $pid has $sessions session file(s) in $session_dir"
+        fi
+    fi
+done
+if [ "$HAS_SESSION" = true ]; then
+    pass "At least one peer has session files (fork-peer prerequisite met)"
+else
+    fail "No peers have session files (fork-peer won't work)"
+fi
+
 # --- Summary ---
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
