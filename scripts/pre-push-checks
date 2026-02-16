@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Shared pre-push quality gate used by local hooks and CI.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+echo "==> ypi pre-push checks"
+echo "repo: $ROOT_DIR"
+
+echo "==> make test-fast"
+make test-fast
+
+echo "==> make test-extensions"
+make test-extensions
+
+echo "✅ pre-push checks passed"

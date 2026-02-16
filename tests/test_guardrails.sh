@@ -272,14 +272,14 @@ echo "=== Temp File Cleanup ==="
 
 # G9: temp context file cleaned up after successful run
 # (This tests post-exec cleanup — currently broken because of `exec`)
-BEFORE=$(ls /tmp/rlm_ctx_d* 2>/dev/null | wc -l)
+BEFORE=$(find /tmp -maxdepth 1 -type f -name 'rlm_ctx_d*' 2>/dev/null | wc -l)
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
     RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
     RLM_PROVIDER=test RLM_MODEL=test \
     rlm_query "Cleanup test?"
 )
-AFTER=$(ls /tmp/rlm_ctx_d* 2>/dev/null | wc -l)
+AFTER=$(find /tmp -maxdepth 1 -type f -name 'rlm_ctx_d*' 2>/dev/null | wc -l)
 
 if grep -q 'rm -f "$CHILD_CONTEXT"' "$RLM_QUERY" 2>/dev/null; then
     # After implementing cleanup, AFTER should equal BEFORE
@@ -297,14 +297,14 @@ exit 1
 ERRPI
     chmod +x "$MOCK_BIN/pi"
 
-    BEFORE=$(ls /tmp/rlm_ctx_d* 2>/dev/null | wc -l)
+    BEFORE=$(find /tmp -maxdepth 1 -type f -name 'rlm_ctx_d*' 2>/dev/null | wc -l)
     OUTPUT=$(
         CONTEXT="$TEST_TMP/ctx.txt" \
         RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
         RLM_PROVIDER=test RLM_MODEL=test \
         rlm_query "Error cleanup test?" 2>&1 || true
     )
-    AFTER=$(ls /tmp/rlm_ctx_d* 2>/dev/null | wc -l)
+    AFTER=$(find /tmp -maxdepth 1 -type f -name 'rlm_ctx_d*' 2>/dev/null | wc -l)
     assert_eq "G10: temp cleaned after error" "$BEFORE" "$AFTER"
 
     # Restore normal mock

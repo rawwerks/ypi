@@ -173,9 +173,16 @@ jj git push                  # Push to GitHub
 ### Testing
 
 ```bash
-make test-fast    # 54 tests, no LLM calls, seconds
-make test-e2e     # Real LLM calls, costs ~$0.05
-make test         # Both
+make test-fast         # unit + guardrails
+make test-extensions   # extension compatibility with installed pi
+make pre-push-checks   # shared local/CI gate (recommended before push)
+make test-e2e          # real LLM calls, costs money
+make test              # all of the above
+```
+
+Install hooks once per clone to run checks automatically on git push:
+```bash
+make install-hooks
 ```
 
 **Before any change to `rlm_query`:** run `make test-fast`. After: run it again. `rlm_query` is a live dependency of the agent's own execution — breaking it breaks the agent.

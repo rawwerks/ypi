@@ -9,9 +9,11 @@ We use [semver](https://semver.org/):
 
 ## How to Release
 
-### 1. Make sure tests pass
+### 1. Run release preflight checks
 ```bash
-make test-fast
+make install-hooks      # once per clone
+make pre-push-checks    # same gate CI uses
+make check-upstream     # verify latest pi compatibility
 ```
 
 ### 2. Update version in package.json
@@ -51,3 +53,4 @@ jj new
 - **No auto-changelog tooling**: The jj log is the source of truth. We manually
   curate CHANGELOG.md to keep it human-readable.
 - **npm login**: Publishing requires `npm login` as `rawwerks`.
+- **Pre-push parity**: Local pre-push hook and CI both call `scripts/pre-push-checks`, so failures are caught before network push and re-verified in a clean runner.

@@ -27,36 +27,32 @@ if **the installed version is not the latest**:
 
 # --- Run tests ---
 
-let unit = exec "make test-unit"
+let pre_push_checks = exec "make pre-push-checks"
   on-fail: "continue"
 
-let guardrails = exec "make test-guardrails"
-  on-fail: "continue"
-
-let extensions = exec "make test-extensions"
-  on-fail: "continue"
-
-if **all three tests passed**:
+if **pre-push checks passed**:
   exec "echo {latest} > .pi-version"
   session "Summarize success"
     prompt: """
-      All tests pass with pi {latest}.
+      All checks pass with pi {latest}.
       Updated .pi-version from {known_good} to {latest}.
     """
 else:
+  # Run individual suites for clearer diagnosis
+  let unit = exec "make test-unit"
+    on-fail: "continue"
+let guardrails = exec "make test-guardrails"
+    on-fail: "continue"
+let extensions = exec "make test-extensions"
+    on-fail: "continue"
   session "Diagnose failures"
     prompt: """
       Pi {latest} breaks ypi. Last known-good: {known_good}.
-
+      Combined pre-push checks:
+      {pre_push_checks}
       Unit tests:
       {unit}
-
-      Guardrail tests:
       {guardrails}
-
-      Extension tests:
       {extensions}
-
-      Identify what broke and why. Check if it's a ypi bug or
       an upstream API change. Suggest a concrete fix.
     """

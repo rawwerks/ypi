@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-guardrails test-extensions test-e2e test-fast check-upstream clean
+.PHONY: test test-unit test-guardrails test-extensions test-e2e test-fast pre-push-checks check-upstream install-hooks clean
 
 # Fast tests — no LLM calls, uses mock pi
 test-unit:
@@ -26,9 +26,19 @@ test-e2e:
 # All tests
 test: test-fast test-extensions test-e2e
 
+# Shared local/CI gate
+pre-push-checks:
+	@scripts/pre-push-checks
+
+
 # Check compatibility with latest upstream Pi
 check-upstream:
 	@scripts/check-upstream
+
+# Install repo hooks (.githooks/*)
+install-hooks:
+	@scripts/install-hooks
+
 
 # Clean up temp files
 clean:

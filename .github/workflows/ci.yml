@@ -21,7 +21,5 @@ jobs:
           echo "pi: $(pi --version)"
           echo "bun: $(bun --version)"
 
-      - name: Run tests
-        run: |
-          make test-fast
-          make test-extensions
+      - name: Run pre-push parity checks
+        run: scripts/pre-push-checks

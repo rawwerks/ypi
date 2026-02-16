@@ -15,27 +15,20 @@ let diff = exec "jj diff --from 'description(\"release:\")' --stat"
 
 # --- Tests ---
 
-let unit = exec "make test-unit"
+let pre_push_checks = exec "make pre-push-checks"
   on-fail: "continue"
 
-let guardrails = exec "make test-guardrails"
-  on-fail: "continue"
-
-let extensions = exec "make test-extensions"
-  on-fail: "continue"
-
-if **any tests failed**:
+if **pre-push checks failed**:
   session "Report test failures and stop"
     prompt: """
-      Tests failed. Cannot release.
+      Pre-push checks failed. Cannot release.
 
-      Unit: {unit}
-      Guardrails: {guardrails}
-      Extensions: {extensions}
+      Output:
+      {pre_push_checks}
 
-      Diagnose what's broken.
+      Diagnose what's broken and propose the smallest safe fix.
     """
-  throw "Tests failed"
+  throw "Pre-push checks failed"
 
 # --- Decide version ---
 

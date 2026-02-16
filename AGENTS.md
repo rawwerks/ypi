@@ -112,6 +112,8 @@ ypi/
 │   └── test_e2e.sh        # Slow: real LLM calls, costs money
 ├── scripts/
 │   ├── check-upstream     # Test ypi against latest pi release
+│   ├── pre-push-checks    # Shared local/CI test gate (fast + extensions)
+│   ├── install-hooks      # Configure core.hooksPath and chmod hook scripts
 │   ├── encrypt-prose      # Encrypt .prose/runs/ and .prose/agents/ before push
 │   └── decrypt-prose      # Decrypt after clone/pull (symlink to encrypt-prose)
 ├── .prose/
@@ -120,7 +122,7 @@ ypi/
 │   └── agents/            # Persistent agent memory (private, encrypted before push)
 ├── .pi-version            # Last known-good pi version
 ├── .sops.yaml             # Age encryption rules
-├── .githooks/pre-commit   # Safety net for direct git usage
+├── .githooks/             # pre-commit + pre-push safety nets for direct git usage
 ├── .github/workflows/     # CI + upstream compat checks
 ├── contrib/extensions/    # Extensions not loaded by default (hashline, etc.)
 ├── experiments/           # Self-experiments (private, encrypted before push)
@@ -159,6 +161,16 @@ make test-unit          # Must pass — this is your safety net
 make test-fast          # unit + guardrails (seconds, free)
 make test-e2e           # real LLM calls (minutes, costs money)
 ```
+
+### Before pushing to GitHub:
+```bash
+make pre-push-checks       # same gate used by CI
+```
+Install local hooks once per clone:
+```bash
+make install-hooks
+```
+This sets `core.hooksPath=.githooks` so `pre-push` runs automatically.
 
 ### The recursive test:
 After modifying rlm_query, verify YOU still work:
@@ -252,12 +264,13 @@ testing between changes. One variable at a time.
 
 ## Bugs We've Found (and must not re-introduce)
 
-### 1. `[ ! -t 0 ]` vs `[ -p /dev/stdin ]`
-**Symptom**: Context is empty in sub-calls.
-**Cause**: Pi's bash tool runs in a subprocess where stdin is never a terminal.
-`[ ! -t 0 ]` always returns true, so the script reads empty stdin.
-**Fix**: `[ -p /dev/stdin ]` checks for an actual pipe.
-**Test**: T3, T4 verify pipe vs inherit behavior.
+### 1. False stdin detection in CI (`[ -p /dev/stdin ]` can be true with empty input)
+**Symptom**: Context is empty in sub-calls (T2/T4 failures in GitHub Actions).
+**Cause**: Some CI shells expose stdin as a pipe inside `$(...)` even when nothing is piped.
+`cat > "$CHILD_CONTEXT"` reads empty stdin and overwrites inherited context.
+**Fix**: Prefer explicit `RLM_STDIN`; when pipe-read is empty and `RLM_STDIN` is unset,
+fall back to inherited `CONTEXT`.
+**Test**: T2/T4 (inherit), T3 (real pipe), CI run parity via `scripts/pre-push-checks`.
 
 ### 2. System prompt as shell arg vs file path
 **Symptom**: Shell escaping nightmares, ARG_MAX errors.
