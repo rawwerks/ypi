@@ -81,6 +81,19 @@ if [ "$NEXT_DEPTH" -gt "$MAX_DEPTH" ]; then
     exit 1
 fi
 
+# ----------------------------------------------------------------------
+# Stale temp reaper — runs once per root invocation (depth 0 only)
+# Cleans up leaked files from crashed/killed processes (SIGKILL skips traps)
+# ----------------------------------------------------------------------
+if [ "$DEPTH" -eq 0 ]; then
+    (
+        # Delete rlm temp files older than 2 hours whose parent process is gone
+        find /tmp -maxdepth 1 -name 'rlm_*' -mmin +120 -delete 2>/dev/null
+        # Remove stale jj workspace directories older than 2 hours
+        find /tmp -maxdepth 1 -name 'rlm_ws_*' -type d -mmin +120 -exec rm -rf {} + 2>/dev/null
+    ) &
+fi
+
 PROVIDER="${RLM_PROVIDER:-}"
 MODEL="${RLM_MODEL:-}"
 SYSTEM_PROMPT_FILE="${RLM_SYSTEM_PROMPT:-}"
@@ -351,6 +364,9 @@ MSGJSON
 
         # Clean up temp files the parent skipped
         rm -f "$CHILD_CONTEXT" "$PROMPT_FILE" "${COMBINED_PROMPT:-}"
+        if [ -n "$JJ_WS_NAME" ]; then
+            jj workspace forget "$JJ_WS_NAME" 2>/dev/null || true
+        fi
     ) &
     ASYNC_PID=$!
     disown $ASYNC_PID 2>/dev/null || true
