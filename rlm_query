@@ -211,6 +211,10 @@ trap 'rlm_error "Interrupted" "Received signal" "Re-run the command"; exit 130' 
 # ----------------------------------------------------------------------
 # Detect piped stdin
 # ----------------------------------------------------------------------
+# Debug stdin detection (temporary)
+if [ -n "${RLM_DEBUG:-}" ]; then
+    echo "DEBUG_STDIN: -p=$([ -p /dev/stdin ] && echo true || echo false) ls=$(ls -la /dev/stdin 2>&1) RLM_STDIN=${RLM_STDIN:-}" >&2
+fi
 HAS_STDIN=false
 if [ -p /dev/stdin ]; then
     HAS_STDIN=true

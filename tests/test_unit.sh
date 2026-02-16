@@ -136,7 +136,8 @@ OUTPUT=$(
     RLM_PROVIDER=test-provider \
     RLM_MODEL=test-model \
     RLM_SYSTEM_PROMPT="$PROJECT_DIR/SYSTEM_PROMPT.md" \
-    rlm_query "What university?"
+    RLM_DEBUG=1 \
+    rlm_query "What university?" 2>&1
 )
 echo "DEBUG T2 OUTPUT: $OUTPUT"
 echo "DEBUG T2 ctx.txt contents: $(cat $TEST_TMP/ctx.txt)"
