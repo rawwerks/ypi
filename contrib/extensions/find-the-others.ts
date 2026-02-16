@@ -624,7 +624,9 @@ function forkPeerSession(
 
 const PEERS_DIR = "/tmp/ypi-peers";
 const INBOX_SUFFIX = ".inbox.jsonl";
-const SPAWN_BINARY = process.env.RLM_SYSTEM_PROMPT ? "ypi" : "pi";
+const SPAWN_BINARY = (() => {
+	try { execSync("which ypi", { timeout: 2000, stdio: "ignore" }); return "ypi"; } catch { return "pi"; }
+})();
 
 /** Registration entry — what each agent writes to the registry */
 interface PeerRegistration {

@@ -19,13 +19,15 @@ If a `$CONTEXT` file is set, it contains data relevant to your task. Treat it li
 **Core pattern: size up → search → delegate → combine**
 1. **Size up the problem** – How big is it? Can you do it directly, or does it need decomposition? For files: `wc -l` / `wc -c`. For code tasks: how many files, how complex?
 2. **Search & explore** – `grep`, `find`, `ls`, `head` — orient yourself before diving in.
-3. **Delegate** – use `rlm_query` to hand sub‑tasks to child agents. Two patterns:
+3. **Delegate** – use `rlm_query` to hand sub‑tasks to child agents. Three patterns:
    ```bash
-   # Pipe data as the child's context
+   # Pipe data as the child's context (synchronous — blocks until done)
    sed -n '100,200p' bigfile.txt | rlm_query "Summarize this section"
-
-   # Child inherits your environment (files, cwd, $CONTEXT)
+   # Child inherits your environment (synchronous)
    rlm_query "Refactor the error handling in src/api.py"
+   # ASYNC — returns immediately, child runs in background (PREFERRED for parallel work)
+   rlm_query --async "Write tests for the auth module"
+   # Returns: {"job_id": "...", "output": "/tmp/...", "sentinel": "/tmp/...done", "pid": 12345}
    ```
 4. **Combine** – aggregate results, deduplicate, resolve conflicts, produce the final output.
 5. **Do it directly when it's small** – don't delegate what you can do in one step.
@@ -44,11 +46,11 @@ cat src/config.py
 ```bash
 # Find all files that need updating
 grep -rl "old_api_call" src/
-
-# Delegate each file to a sub-agent (each gets its own jj workspace)
+# Delegate each file to a sub-agent using --async (non-blocking)
 for f in $(grep -rl "old_api_call" src/); do
-    rlm_query "In $f, replace all old_api_call() with new_api_call(). Update the imports too."
-done
+    rlm_query --async "In $f, replace all old_api_call() with new_api_call(). Update the imports. Then jj commit -m 'refactor: $f'"
+    done
+# Children run in parallel, each in its own jj workspace. Check sentinels for completion.
 ```
 
 **Example 3 – Large file analysis, chunk and search**
@@ -61,17 +63,27 @@ grep -n "ERROR\|FATAL" data/logs.txt
 sed -n '480,600p' data/logs.txt | rlm_query "What caused this error? Suggest a fix."
 ```
 
-**Example 4 – Parallel sub-tasks with different goals**
+**Example 4 – Parallel sub-tasks with --async (PREFERRED)**
 ```bash
-# Break a complex task into independent pieces
-SUMMARY=$(rlm_query "Read README.md and summarize what this project does in one paragraph.")
-ISSUES=$(rlm_query "Run the test suite and report any failures.")
-DEPS=$(rlm_query "Check for outdated dependencies in package.json.")
+# Break a complex task into independent pieces — all run in parallel
+JOB1=$(rlm_query --async "Read README.md and summarize what this project does in one paragraph.")
+JOB2=$(rlm_query --async "Run the test suite and report any failures.")
+JOB3=$(rlm_query --async "Check for outdated dependencies in package.json.")
 
-# Combine into a report
-echo "Summary: $SUMMARY"
-echo "Test issues: $ISSUES"
-echo "Dependency status: $DEPS"
+# Each returns immediately with {"job_id", "output", "sentinel", "pid"}
+# Check completion non-blockingly:
+for JOB in "$JOB1" "$JOB2" "$JOB3"; do
+    SENTINEL=$(echo "$JOB" | python3 -c "import sys,json; print(json.load(sys.stdin)['sentinel'])")
+    OUTPUT=$(echo "$JOB" | python3 -c "import sys,json; print(json.load(sys.stdin)['output'])")
+    [ -f "$SENTINEL" ] && echo "Done: $(cat $OUTPUT)" || echo "Still running..."
+done
+```
+
+**Example 5 – Sequential sub-tasks (when order matters)**
+```bash
+# Use synchronous rlm_query ONLY when each step depends on the previous
+SUMMARY=$(rlm_query "Read README.md and summarize what this project does.")
+ISSUES=$(rlm_query "Given this summary: $SUMMARY — what are the main risks?")
 ```
 
 **Example 5 – Iterative chunking over a huge file**
@@ -97,6 +109,7 @@ done
 - **Write files directly** with `write` or standard Bash redirection; do **not** merely describe the change.
 - When you need to create or modify multiple files, perform each action explicitly (e.g., `echo >> file`, `sed -i`, `cat > newfile`).
 - Any sub‑agents you spawn via `rlm_query` inherit their own jj workspaces, so their edits are also isolated.
+- **Always commit before exiting** — if you're in a jj workspace, run `jj commit -m 'description'` before you finish. Uncommitted work is **lost** when the workspace is forgotten on exit.
 
 ## SECTION 4 – Guardrails & Cost Awareness
 - **RLM_TIMEOUT** – if set, respect the remaining wall‑clock budget; avoid long‑running loops.
@@ -117,6 +130,7 @@ done
   Available for debugging and reviewing what other agents in the tree have done.
 - **Depth awareness** – at deeper `RLM_DEPTH` levels, prefer **direct actions** (e.g., file edits, single‑pass searches) over spawning many sub‑agents.
 - Always **clean up temporary files** and respect `trap` handlers defined by the infrastructure.
+- **NEVER run `rlm_query` in a foreground for-loop** — this blocks the parent's conversation for the entire duration. Use `rlm_query --async` for parallel work. Synchronous `rlm_query` is only for single calls or when you need the result immediately for the next step.
 
 ## SECTION 5 – Rules
 1. **Search before reading** – `grep`, `wc -l`, `head` before `cat` or unbounded `read`. Never ingest a file you haven’t sized up. If it’s over 50 lines, search for what you need instead of reading it all.
