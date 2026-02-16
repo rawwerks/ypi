@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# rlm_cleanup — Clean up stale rlm temp files and jj workspaces.
+#
+# Usage:
+#   rlm_cleanup              # dry-run: show what would be cleaned
+#   rlm_cleanup --force      # actually delete
+#   rlm_cleanup --age 60     # override age threshold (default: 120 min)
+#
+# What it cleans:
+#   1. /tmp/rlm_* temp files (context, prompts, cost, async output)
+#   2. /tmp/rlm_ws_* workspace directories
+#   3. Stale jj workspaces named rlm-* in the current repo (if in a jj repo)
+#
+# Safe by default: dry-run unless --force is passed.
+
+set -euo pipefail
+
+FORCE=false
+AGE_MIN=120  # minutes
+
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --force) FORCE=true; shift ;;
+        --age) AGE_MIN="$2"; shift 2 ;;
+        --help|-h)
+            sed -n '2,/^$/{ s/^# //; s/^#$//; p }' "$0"
+            exit 0
+            ;;
+        *) echo "Unknown flag: $1" >&2; exit 1 ;;
+    esac
+done
+
+echo "rlm_cleanup — age threshold: ${AGE_MIN}m, mode: $( $FORCE && echo 'FORCE' || echo 'dry-run' )"
+echo ""
+
+# --- 1. Temp files ---
+FILES=$(find /tmp -maxdepth 1 -name 'rlm_*' ! -type d -mmin +"$AGE_MIN" 2>/dev/null || true)
+FILE_COUNT=$(echo "$FILES" | grep -c . 2>/dev/null || echo 0)
+FILE_SIZE=$(echo "$FILES" | xargs du -ch 2>/dev/null | tail -1 | cut -f1 || echo "0")
+
+echo "Temp files older than ${AGE_MIN}m: $FILE_COUNT ($FILE_SIZE)"
+if [ "$FILE_COUNT" -gt 0 ]; then
+    if [ "$FORCE" = true ]; then
+        echo "$FILES" | xargs rm -f 2>/dev/null
+        echo "  ✓ deleted"
+    else
+        echo "  (use --force to delete)"
+    fi
+fi
+
+# --- 2. Workspace directories ---
+WS_DIRS=$(find /tmp -maxdepth 1 -name 'rlm_ws_*' -type d -mmin +"$AGE_MIN" 2>/dev/null || true)
+WS_COUNT=$(echo "$WS_DIRS" | grep -c . 2>/dev/null || echo 0)
+WS_SIZE=$(echo "$WS_DIRS" | xargs du -csh 2>/dev/null | tail -1 | cut -f1 || echo "0")
+
+echo "Workspace dirs older than ${AGE_MIN}m: $WS_COUNT ($WS_SIZE)"
+if [ "$WS_COUNT" -gt 0 ]; then
+    if [ "$FORCE" = true ]; then
+        echo "$WS_DIRS" | xargs rm -rf 2>/dev/null
+        echo "  ✓ deleted"
+    else
+        echo "  (use --force to delete)"
+    fi
+fi
+
+# --- 3. Stale jj workspaces (rlm-* pattern) ---
+if jj root &>/dev/null 2>&1; then
+    STALE_WS=$(jj workspace list 2>/dev/null | grep '^rlm-' | awk '{print $1}' | sed 's/:$//' || true)
+    STALE_WS_COUNT=$(echo "$STALE_WS" | grep -c . 2>/dev/null || echo 0)
+
+    echo "Stale jj workspaces (rlm-*): $STALE_WS_COUNT"
+    if [ "$STALE_WS_COUNT" -gt 0 ]; then
+        if [ "$FORCE" = true ]; then
+            echo "$STALE_WS" | while read -r ws; do
+                jj workspace forget "$ws" 2>/dev/null && echo "  ✓ forgot $ws" || echo "  ✗ failed: $ws"
+            done
+        else
+            echo "$STALE_WS" | while read -r ws; do echo "  $ws"; done
+            echo "  (use --force to forget)"
+        fi
+    fi
+else
+    echo "Stale jj workspaces: (not in a jj repo, skipped)"
+fi
+
+echo ""
+echo "Done."

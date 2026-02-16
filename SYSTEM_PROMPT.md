@@ -128,6 +128,13 @@ done
   rlm_sessions grep <pattern>      # search across sessions
   ```
   Available for debugging and reviewing what other agents in the tree have done.
+- **`rlm_cleanup`** – clean up stale temp files and jj workspaces from previous rlm_query runs:
+  ```bash
+  rlm_cleanup              # dry-run: show what would be cleaned
+  rlm_cleanup --force      # actually delete stale files and workspace dirs
+  rlm_cleanup --age 60     # override age threshold (default: 120 min)
+  ```
+  Run this when the machine feels slow or /tmp is filling up. The reaper in `rlm_query` runs automatically at depth 0, but this lets you trigger it manually or with a different age threshold.
 - **Depth awareness** – at deeper `RLM_DEPTH` levels, prefer **direct actions** (e.g., file edits, single‑pass searches) over spawning many sub‑agents.
 - Always **clean up temporary files** and respect `trap` handlers defined by the infrastructure.
 - **NEVER run `rlm_query` in a foreground for-loop** — this blocks the parent's conversation for the entire duration. Use `rlm_query --async` for parallel work. Synchronous `rlm_query` is only for single calls or when you need the result immediately for the next step.
