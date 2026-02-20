@@ -21,8 +21,9 @@ jobs:
         id: check
         run: scripts/check-upstream --install
 
-      - name: Create PR if version bumped
-        if: success()
+      - name: Create PR if version bumped (best effort)
+        if: steps.check.outcome == 'success'
+        continue-on-error: true
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -34,8 +35,8 @@ jobs:
           branch: ci/pi-compat
           delete-branch: true
 
-      - name: Open issue on failure
-        if: failure()
+      - name: Open issue on upstream check failure
+        if: steps.check.outcome == 'failure'
         uses: actions/github-script@v7
         with:
           script: |
