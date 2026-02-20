@@ -66,7 +66,7 @@ mkdir -p "$RLM_SESSION_DIR"
 
 # Build combined system prompt: SYSTEM_PROMPT.md + rlm_query source
 # This way the agent sees the full implementation, not just usage docs.
-COMBINED_PROMPT=$(mktemp /tmp/ypi_system_prompt_XXXXXX.md)
+COMBINED_PROMPT=$(mktemp "${TMPDIR:-/tmp}/ypi_system_prompt.XXXXXX")
 trap 'rm -f "$COMBINED_PROMPT"' EXIT
 
 cat "$SCRIPT_DIR/SYSTEM_PROMPT.md" > "$COMBINED_PROMPT"
@@ -121,4 +121,13 @@ while [[ $# -gt 0 ]]; do
 done
 # Launch Pi with the combined system prompt, passing all args through
 # User's own extensions (hashline, etc.) are discovered automatically by Pi.
-exec pi --system-prompt "$COMBINED_PROMPT" "${YPI_EXT_ARGS[@]}" "${PASS_ARGS[@]}"
+# Bash 3.2 (macOS) + `set -u` treats `${empty_array[@]}` as unbound.
+# Build argv incrementally so zero-length arrays stay zero-arg.
+PI_ARGS=(pi --system-prompt "$COMBINED_PROMPT")
+if [ ${#YPI_EXT_ARGS[@]} -gt 0 ]; then
+    PI_ARGS+=("${YPI_EXT_ARGS[@]}")
+fi
+if [ ${#PASS_ARGS[@]} -gt 0 ]; then
+    PI_ARGS+=("${PASS_ARGS[@]}")
+fi
+exec "${PI_ARGS[@]}"
