@@ -9,6 +9,10 @@
 
 set -euo pipefail
 
+# Detach from inherited stdin (e.g., git pre-push hook ref stream),
+# so rlm_query tests do not accidentally treat hook stdin as piped context.
+exec </dev/null
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RLM_QUERY="$PROJECT_DIR/rlm_query"
