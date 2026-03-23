@@ -94,6 +94,34 @@ if [ "$DEPTH" -eq 0 ]; then
     ) &
 fi
 
+# ----------------------------------------------------------------------
+# Resolve the `pi` binary — prefer YPI_PI_BIN set by ypi launcher,
+# then search node_modules, then fall back to PATH.
+# ----------------------------------------------------------------------
+PI_BIN="${YPI_PI_BIN:-}"
+if [ -z "$PI_BIN" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+    for candidate in \
+        "$SCRIPT_DIR/node_modules/.bin/pi" \
+        "$SCRIPT_DIR/../.bin/pi" \
+        "$SCRIPT_DIR/node_modules/@mariozechner/pi-coding-agent/dist/cli.js" \
+        "$SCRIPT_DIR/../@mariozechner/pi-coding-agent/dist/cli.js"; do
+        if [ -f "$candidate" ]; then
+            PI_BIN="$(readlink -f "$candidate")"
+            break
+        fi
+    done
+fi
+if [ -z "$PI_BIN" ]; then
+    PI_BIN="$(command -v pi 2>/dev/null || true)"
+fi
+if [ -z "$PI_BIN" ]; then
+    rlm_error "Cannot find pi binary" \
+        "Neither YPI_PI_BIN nor node_modules nor PATH contain the Pi coding agent" \
+        "Install with: npm install -g @mariozechner/pi-coding-agent"
+    exit 1
+fi
+
 PROVIDER="${RLM_PROVIDER:-}"
 MODEL="${RLM_MODEL:-}"
 SYSTEM_PROMPT_FILE="${RLM_SYSTEM_PROMPT:-}"
@@ -342,7 +370,7 @@ if [ "$ASYNC" = true ]; then
     ASYNC_SENTINEL="/tmp/${ASYNC_ID}.done"
 
     # Build the full command
-    CHILD_CMD=(pi "${CMD_ARGS[@]}" "$PROMPT")
+    CHILD_CMD=("$PI_BIN" "${CMD_ARGS[@]}" "$PROMPT")
     if [ -n "$TIMEOUT_CMD" ]; then
         CHILD_CMD=($TIMEOUT_CMD "${CHILD_CMD[@]}")
     fi
@@ -411,7 +439,7 @@ if [ "${RLM_JSON:-1}" != "0" ]; then
 
     PARSER="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/rlm_parse_json"
 
-    $TIMEOUT_CMD pi "${JSON_CMD_ARGS[@]}" "$PROMPT" 2>/dev/null | python3 "$PARSER" 3>"$COST_OUT"
+    $TIMEOUT_CMD "$PI_BIN" "${JSON_CMD_ARGS[@]}" "$PROMPT" 2>/dev/null | python3 "$PARSER" 3>"$COST_OUT"
     RC=${PIPESTATUS[0]}
 
     # Record cost if we got data
@@ -430,7 +458,7 @@ if [ "${RLM_JSON:-1}" != "0" ]; then
     fi
 else
     # Plain text mode (RLM_JSON=0): no cost tracking
-    $TIMEOUT_CMD pi "${CMD_ARGS[@]}" "$PROMPT"
+    $TIMEOUT_CMD "$PI_BIN" "${CMD_ARGS[@]}" "$PROMPT"
     RC=$?
 
     if [ -n "${PI_TRACE_FILE:-}" ]; then

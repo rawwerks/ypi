@@ -32,6 +32,37 @@ set -euo pipefail
 # Follow symlinks — npm install -g creates symlinks in .bin/ pointing to node_modules/ypi/
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
+# Resolve the `pi` binary from our dependency tree.
+# When installed via bun/pnpm, transitive dependency binaries (from
+# @mariozechner/pi-coding-agent) are NOT linked to the global bin dir.
+# We find pi in our own node_modules to avoid users needing a separate install
+# (or accidentally installing the wrong `pi` npm package — a math calculator).
+PI_BIN=""
+for candidate in \
+    "$SCRIPT_DIR/node_modules/.bin/pi" \
+    "$SCRIPT_DIR/../.bin/pi" \
+    "$SCRIPT_DIR/node_modules/@mariozechner/pi-coding-agent/dist/cli.js" \
+    "$SCRIPT_DIR/../@mariozechner/pi-coding-agent/dist/cli.js"; do
+    if [ -f "$candidate" ]; then
+        PI_BIN="$(readlink -f "$candidate")"
+        break
+    fi
+done
+
+# Fall back to PATH (works when pi-coding-agent is installed globally separately)
+if [ -z "$PI_BIN" ]; then
+    PI_BIN="$(command -v pi 2>/dev/null || true)"
+fi
+
+if [ -z "$PI_BIN" ]; then
+    echo "Error: Could not find the Pi coding agent binary." >&2
+    echo "Install it with: npm install -g @mariozechner/pi-coding-agent" >&2
+    echo "(Note: 'npm install -g pi' is a different package — a math calculator, not the coding agent)" >&2
+    exit 1
+fi
+
+export YPI_PI_BIN="$PI_BIN"
+
 # Put rlm_query on PATH so Pi's bash tool can find it
 export PATH="$SCRIPT_DIR:$PATH"
 
@@ -121,4 +152,4 @@ while [[ $# -gt 0 ]]; do
 done
 # Launch Pi with the combined system prompt, passing all args through
 # User's own extensions (hashline, etc.) are discovered automatically by Pi.
-exec pi --system-prompt "$COMBINED_PROMPT" "${YPI_EXT_ARGS[@]}" "${PASS_ARGS[@]}"
+exec "$PI_BIN" --system-prompt "$COMBINED_PROMPT" "${YPI_EXT_ARGS[@]}" "${PASS_ARGS[@]}"
