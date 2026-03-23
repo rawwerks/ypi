@@ -96,7 +96,7 @@ echo ""
 echo "=== T2: Extension loads without errors ==="
 
 if command -v pi &>/dev/null; then
-  LOAD_STDERR=$(mktemp /tmp/cachebro_test_XXXXXX.txt)
+  LOAD_STDERR=$(mktemp "${TMPDIR:-/tmp}/cachebro_test.txt.XXXXXX")
   CLEANUP_FILES+=("$LOAD_STDERR" "${LOAD_STDERR}.stdout")
 
   echo "test" | timeout 15 pi -p --no-session --no-extensions -e "$EXT" "Say ok" \
@@ -113,7 +113,7 @@ fi
 echo ""
 echo "=== T3: Hashing correctness ==="
 
-TMP_DIR=$(mktemp -d /tmp/cachebro_test_XXXXXX)
+TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cachebro_test.XXXXXX")
 CLEANUP_FILES+=("$TMP_DIR")
 
 echo "hello world" > "$TMP_DIR/test.txt"
@@ -261,7 +261,7 @@ if [ "$RUN_E2E" = true ]; then
     echo ""
     echo "=== T9: Cache hit on second read (pi $PI_VERSION) ==="
 
-    E2E_DIR=$(mktemp -d /tmp/cachebro_e2e_XXXXXX)
+    E2E_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cachebro_e2e.XXXXXX")
     CLEANUP_FILES+=("$E2E_DIR")
 
     cat > "$E2E_DIR/example.ts" << 'TSEOF'

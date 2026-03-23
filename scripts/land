@@ -37,7 +37,7 @@ echo "==> step 4/5: show CI status"
 
 if [ "$AGENT_CHECK" = true ] && command -v ypi >/dev/null 2>&1; then
   echo "==> step 5/5: agent audit"
-  SNAP=$(mktemp /tmp/ypi_land_audit_XXXXXX.txt)
+  SNAP=$(mktemp "${TMPDIR:-/tmp}/ypi_land_audit.XXXXXX")
   trap 'rm -f "$SNAP"' EXIT
 
   {

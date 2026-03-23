@@ -66,7 +66,7 @@ echo ""
 
 # ─── Generate a test-specific extension with our unique prefix ────────────
 
-TEST_EXTENSION=$(mktemp /tmp/ndtest_ext_XXXXXX.ts)
+TEST_EXTENSION=$(mktemp "${TMPDIR:-/tmp}/ndtest_ext.ts.XXXXXX")
 CLEANUP_FILES+=("$TEST_EXTENSION")
 
 cat > "$TEST_EXTENSION" << EXTEOF
@@ -170,7 +170,7 @@ tmux new-session -d -s "$TMUX_SESSION" -x 120 -y 40
 
 echo "--- Test 1: Idle agent woken by sentinel ---"
 
-SESSION_1=$(mktemp /tmp/ndtest_session_XXXXXX.jsonl)
+SESSION_1=$(mktemp "${TMPDIR:-/tmp}/ndtest_session.jsonl.XXXXXX")
 CLEANUP_FILES+=("$SESSION_1")
 
 start_pi_interactive "idle" "$SESSION_1"
@@ -226,7 +226,7 @@ tmux send-keys -t "$TMUX_SESSION:idle" "/exit" Enter 2>/dev/null || true
 echo ""
 echo "--- Test 2: Busy agent gets sentinel as steer ---"
 
-SESSION_2=$(mktemp /tmp/ndtest_session_XXXXXX.jsonl)
+SESSION_2=$(mktemp "${TMPDIR:-/tmp}/ndtest_session.jsonl.XXXXXX")
 CLEANUP_FILES+=("$SESSION_2")
 
 start_pi_interactive "busy" "$SESSION_2"
@@ -269,7 +269,7 @@ tmux send-keys -t "$TMUX_SESSION:busy" "/exit" Enter 2>/dev/null || true
 echo ""
 echo "--- Test 3: Multiple sentinels ---"
 
-SESSION_3=$(mktemp /tmp/ndtest_session_XXXXXX.jsonl)
+SESSION_3=$(mktemp "${TMPDIR:-/tmp}/ndtest_session.jsonl.XXXXXX")
 CLEANUP_FILES+=("$SESSION_3")
 
 start_pi_interactive "multi" "$SESSION_3"
@@ -312,7 +312,7 @@ tmux send-keys -t "$TMUX_SESSION:multi" "/exit" Enter 2>/dev/null || true
 echo "--- T4: Broadcast sentinel blocked ---"
 
 # Generate a test extension that has instance ID filtering + unique prefix
-TEST_EXT_4=$(mktemp /tmp/ndtest_ext4_XXXXXX.ts)
+TEST_EXT_4=$(mktemp "${TMPDIR:-/tmp}/ndtest_ext4.ts.XXXXXX")
 CLEANUP_FILES+=("$TEST_EXT_4")
 TEST_PREFIX_4="ndtest4-${TEST_ID}-"
 
@@ -365,7 +365,7 @@ export default function (pi: ExtensionAPI) {
     });
 }
 EXT4EOF
-SESSION_4=$(mktemp /tmp/ndtest_session_XXXXXX.jsonl)
+SESSION_4=$(mktemp "${TMPDIR:-/tmp}/ndtest_session.jsonl.XXXXXX")
 CLEANUP_FILES+=("$SESSION_4" "/tmp/ndtest4-instance-${TEST_ID}.txt")
 tmux new-window -t "$TMUX_SESSION" -n broadcast
 tmux send-keys -t "$TMUX_SESSION:broadcast" "pi -e $TEST_EXT_4 --no-extensions --session $SESSION_4" Enter
@@ -450,8 +450,8 @@ echo "--- T5: Cross-instance isolation ---"
 #   - Neither receives it (blocked and deleted)
 
 TEST_PREFIX_5="ndtest5-${TEST_ID}-"
-TEST_EXT_5A=$(mktemp /tmp/ndtest_ext5a_XXXXXX.ts)
-TEST_EXT_5B=$(mktemp /tmp/ndtest_ext5b_XXXXXX.ts)
+TEST_EXT_5A=$(mktemp "${TMPDIR:-/tmp}/ndtest_ext5a.ts.XXXXXX")
+TEST_EXT_5B=$(mktemp "${TMPDIR:-/tmp}/ndtest_ext5b.ts.XXXXXX")
 CLEANUP_FILES+=("$TEST_EXT_5A" "$TEST_EXT_5B")
 
 for WHICH in A B; do
@@ -504,8 +504,8 @@ export default function (pi: ExtensionAPI) {
 EXT5EOF
 done
 
-SESSION_5A=$(mktemp /tmp/ndtest_session5a_XXXXXX.jsonl)
-SESSION_5B=$(mktemp /tmp/ndtest_session5b_XXXXXX.jsonl)
+SESSION_5A=$(mktemp "${TMPDIR:-/tmp}/ndtest_session5a.jsonl.XXXXXX")
+SESSION_5B=$(mktemp "${TMPDIR:-/tmp}/ndtest_session5b.jsonl.XXXXXX")
 CLEANUP_FILES+=("$SESSION_5A" "$SESSION_5B" "/tmp/ndtest5-instance-${TEST_ID}-A.txt" "/tmp/ndtest5-instance-${TEST_ID}-B.txt")
 
 # Start both instances

@@ -267,7 +267,7 @@ if [ "$E2E" = true ]; then
     EXT_PATH="$SCRIPT_DIR/../extensions/find-the-others.ts"
 
     # Create a temporary working directory
-    TEST_DIR=$(mktemp -d /tmp/steer-test-XXXXXX)
+    TEST_DIR=$(mktemp -d "${TMPDIR:-/tmp}/steer-test.XXXXXX")
     CLEANUP_FILES+=("$TEST_DIR")
 
     # Helper: get the node/pi child process of a tmux session

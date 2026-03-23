@@ -84,7 +84,7 @@ if [ "$RUN_E2E" = true ]; then
   echo "=== T4: System prompt persisted to session file ==="
 
   # Start a pi session with our extension, send one message, exit
-  SESSION_DIR=$(mktemp -d /tmp/psp-test-XXXXXX)
+  SESSION_DIR=$(mktemp -d "${TMPDIR:-/tmp}/psp-test.XXXXXX")
   SESSION_FILE="$SESSION_DIR/test-session.jsonl"
 
   # Use pi with a session file so we can inspect it

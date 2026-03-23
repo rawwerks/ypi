@@ -74,7 +74,7 @@ assert_exit_code() {
 
 # Create a mock `pi` that just echoes its args and env, so we can test
 # rlm_query's logic without hitting a real LLM.
-MOCK_BIN=$(mktemp -d /tmp/rlm_test_bin_XXXXXX)
+MOCK_BIN=$(mktemp -d "${TMPDIR:-/tmp}/rlm_test_bin.XXXXXX")
 cat > "$MOCK_BIN/pi" << 'MOCK_PI'
 #!/bin/bash
 # Mock pi: dump args and key env vars as JSON-ish output for test assertions
@@ -112,7 +112,7 @@ export RLM_JSON=0
 
 
 # Temp dir for test artifacts
-TEST_TMP=$(mktemp -d /tmp/rlm_test_XXXXXX)
+TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/rlm_test.XXXXXX")
 trap 'rm -rf "$TEST_TMP" "$MOCK_BIN"' EXIT
 
 # ─── Test Group: Basic Invocation ─────────────────────────────────────────
