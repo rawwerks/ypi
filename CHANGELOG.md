@@ -3,6 +3,12 @@
 All notable changes to ypi are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.1] - 2026-03-23
+
+### Fixed
+- **macOS mktemp compatibility**: BSD `mktemp` does not allow characters after the `XXXXXX` template suffix — moved `XXXXXX` to end of all templates and use `${TMPDIR:-/tmp}` for portable temp directory resolution
+- **Bash 3.2 unbound variable crash**: empty array expansion under `set -u` fails on macOS default bash — build argv incrementally with length checks in `ypi` launcher
+
 ## [0.5.0] - 2026-02-15
 
 ### Added

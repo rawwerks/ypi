@@ -1,6 +1,6 @@
 {
   "name": "ypi",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "ypi — a recursive coding agent. Pi that can call itself via rlm_query.",
   "license": "MIT",
   "author": "Raymond Weitekamp",
