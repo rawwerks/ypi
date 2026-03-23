@@ -139,7 +139,7 @@ fi
 
 # Initialize cost file if budget is set but no file exists yet
 if [ -n "${RLM_BUDGET:-}" ] && [ -z "${RLM_COST_FILE:-}" ]; then
-    export RLM_COST_FILE=$(mktemp /tmp/rlm_cost_XXXXXX.jsonl)
+    export RLM_COST_FILE=$(mktemp "${TMPDIR:-/tmp}/rlm_cost.XXXXXX")
 fi
 
 # ----------------------------------------------------------------------
@@ -171,12 +171,12 @@ fi
 # ----------------------------------------------------------------------
 # Temporary child context file
 # ----------------------------------------------------------------------
-CHILD_CONTEXT=$(mktemp /tmp/rlm_ctx_d${NEXT_DEPTH}_XXXXXX.txt)
+CHILD_CONTEXT=$(mktemp "${TMPDIR:-/tmp}/rlm_ctx_d${NEXT_DEPTH}.XXXXXX")
 COMBINED_PROMPT=""
 
 # Write prompt to a file for symbolic access — agents can grep/sed the original
 # question instead of relying on in-context token copying.
-PROMPT_FILE=$(mktemp /tmp/rlm_prompt_d${NEXT_DEPTH}_XXXXXX.txt)
+PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/rlm_prompt_d${NEXT_DEPTH}.XXXXXX")
 echo "$PROMPT" > "$PROMPT_FILE"
 
 # ----------------------------------------------------------------------
@@ -188,7 +188,7 @@ if [ "${RLM_JJ:-1}" != "0" ] \
    && command -v jj &>/dev/null \
    && jj root &>/dev/null 2>&1; then
     JJ_WS_NAME="rlm-d${NEXT_DEPTH}-$$"
-    JJ_WORKSPACE=$(mktemp -d /tmp/rlm_ws_d${NEXT_DEPTH}_XXXXXX)
+    JJ_WORKSPACE=$(mktemp -d "${TMPDIR:-/tmp}/rlm_ws_d${NEXT_DEPTH}.XXXXXX")
     if ! jj workspace add --name "$JJ_WS_NAME" "$JJ_WORKSPACE" &>/dev/null; then
         JJ_WORKSPACE=""
         JJ_WS_NAME=""
@@ -297,7 +297,7 @@ fi
 # Build combined system prompt with rlm_query source embedded
 COMBINED_PROMPT=""
 if [ -n "$SYSTEM_PROMPT_FILE" ] && [ -f "$SYSTEM_PROMPT_FILE" ]; then
-    COMBINED_PROMPT=$(mktemp /tmp/rlm_system_prompt_XXXXXX.md)
+    COMBINED_PROMPT=$(mktemp "${TMPDIR:-/tmp}/rlm_system_prompt.XXXXXX")
     cat "$SYSTEM_PROMPT_FILE" > "$COMBINED_PROMPT"
     SELF_SOURCE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/rlm_query"
     if [ -f "$SELF_SOURCE" ]; then
@@ -389,7 +389,7 @@ fi
 # Run child Pi — JSON mode (default) or plain text
 # JSON mode streams text to stdout and captures cost via fd 3.
 # ----------------------------------------------------------------------
-COST_OUT=$(mktemp /tmp/rlm_cost_out_XXXXXX.json)
+COST_OUT=$(mktemp "${TMPDIR:-/tmp}/rlm_cost_out.XXXXXX")
 trap '{
     rm -f "$CHILD_CONTEXT" "$PROMPT_FILE"
     rm -f "${COMBINED_PROMPT:-}"

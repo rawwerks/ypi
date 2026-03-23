@@ -96,7 +96,7 @@ echo ""
 echo "T3-T6: Fork session and verify structure"
 
 # Create a test output directory
-TEST_OUTPUT_DIR=$(mktemp -d /tmp/fork_test_XXXXXX)
+TEST_OUTPUT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fork_test.XXXXXX")
 CLEANUP_FILES+=("$TEST_OUTPUT_DIR")
 
 # We need to invoke the fork logic. Since we can't directly call the TS function,

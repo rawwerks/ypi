@@ -87,7 +87,7 @@ echo ""
 echo "=== T2: Extension loads without errors ==="
 
 if command -v pi &>/dev/null; then
-  LOAD_STDERR=$(mktemp /tmp/at_test_XXXXXX.txt)
+  LOAD_STDERR=$(mktemp "${TMPDIR:-/tmp}/at_test.txt.XXXXXX")
   CLEANUP_FILES+=("$LOAD_STDERR" "${LOAD_STDERR}.stdout")
 
   # Load with disable=1 so it doesn't try to summarize during test
@@ -142,8 +142,8 @@ if [ "$RUN_E2E" = true ]; then
     echo "=== T4: Title set after initial turns (pi $PI_VERSION) ==="
 
     TMUX_SESSION="at-test-$$"
-    E2E_DIR=$(mktemp -d /tmp/at_e2e_XXXXXX)
-    DEBUG_LOG=$(mktemp /tmp/at_debug_XXXXXX.log)
+    E2E_DIR=$(mktemp -d "${TMPDIR:-/tmp}/at_e2e.XXXXXX")
+    DEBUG_LOG=$(mktemp "${TMPDIR:-/tmp}/at_debug.log.XXXXXX")
     CLEANUP_FILES+=("$E2E_DIR" "$DEBUG_LOG")
 
     # Create a tmux session for the test

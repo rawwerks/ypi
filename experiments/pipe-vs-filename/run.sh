@@ -34,7 +34,7 @@ cd "$REPO_DIR"
 cp "$TARGET_FILE" "$RESULTS_DIR/original.sh"
 
 # Create a working copy so both conditions edit independently
-WORK_COPY=$(mktemp /tmp/rlm_sessions_${CONDITION}_XXXXXX.sh)
+WORK_COPY=$(mktemp "${TMPDIR:-/tmp}/rlm_sessions_${CONDITION}.XXXXXX")
 cp "$TARGET_FILE" "$WORK_COPY"
 trap 'rm -f "$WORK_COPY"' EXIT
 

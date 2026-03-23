@@ -41,7 +41,7 @@ should_run() {
 }
 
 # Temp dir for test artifacts
-TEST_TMP=$(mktemp -d /tmp/rlm_e2e_XXXXXX)
+TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/rlm_e2e.XXXXXX")
 export PI_TRACE_FILE="$TEST_TMP/trace.log"
 trap 'rm -rf "$TEST_TMP"' EXIT
 

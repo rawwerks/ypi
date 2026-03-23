@@ -43,7 +43,7 @@ assert_file_not_exists() {
 
 # ─── Mock pi ──────────────────────────────────────────────────────────────
 
-MOCK_BIN=$(mktemp -d /tmp/rlm_test_bin_XXXXXX)
+MOCK_BIN=$(mktemp -d "${TMPDIR:-/tmp}/rlm_test_bin.XXXXXX")
 cat > "$MOCK_BIN/pi" << 'MOCK_PI'
 #!/bin/bash
 echo "MOCK_PI_CALLED"
@@ -77,7 +77,7 @@ unset RLM_EXTENSIONS RLM_CHILD_EXTENSIONS RLM_HASHLINE RLM_JJ RLM_JSON RLM_STDIN
 # Disable JSON mode in guardrail tests — mock pi doesn't output JSON
 export RLM_JSON=0
 
-TEST_TMP=$(mktemp -d /tmp/rlm_test_XXXXXX)
+TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/rlm_test.XXXXXX")
 cat > "$TEST_TMP/ctx.txt" << 'EOF'
 Test context for guardrail tests.
 EOF
@@ -867,7 +867,7 @@ OUTPUT=$(
 assert_contains "G39: no budget succeeds" "MOCK_PI_CALLED" "$OUTPUT"
 
 # G40: budget set but no spend yet — call proceeds
-COST_FILE=$(mktemp /tmp/rlm_cost_test_XXXXXX.jsonl)
+COST_FILE=$(mktemp "${TMPDIR:-/tmp}/rlm_cost_test.jsonl.XXXXXX")
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
     RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
@@ -881,7 +881,7 @@ assert_contains "G40: budget set, no spend, proceeds" "MOCK_PI_CALLED" "$OUTPUT"
 rm -f "$COST_FILE"
 
 # G41: budget exceeded — cost file shows spend over budget
-COST_FILE=$(mktemp /tmp/rlm_cost_test_XXXXXX.jsonl)
+COST_FILE=$(mktemp "${TMPDIR:-/tmp}/rlm_cost_test.jsonl.XXXXXX")
 echo '{"cost": 0.60, "tokens": 5000}' > "$COST_FILE"
 echo '{"cost": 0.45, "tokens": 4000}' >> "$COST_FILE"
 OUTPUT=$(
@@ -897,7 +897,7 @@ assert_contains "G41: budget exceeded" "Budget exceeded" "$OUTPUT"
 rm -f "$COST_FILE"
 
 # G42: budget not exceeded — cost under limit
-COST_FILE=$(mktemp /tmp/rlm_cost_test_XXXXXX.jsonl)
+COST_FILE=$(mktemp "${TMPDIR:-/tmp}/rlm_cost_test.jsonl.XXXXXX")
 echo '{"cost": 0.30, "tokens": 3000}' > "$COST_FILE"
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
@@ -931,7 +931,7 @@ OUTPUT=$(
 assert_contains "G44: rlm_cost no file" "\$0.000000" "$OUTPUT"
 
 # G45: rlm_cost with cost file returns total
-COST_FILE=$(mktemp /tmp/rlm_cost_test_XXXXXX.jsonl)
+COST_FILE=$(mktemp "${TMPDIR:-/tmp}/rlm_cost_test.jsonl.XXXXXX")
 echo '{"cost": 0.15, "tokens": 2000}' > "$COST_FILE"
 echo '{"cost": 0.25, "tokens": 3000}' >> "$COST_FILE"
 OUTPUT=$(
@@ -942,7 +942,7 @@ assert_contains "G45: rlm_cost sums" "\$0.400000" "$OUTPUT"
 rm -f "$COST_FILE"
 
 # G46: rlm_cost --json returns structured data
-COST_FILE=$(mktemp /tmp/rlm_cost_test_XXXXXX.jsonl)
+COST_FILE=$(mktemp "${TMPDIR:-/tmp}/rlm_cost_test.jsonl.XXXXXX")
 echo '{"cost": 0.10, "tokens": 1000}' > "$COST_FILE"
 echo '{"cost": 0.20, "tokens": 2000}' >> "$COST_FILE"
 OUTPUT=$(

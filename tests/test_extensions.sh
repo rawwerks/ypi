@@ -40,7 +40,7 @@ test_extension_loads() {
     fi
 
     local stderr_file
-    stderr_file=$(mktemp /tmp/ext_test_XXXXXX.txt)
+    stderr_file=$(mktemp "${TMPDIR:-/tmp}/ext_test.txt.XXXXXX")
 
     # Load the extension in print mode with a trivial prompt
     echo "test" | timeout 15 pi -p --no-session --no-extensions -e "$path" "say ok" \
@@ -69,7 +69,7 @@ fi
 echo ""
 echo "--- Environment integration ---"
 
-stderr_file=$(mktemp /tmp/ext_test_XXXXXX.txt)
+stderr_file=$(mktemp "${TMPDIR:-/tmp}/ext_test.txt.XXXXXX")
 RLM_DEPTH=0 RLM_MAX_DEPTH=5 \
     echo "test" | timeout 15 pi -p --no-session --no-extensions \
     -e "$PROJECT_DIR/extensions/ypi.ts" "say ok" \
