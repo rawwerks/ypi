@@ -120,6 +120,15 @@ else
 fi
 echo ""
 
+echo "── Extension E2E tests (real LLM calls) ──"
+if make test-extensions-e2e; then
+    info "Extension E2E tests passed"
+else
+    warn "Extension E2E tests FAILED"
+    FAILED=true
+fi
+echo ""
+
 # ─── Results ──────────────────────────────────────────────────────────────
 
 if [ "$FAILED" = true ]; then

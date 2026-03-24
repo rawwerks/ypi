@@ -18,6 +18,11 @@ test-extensions:
 	@echo "Running extension tests..."
 	@bash tests/test_extensions.sh
 
+# Extension E2E tests — REAL LLM calls, tests extension API compatibility
+test-extensions-e2e:
+	@echo "Running extension e2e tests (real LLM calls)..."
+	@bash tests/test_extensions_e2e.sh
+
 # E2E tests — REAL LLM calls, costs money
 test-e2e:
 	@echo "Running e2e tests (real LLM calls)..."
