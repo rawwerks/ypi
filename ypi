@@ -121,7 +121,10 @@ while [[ $# -gt 0 ]]; do
 done
 # Launch Pi with the combined system prompt, passing all args through
 # User's own extensions (hashline, etc.) are discovered automatically by Pi.
+# Pass through RLM_PROVIDER/RLM_MODEL to the root session if set.
 PI_ARGV=(pi --system-prompt "$COMBINED_PROMPT")
+[ -n "${RLM_PROVIDER:-}" ] && PI_ARGV+=(--provider "$RLM_PROVIDER")
+[ -n "${RLM_MODEL:-}" ] && PI_ARGV+=(--model "$RLM_MODEL")
 [ ${#YPI_EXT_ARGS[@]} -gt 0 ] && PI_ARGV+=("${YPI_EXT_ARGS[@]}")
 [ ${#PASS_ARGS[@]} -gt 0 ] && PI_ARGV+=("${PASS_ARGS[@]}")
 exec "${PI_ARGV[@]}"
