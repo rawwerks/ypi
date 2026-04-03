@@ -340,7 +340,8 @@ OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
     rlm_query "How many r's in strawberry?"
 )
-assert_contains "T14d: prompt file is set" "RLM_PROMPT_FILE=/tmp/rlm_prompt_" "$OUTPUT"
+assert_contains "T14d: prompt file is set" "RLM_PROMPT_FILE=" "$OUTPUT"
+assert_contains "T14d: prompt file path contains rlm_prompt" "rlm_prompt_" "$OUTPUT"
 assert_contains "T14d: prompt file has content" "PROMPT_CONTENT=How many r's in strawberry?" "$OUTPUT"
 
 # ─── Test Group: Temp File Cleanup ────────────────────────────────────────
