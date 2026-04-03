@@ -165,7 +165,7 @@ fi
 # Trace logging (optional)
 # ----------------------------------------------------------------------
 if [ -n "${PI_TRACE_FILE:-}" ]; then
-    echo "[$(date +%H:%M:%S.%3N)] depth=$DEPTH→$NEXT_DEPTH PID=$$ PPID=$PPID call=$RLM_CALL_COUNT trace=$RLM_TRACE_ID fork=$FORK prompt: ${PROMPT:0:120}" >> "$PI_TRACE_FILE"
+    echo "[$(date +%H:%M:%S.%3N)] depth=${DEPTH}→${NEXT_DEPTH} PID=$$ PPID=$PPID call=$RLM_CALL_COUNT trace=$RLM_TRACE_ID fork=$FORK prompt: ${PROMPT:0:120}" >> "$PI_TRACE_FILE"
 fi
 
 # ----------------------------------------------------------------------
