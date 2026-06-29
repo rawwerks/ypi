@@ -27,6 +27,7 @@
 #   RLM_MAX_DEPTH     — max recursion depth (default: 3)
 #   RLM_PROVIDER      — LLM provider
 #   RLM_MODEL         — LLM model
+#   RLM_THINKING_LEVEL — Pi thinking level for child calls
 #   RLM_SYSTEM_PROMPT — path to the RLM system prompt file
 #   CONTEXT           — path to the current context file
 #   RLM_STDIN         — set to "1" by the calling pattern to indicate piped input
@@ -34,8 +35,12 @@
 #   RLM_START_TIME    — epoch seconds when the root call started (auto‑set)
 #   RLM_MAX_CALLS     — maximum total rlm_query invocations allowed
 #   RLM_CALL_COUNT    — current count of invocations (auto‑incremented)
-#   RLM_CHILD_MODEL   — model to use for child calls (depth > 0)
-#   RLM_CHILD_PROVIDER— provider to use for child calls (depth > 0)
+#   RLM_CHILD_MODEL   — model to use for all child calls (depth > 0)
+#   RLM_CHILD_PROVIDER— provider to use with RLM_CHILD_MODEL (depth > 0)
+#   RLM_CHILD_THINKING_LEVEL — thinking level to use for all child calls (depth > 0)
+#   RLM_CHILD_MODELS  — comma-separated child-depth model list (depth 1,2,...)
+#   RLM_CHILD_PROVIDERS — comma-separated child-depth provider list (depth 1,2,...)
+#   RLM_CHILD_THINKING_LEVELS — comma-separated child-depth thinking list (depth 1,2,...)
 #   RLM_JJ            — set to "0" to disable jj workspace isolation
 #   RLM_EXTENSIONS    — set to "0" to disable Pi extensions (default: 1)
 #   RLM_CHILD_EXTENSIONS — override extensions for depth > 0 (default: same as parent)
@@ -201,6 +206,7 @@ fi
 
 PROVIDER="${RLM_PROVIDER:-}"
 MODEL="${RLM_MODEL:-}"
+THINKING_LEVEL="${RLM_THINKING_LEVEL:-}"
 SYSTEM_PROMPT_FILE="${RLM_SYSTEM_PROMPT:-}"
 
 # ----------------------------------------------------------------------
@@ -349,12 +355,41 @@ else
 fi
 
 # ----------------------------------------------------------------------
-# Model routing for child calls (depth > 0)
+# Model/thinking routing for child calls (depth > 0)
 # ----------------------------------------------------------------------
-if [ "$NEXT_DEPTH" -gt 0 ] && [ -n "${RLM_CHILD_MODEL:-}" ]; then
-    MODEL="${RLM_CHILD_MODEL}"
-    if [ -n "${RLM_CHILD_PROVIDER:-}" ]; then
+comma_entry() {
+    local list="${1:-}"
+    local index="$2"
+    [ -n "$list" ] || return 0
+    python3 - "$list" "$index" <<'PY'
+import sys
+parts = [part.strip() for part in sys.argv[1].split(',')]
+idx = int(sys.argv[2]) - 1
+print(parts[idx] if 0 <= idx < len(parts) else "")
+PY
+}
+
+DEPTH_MODEL="$(comma_entry "${RLM_CHILD_MODELS:-}" "$NEXT_DEPTH")"
+DEPTH_PROVIDER="$(comma_entry "${RLM_CHILD_PROVIDERS:-}" "$NEXT_DEPTH")"
+DEPTH_THINKING="$(comma_entry "${RLM_CHILD_THINKING_LEVELS:-}" "$NEXT_DEPTH")"
+
+if [ "$NEXT_DEPTH" -gt 0 ]; then
+    if [ -n "$DEPTH_MODEL" ]; then
+        MODEL="$DEPTH_MODEL"
+    elif [ -n "${RLM_CHILD_MODEL:-}" ]; then
+        MODEL="${RLM_CHILD_MODEL}"
+    fi
+
+    if [ -n "$DEPTH_PROVIDER" ]; then
+        PROVIDER="$DEPTH_PROVIDER"
+    elif [ -n "${RLM_CHILD_PROVIDER:-}" ] && { [ -n "$DEPTH_MODEL" ] || [ -n "${RLM_CHILD_MODEL:-}" ]; }; then
         PROVIDER="${RLM_CHILD_PROVIDER}"
+    fi
+
+    if [ -n "$DEPTH_THINKING" ]; then
+        THINKING_LEVEL="$DEPTH_THINKING"
+    elif [ -n "${RLM_CHILD_THINKING_LEVEL:-}" ]; then
+        THINKING_LEVEL="${RLM_CHILD_THINKING_LEVEL}"
     fi
 fi
 
@@ -367,6 +402,7 @@ export RLM_DEPTH="$NEXT_DEPTH"
 export RLM_MAX_DEPTH="$MAX_DEPTH"
 export RLM_PROVIDER="$PROVIDER"
 export RLM_MODEL="$MODEL"
+export RLM_THINKING_LEVEL="$THINKING_LEVEL"
 export RLM_SYSTEM_PROMPT="${SYSTEM_PROMPT_FILE:-}"
 export RLM_START_TIME="${RLM_START_TIME}"
 export RLM_TIMEOUT="${RLM_TIMEOUT:-}"
@@ -397,6 +433,7 @@ PI_BIN="${YPI_PI_BIN:-pi}"
 CMD_ARGS=(-p)
 [ -n "$PROVIDER" ] && CMD_ARGS+=(--provider "$PROVIDER")
 [ -n "$MODEL" ] && CMD_ARGS+=(--model "$MODEL")
+[ -n "$THINKING_LEVEL" ] && CMD_ARGS+=(--thinking "$THINKING_LEVEL")
 
 if [ -z "$JJ_WORKSPACE" ] && [ "${RLM_UNSAFE_NO_JJ_WRITE:-0}" != "1" ]; then
     CMD_ARGS+=(--tools read,grep,find,ls,rlm_query)

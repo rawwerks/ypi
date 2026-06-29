@@ -52,12 +52,17 @@ echo "CONTEXT=$CONTEXT"
 echo "RLM_DEPTH=$RLM_DEPTH"
 echo "RLM_MODEL=$RLM_MODEL"
 echo "RLM_PROVIDER=$RLM_PROVIDER"
+echo "RLM_THINKING_LEVEL=${RLM_THINKING_LEVEL:-unset}"
 echo "RLM_TIMEOUT=${RLM_TIMEOUT:-unset}"
 echo "RLM_START_TIME=${RLM_START_TIME:-unset}"
 echo "RLM_MAX_CALLS=${RLM_MAX_CALLS:-unset}"
 echo "RLM_CALL_COUNT=${RLM_CALL_COUNT:-unset}"
 echo "RLM_CHILD_MODEL=${RLM_CHILD_MODEL:-unset}"
 echo "RLM_CHILD_PROVIDER=${RLM_CHILD_PROVIDER:-unset}"
+echo "RLM_CHILD_MODELS=${RLM_CHILD_MODELS:-unset}"
+echo "RLM_CHILD_PROVIDERS=${RLM_CHILD_PROVIDERS:-unset}"
+echo "RLM_CHILD_THINKING_LEVEL=${RLM_CHILD_THINKING_LEVEL:-unset}"
+echo "RLM_CHILD_THINKING_LEVELS=${RLM_CHILD_THINKING_LEVELS:-unset}"
 echo "RLM_TRACE_ID=${RLM_TRACE_ID:-unset}"
 echo "RLM_SESSION_FILE=${RLM_SESSION_FILE:-unset}"
 # Simulate a slow call if MOCK_SLEEP is set
@@ -69,12 +74,18 @@ chmod +x "$MOCK_BIN/pi"
 
 export PATH="$MOCK_BIN:$PROJECT_DIR:$PATH"
 
-# Clean slate — unset all RLM_* vars so ambient env doesn't leak into tests
+# Clean slate — unset inherited ypi/rlm vars so ambient live-session env doesn't
+# bypass the mock or leak into tests.
 for _v in $(env | grep '^RLM_' | cut -d= -f1); do unset "$_v"; done
+for _v in $(env | grep '^YPI_' | cut -d= -f1); do unset "$_v"; done
 unset RLM_SESSION_DIR RLM_SESSION_FILE RLM_TRACE_ID RLM_COST_FILE RLM_BUDGET
 unset RLM_DEPTH RLM_MAX_DEPTH RLM_TIMEOUT RLM_START_TIME RLM_MAX_CALLS RLM_CALL_COUNT
-unset RLM_PROVIDER RLM_MODEL RLM_CHILD_MODEL RLM_CHILD_PROVIDER
+unset RLM_PROVIDER RLM_MODEL RLM_THINKING_LEVEL RLM_CHILD_MODEL RLM_CHILD_PROVIDER
+unset RLM_CHILD_MODELS RLM_CHILD_PROVIDERS RLM_CHILD_THINKING_LEVEL RLM_CHILD_THINKING_LEVELS
 unset RLM_EXTENSIONS RLM_CHILD_EXTENSIONS RLM_HASHLINE RLM_JJ RLM_JSON RLM_STDIN
+# Force rlm_query to use the mock even when a parent ypi session exported
+# YPI_PI_BIN to a real pi binary.
+export YPI_PI_BIN="$MOCK_BIN/pi"
 
 # Disable JSON mode in guardrail tests — mock pi doesn't output JSON
 export RLM_JSON=0
@@ -215,13 +226,27 @@ if _feature_exists "RLM_CHILD_MODEL"; then
     OUTPUT=$(
         CONTEXT="$TEST_TMP/ctx.txt" \
         RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
-        RLM_PROVIDER=anthropic RLM_MODEL=claude-sonnet \
+        RLM_PROVIDER=anthropic RLM_MODEL=claude-sonnet RLM_THINKING_LEVEL=xhigh \
         rlm_query "Root model test without child override?"
     )
     assert_contains "G6: root model passes through without override" "--model claude-sonnet" "$OUTPUT"
+    assert_contains "G6: root thinking passes through without override" "--thinking xhigh" "$OUTPUT"
 else
     skip "G6: root uses root model" "RLM_CHILD_MODEL not implemented yet"
 fi
+
+# G6b: per-depth child model/thinking lists override by child depth
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/ctx.txt" \
+    RLM_DEPTH=1 RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=openai RLM_MODEL=gpt-5.5:xhigh RLM_THINKING_LEVEL=xhigh \
+    RLM_CHILD_MODELS='gpt-5.5:high,gpt-5.5:medium' \
+    RLM_CHILD_THINKING_LEVELS='high,medium' \
+    rlm_query "Depth-specific model routing?"
+)
+assert_contains "G6b: second-depth model selected" "--model gpt-5.5:medium" "$OUTPUT"
+assert_contains "G6b: second-depth thinking selected" "--thinking medium" "$OUTPUT"
+assert_contains "G6b: provider inherited" "--provider openai" "$OUTPUT"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

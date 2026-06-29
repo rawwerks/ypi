@@ -10,13 +10,18 @@
 #   ypi --provider anthropic --model claude-sonnet-4-5-20250929 "question"
 #
 # Environment overrides:
-#   RLM_PROVIDER       — LLM provider for sub-calls (default: Pi's default)
-#   RLM_MODEL          — LLM model for sub-calls (default: Pi's default)
+#   RLM_PROVIDER       — LLM provider override for root + sub-calls (default: Pi active/default provider)
+#   RLM_MODEL          — LLM model override for root + sub-calls (default: Pi active/default model)
+#   RLM_THINKING_LEVEL — thinking-level override for sub-calls (default: Pi active/default thinking)
 #   RLM_MAX_DEPTH      — max recursion depth (default: 3)
 #   RLM_TIMEOUT        — wall-clock seconds for entire recursive tree (default: none)
 #   RLM_MAX_CALLS      — max total rlm_query invocations (default: none)
-#   RLM_CHILD_MODEL    — cheaper model for sub-calls at depth > 0 (default: same as root)
-#   RLM_CHILD_PROVIDER — provider for sub-calls at depth > 0 (default: same as root)
+#   RLM_CHILD_MODEL    — model for all sub-calls at depth > 0 (default: same as root)
+#   RLM_CHILD_PROVIDER — provider for RLM_CHILD_MODEL (default: same as root)
+#   RLM_CHILD_THINKING_LEVEL — thinking level for all sub-calls at depth > 0
+#   RLM_CHILD_MODELS   — comma-separated child-depth model list (depth 1,2,...)
+#   RLM_CHILD_PROVIDERS — comma-separated child-depth provider list (depth 1,2,...)
+#   RLM_CHILD_THINKING_LEVELS — comma-separated child-depth thinking list (depth 1,2,...)
 #   RLM_JJ             — set to "0" to disable jj workspace isolation (default: 1)
 #   RLM_EXTENSIONS     — set to "0" to disable Pi extensions (default: 1)
 #   RLM_CHILD_EXTENSIONS — override extensions for depth > 0 (default: same as parent)
@@ -77,11 +82,11 @@ export YPI_PI_BIN="$PI_BIN"
 # Put rlm_query on PATH so Pi's bash tool can find it
 export PATH="$SCRIPT_DIR:$PATH"
 
-# Initialize RLM environment — pass through all guardrails
+# Initialize RLM environment — pass through all guardrails.
+# Provider/model routing is applied after CLI parsing so explicit --provider / --model
+# flags remain authoritative for the root Pi process.
 export RLM_DEPTH="${RLM_DEPTH:-0}"
 export RLM_MAX_DEPTH="${RLM_MAX_DEPTH:-3}"
-[ -n "${RLM_PROVIDER:-}" ]       && export RLM_PROVIDER
-[ -n "${RLM_MODEL:-}" ]          && export RLM_MODEL
 export RLM_SYSTEM_PROMPT="$SCRIPT_DIR/SYSTEM_PROMPT.md"
 
 # Guardrails — pass through if set, don't override
@@ -89,6 +94,10 @@ export RLM_SYSTEM_PROMPT="$SCRIPT_DIR/SYSTEM_PROMPT.md"
 [ -n "${RLM_MAX_CALLS:-}" ]      && export RLM_MAX_CALLS
 [ -n "${RLM_CHILD_MODEL:-}" ]    && export RLM_CHILD_MODEL
 [ -n "${RLM_CHILD_PROVIDER:-}" ] && export RLM_CHILD_PROVIDER
+[ -n "${RLM_CHILD_THINKING_LEVEL:-}" ] && export RLM_CHILD_THINKING_LEVEL
+[ -n "${RLM_CHILD_MODELS:-}" ]   && export RLM_CHILD_MODELS
+[ -n "${RLM_CHILD_PROVIDERS:-}" ] && export RLM_CHILD_PROVIDERS
+[ -n "${RLM_CHILD_THINKING_LEVELS:-}" ] && export RLM_CHILD_THINKING_LEVELS
 [ -n "${PI_TRACE_FILE:-}" ]      && export PI_TRACE_FILE
 export RLM_JJ="${RLM_JJ:-1}"
 export RLM_EXTENSIONS="${RLM_EXTENSIONS:-1}"
@@ -189,8 +198,20 @@ fi
 # Launch Pi with the canonical recursive extension. User's own extensions are
 # still discovered by Pi; this one is explicit so ypi is always active.
 PI_ARGV=("$PI_BIN")
-[ "$HAS_PROVIDER" = false ] && [ -n "${RLM_PROVIDER:-}" ] && PI_ARGV+=(--provider "$RLM_PROVIDER")
-[ "$HAS_MODEL" = false ] && [ -n "${RLM_MODEL:-}" ] && PI_ARGV+=(--model "$RLM_MODEL")
+if [ "$HAS_PROVIDER" = false ] && [ -n "${RLM_PROVIDER:-}" ]; then
+    PI_ARGV+=(--provider "$RLM_PROVIDER")
+elif [ "$HAS_PROVIDER" = true ]; then
+    # Explicit CLI provider should win for both root and recursive children.
+    # The extension will seed RLM_PROVIDER from Pi's active root model.
+    unset RLM_PROVIDER
+fi
+if [ "$HAS_MODEL" = false ] && [ -n "${RLM_MODEL:-}" ]; then
+    PI_ARGV+=(--model "$RLM_MODEL")
+elif [ "$HAS_MODEL" = true ]; then
+    # Explicit CLI model should win for both root and recursive children.
+    # The extension will seed RLM_MODEL from Pi's active root model.
+    unset RLM_MODEL
+fi
 PI_ARGV+=(-e "$YPI_EXTENSION")
 [ ${#PASS_ARGS[@]} -gt 0 ] && PI_ARGV+=("${PASS_ARGS[@]}")
 exec "${PI_ARGV[@]}"

@@ -19,13 +19,13 @@ If a `$CONTEXT` file is set, it contains data relevant to your task. Treat it li
 **Core pattern: size up → search → delegate → combine**
 1. **Size up the problem** – How big is it? Can you do it directly, or does it need decomposition? For files: `wc -l` / `wc -c`. For code tasks: how many files, how complex?
 2. **Search & explore** – `grep`, `find`, `ls`, `head` — orient yourself before diving in.
-3. **Delegate** – use `rlm_query` to hand sub-tasks to child agents. Prefer the native Pi `rlm_query` tool for a single synchronous child call. When the shell command is available, use it for pipes, shell loops, and async jobs:
+3. **Delegate** – use `rlm_query` to hand sub-tasks to child agents. Prefer the native Pi `rlm_query` tool for independent subtasks: issue multiple native tool calls in the same assistant turn so Pi can run them in parallel. Use the shell command for pipes, shell loops, and async jobs that must be launched from bash:
    ```bash
    # Pipe data as the child's context (synchronous — blocks until done)
    sed -n '100,200p' bigfile.txt | rlm_query "Summarize this section"
-   # Child inherits your environment (synchronous)
+   # Child inherits your environment (synchronous shell helper)
    rlm_query "Refactor the error handling in src/api.py"
-   # ASYNC — returns immediately, child runs in background (PREFERRED for parallel work)
+   # ASYNC — returns immediately, child runs in background (for bash fan-out/loops)
    rlm_query --async "Write tests for the auth module"
    # Returns: {"job_id": "...", "output": "/tmp/...", "sentinel": "/tmp/...done", "pid": 12345}
    ```
@@ -63,9 +63,12 @@ grep -n "ERROR\|FATAL" data/logs.txt
 sed -n '480,600p' data/logs.txt | rlm_query "What caused this error? Suggest a fix."
 ```
 
-**Example 4 – Parallel sub-tasks with --async (PREFERRED)**
+**Example 4 – Parallel sub-tasks**
+
+Prefer multiple native `rlm_query` tool calls in one assistant turn for independent subtasks; the native tool is marked parallel-capable and Pi can execute them concurrently. Use shell `--async` only when you are already in bash, need pipes, or need a loop-driven fan-out:
+
 ```bash
-# Break a complex task into independent pieces — all run in parallel
+# Break a complex bash-discovered task list into independent pieces — all run in parallel
 JOB1=$(rlm_query --async "Read README.md and summarize what this project does in one paragraph.")
 JOB2=$(rlm_query --async "Run the test suite and report any failures.")
 JOB3=$(rlm_query --async "Check for outdated dependencies in package.json.")
@@ -117,6 +120,7 @@ done
 - **RLM_TIMEOUT** – if set, respect the remaining wall‑clock budget; avoid long‑running loops.
 - **RLM_MAX_CALLS** – each `rlm_query` increments `RLM_CALL_COUNT`; stay within the limit.
 - **RLM_BUDGET** – if set, max dollar spend for the entire recursive tree. Native extension mode enforces this only in JSON mode so child cost can be measured. Be cost-conscious either way.
+- **Child model routing** – by default, children inherit Pi's active root provider/model/thinking. If configured, respect `RLM_CHILD_MODEL`/`RLM_CHILD_THINKING_LEVEL` for all child calls or `RLM_CHILD_MODELS`/`RLM_CHILD_THINKING_LEVELS` as comma-separated per-depth routes.
 - **`rlm_cost`** – when the shell helper suite is installed, call this to see cumulative spend:
   ```bash
   rlm_cost          # "$0.042381"
@@ -150,4 +154,5 @@ done
 6. **Small, focused sub‑agents** – each `rlm_query` call should have a clear, bounded task. Keep the call count low.
 7. **Depth preference** – deeper depths ⇒ fewer sub‑calls, more direct Bash actions.
 8. **Say “I don’t know” only when true** – only when the required information is genuinely absent from the context, repo, or environment.
-9. **Safety** – never execute untrusted commands without explicit intent; rely on the provided tooling.
+9. **Parallel when independent** – for independent subtasks, prefer multiple native `rlm_query` tool calls in the same assistant turn. Use shell `rlm_query --async` for bash fan-out, loops, or piped contexts.
+10. **Safety** – never execute untrusted commands without explicit intent; rely on the provided tooling.

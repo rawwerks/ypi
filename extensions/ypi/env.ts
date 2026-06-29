@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { YpiRuntime } from "./runtime.ts";
 import { debug } from "./runtime.ts";
 
@@ -65,7 +65,7 @@ function ensureCostFile(): void {
 	process.env.RLM_COST_FILE = path.join(tmpdir(), `rlm_cost_${process.env.RLM_TRACE_ID}.jsonl`);
 }
 
-export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext): void {
+export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext, pi?: ExtensionAPI): void {
 	process.env.RLM_DEPTH = process.env.RLM_DEPTH || "0";
 	process.env.RLM_MAX_DEPTH = process.env.RLM_MAX_DEPTH || "3";
 	process.env.RLM_SYSTEM_PROMPT = process.env.RLM_SYSTEM_PROMPT || runtime.systemPromptPath;
@@ -94,8 +94,15 @@ export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext): 
 	}
 
 	if (ctx?.model) {
-		process.env.RLM_PROVIDER = process.env.RLM_PROVIDER || ctx.model.provider;
-		process.env.RLM_MODEL = process.env.RLM_MODEL || ctx.model.id;
-		debug(`__YPI_EXTENSION_MODEL__ ${process.env.RLM_PROVIDER}/${process.env.RLM_MODEL}`);
+		// Pi's active root route is the source of truth. Refresh these on every
+		// contextual environment pass so `/model` and thinking-level changes are
+		// picked up by subsequent recursive children. Use RLM_CHILD_* for child-only
+		// overrides instead of pinning stale root values here.
+		process.env.RLM_PROVIDER = ctx.model.provider;
+		process.env.RLM_MODEL = ctx.model.id;
+		if (pi) {
+			process.env.RLM_THINKING_LEVEL = pi.getThinkingLevel();
+		}
+		debug(`__YPI_EXTENSION_MODEL__ ${process.env.RLM_PROVIDER}/${process.env.RLM_MODEL}:${process.env.RLM_THINKING_LEVEL || ""}`);
 	}
 }

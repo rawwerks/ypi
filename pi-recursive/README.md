@@ -34,8 +34,12 @@ Behavior is controlled through `RLM_*` environment variables. The pure extension
 | Variable | Example | What it does |
 | --- | --- | --- |
 | `RLM_MAX_DEPTH` | `RLM_MAX_DEPTH=3` | How deep recursion can go (default `3`). |
-| `RLM_CHILD_MODEL` | `RLM_CHILD_MODEL=haiku` | Use a cheaper model for sub-calls at depth > 0. |
-| `RLM_CHILD_PROVIDER` | `RLM_CHILD_PROVIDER=anthropic` | Provider for sub-calls at depth > 0. |
+| `RLM_CHILD_MODEL` | `RLM_CHILD_MODEL=haiku` | Use one model for all sub-calls at depth > 0. |
+| `RLM_CHILD_PROVIDER` | `RLM_CHILD_PROVIDER=anthropic` | Provider used with `RLM_CHILD_MODEL`. |
+| `RLM_CHILD_THINKING_LEVEL` | `RLM_CHILD_THINKING_LEVEL=high` | Thinking level for all sub-calls at depth > 0. |
+| `RLM_CHILD_MODELS` | `RLM_CHILD_MODELS=big:high,small:medium` | Comma-separated model route for child depths 1, 2, ... |
+| `RLM_CHILD_PROVIDERS` | `RLM_CHILD_PROVIDERS=openai,openai` | Comma-separated provider route for child depths 1, 2, ... |
+| `RLM_CHILD_THINKING_LEVELS` | `RLM_CHILD_THINKING_LEVELS=high,medium` | Comma-separated thinking route for child depths 1, 2, ... |
 | `RLM_BUDGET` | `RLM_BUDGET=0.50` | Max dollar spend for the recursive tree (requires `RLM_JSON=1`, the default). |
 | `RLM_TIMEOUT` | `RLM_TIMEOUT=60` | Wall-clock limit (seconds) for the entire recursive tree. |
 | `RLM_MAX_CALLS` | `RLM_MAX_CALLS=20` | Max total `rlm_query` invocations. |

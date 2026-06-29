@@ -304,7 +304,7 @@ if should_run "E9"; then
         TRACE_E9="$TEST_TMP/trace_e9.log"
         STDOUT_E9="$TEST_TMP/e9_stdout.txt"
         STDERR_E9="$TEST_TMP/e9_stderr.txt"
-        PROMPT_E9="Use the bash tool to run rlm_query exactly once with this exact prompt: Reply with exactly CHILD_OK. Then reply with exactly the child answer and no other text."
+        PROMPT_E9="Use the rlm_query tool exactly once with this exact prompt: Reply with exactly CHILD_OK. Then reply with exactly the child answer and no other text."
 
         START=$(date +%s)
         set +e

@@ -269,16 +269,21 @@ testing between changes. One variable at a time.
 | `CONTEXT` | Path to context file on disk | (required for QA) |
 | `RLM_DEPTH` | Current recursion depth | `0` |
 | `RLM_MAX_DEPTH` | Maximum recursion depth | `3` |
-| `RLM_PROVIDER` | LLM provider for sub-calls | Pi's default |
-| `RLM_MODEL` | LLM model for sub-calls | Pi's default |
+| `RLM_PROVIDER` | LLM provider override for root + sub-calls; otherwise seeded from Pi's active/root provider | Pi settings/active model |
+| `RLM_MODEL` | LLM model override for root + sub-calls; otherwise seeded from Pi's active/root model | Pi settings/active model |
+| `RLM_THINKING_LEVEL` | Thinking level propagated to child calls; otherwise seeded from Pi's active/root thinking level | Pi settings/active thinking |
 | `RLM_SYSTEM_PROMPT` | Path to system prompt file | (required) |
 | `PI_TRACE_FILE` | Trace log path | (none) |
 | `RLM_TIMEOUT` | Max wall-clock seconds | (none = unlimited) |
 | `RLM_START_TIME` | Epoch seconds when the current depth-0 tree began | (auto-set per top-level call) |
 | `RLM_MAX_CALLS` | Max total rlm_query invocations (permits 1..N, rejects N+1) | (none = unlimited) |
 | `RLM_CALL_COUNT` | Running count of calls so far | `0` |
-| `RLM_CHILD_MODEL` | Model override for depth > 0 | (none = same as parent) |
-| `RLM_CHILD_PROVIDER` | Provider override for depth > 0 | (none = same as parent) |
+| `RLM_CHILD_MODEL` | Model override for all child depths | (none = same as parent/root route) |
+| `RLM_CHILD_PROVIDER` | Provider override used with `RLM_CHILD_MODEL` | (none = same as parent/root route) |
+| `RLM_CHILD_THINKING_LEVEL` | Thinking override for all child depths | (none = same as parent/root thinking) |
+| `RLM_CHILD_MODELS` | Comma-separated per-child-depth model route, depth 1,2,... | (none) |
+| `RLM_CHILD_PROVIDERS` | Comma-separated per-child-depth provider route, depth 1,2,... | (none) |
+| `RLM_CHILD_THINKING_LEVELS` | Comma-separated per-child-depth thinking route, depth 1,2,... | (none) |
 | `RLM_JJ` | Enable jj workspace isolation | `1` (set `0` to disable) |
 | `RLM_UNSAFE_NO_JJ_WRITE` | Allow writable child tools when jj is disabled/unavailable | `0` |
 | `RLM_SHARED_SESSIONS` | Allow child agents to write trace-named Pi sessions | `1` (set `0` for `--no-session`) |

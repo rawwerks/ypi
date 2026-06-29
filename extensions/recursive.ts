@@ -25,12 +25,12 @@ export default function (pi: ExtensionAPI) {
 	debug(`__YPI_EXTENSION_LOADED__ root=${runtime.root}`);
 
 	pi.on("session_start", (_event, ctx) => {
-		ensureEnvironment(runtime, ctx);
+		ensureEnvironment(runtime, ctx, pi);
 		updateStatus(ctx);
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
-		ensureEnvironment(runtime, ctx);
+		ensureEnvironment(runtime, ctx, pi);
 		debug("__YPI_EXTENSION_PROMPT_PATCHED__");
 		return { systemPrompt: patchSystemPrompt(runtime, event) };
 	});

@@ -85,6 +85,7 @@ echo "RLM_DEPTH=$RLM_DEPTH"
 echo "RLM_MAX_DEPTH=$RLM_MAX_DEPTH"
 echo "RLM_PROVIDER=$RLM_PROVIDER"
 echo "RLM_MODEL=$RLM_MODEL"
+echo "RLM_THINKING_LEVEL=${RLM_THINKING_LEVEL:-}"
 echo "RLM_SYSTEM_PROMPT=$RLM_SYSTEM_PROMPT"
 echo "RLM_PROMPT_FILE=$RLM_PROMPT_FILE"
 if [ -n "${RLM_PROMPT_FILE:-}" ] && [ -f "${RLM_PROMPT_FILE:-}" ]; then
@@ -104,9 +105,14 @@ chmod +x "$MOCK_BIN/pi"
 # Override PATH so rlm_query finds our mock pi
 export PATH="$MOCK_BIN:$PROJECT_DIR:$PATH"
 
-# Clean environment — unset all RLM_ vars so tests check rlm_query's own defaults,
-# not whatever the parent ypi session exported.
+# Clean environment — unset inherited ypi/rlm vars so tests check this repo's
+# mock-Pi harness, not whatever live ypi session is running the tests.
 for var in $(env | grep '^RLM_' | cut -d= -f1); do unset "$var"; done
+for var in $(env | grep '^YPI_' | cut -d= -f1); do unset "$var"; done
+# Force both rlm_query (YPI_PI_BIN path) and the ypi launcher (PATH fallback) to
+# use the mock. A live parent ypi session exports YPI_PI_BIN to the real pi;
+# without this override unit tests accidentally make real model calls.
+export YPI_PI_BIN="$MOCK_BIN/pi"
 # Disable JSON mode in unit tests — mock pi doesn't output JSON
 export RLM_JSON=0
 
@@ -351,29 +357,40 @@ OUTPUT=$(
 assert_contains "T14c: explicit provider passes through" "--provider anthropic" "$OUTPUT"
 assert_contains "T14c: explicit model passes through" "--model claude-opus-4-6" "$OUTPUT"
 
-# T14e: ypi root launcher honors RLM_PROVIDER/RLM_MODEL
+# T14e: bare ypi root launcher defers provider/model defaults to Pi settings
+OUTPUT=$(
+    YPI_QUIET=1 \
+    "$PROJECT_DIR/ypi" -p --no-session "Launcher default routing?"
+)
+assert_not_contains "T14e: launcher does not hardcode provider" "--provider" "$OUTPUT"
+assert_not_contains "T14e: launcher does not hardcode model" "--model" "$OUTPUT"
+assert_contains "T14e: launcher loads canonical extension" "-e $PROJECT_DIR/extensions/recursive.ts" "$OUTPUT"
+assert_not_contains "T14e: launcher does not limit tools" "--tools" "$OUTPUT"
+assert_not_contains "T14e: launcher does not build system prompt" "--system-prompt" "$OUTPUT"
+
+# T14f: ypi root launcher honors RLM_PROVIDER/RLM_MODEL env overrides
 OUTPUT=$(
     RLM_PROVIDER=openrouter \
     RLM_MODEL=openai/gpt-5.5:xhigh \
     YPI_QUIET=1 \
     "$PROJECT_DIR/ypi" -p --no-session "Launcher model routing?"
 )
-assert_contains "T14e: launcher provider from env" "--provider openrouter" "$OUTPUT"
-assert_contains "T14e: launcher model from env" "--model openai/gpt-5.5:xhigh" "$OUTPUT"
-assert_contains "T14e: launcher loads canonical extension" "-e $PROJECT_DIR/extensions/recursive.ts" "$OUTPUT"
-assert_not_contains "T14e: launcher does not build system prompt" "--system-prompt" "$OUTPUT"
+assert_contains "T14f: launcher provider from env" "--provider openrouter" "$OUTPUT"
+assert_contains "T14f: launcher model from env" "--model openai/gpt-5.5:xhigh" "$OUTPUT"
 
-# T14f: explicit ypi CLI provider/model wins over environment routing
+# T14g: explicit ypi CLI provider/model wins over environment routing and child env seeding
 OUTPUT=$(
     RLM_PROVIDER=openrouter \
     RLM_MODEL=openai/gpt-5.5:xhigh \
     YPI_QUIET=1 \
     "$PROJECT_DIR/ypi" --provider anthropic --model claude-haiku -p --no-session "Launcher explicit routing?"
 )
-assert_contains "T14f: launcher explicit provider" "--provider anthropic" "$OUTPUT"
-assert_contains "T14f: launcher explicit model" "--model claude-haiku" "$OUTPUT"
-assert_not_contains "T14f: launcher provider not duplicated" "--provider openrouter" "$OUTPUT"
-assert_not_contains "T14f: launcher model not duplicated" "--model openai/gpt-5.5:xhigh" "$OUTPUT"
+assert_contains "T14g: launcher explicit provider" "--provider anthropic" "$OUTPUT"
+assert_contains "T14g: launcher explicit model" "--model claude-haiku" "$OUTPUT"
+assert_not_contains "T14g: launcher provider not duplicated" "--provider openrouter" "$OUTPUT"
+assert_not_contains "T14g: launcher model not duplicated" "--model openai/gpt-5.5:xhigh" "$OUTPUT"
+assert_contains "T14g: launcher explicit provider clears env" "RLM_PROVIDER=" "$OUTPUT"
+assert_contains "T14g: launcher explicit model clears env" "RLM_MODEL=" "$OUTPUT"
 
 # T14d: RLM_PROMPT_FILE is set and contains the original prompt (symbolic access)
 OUTPUT=$(
