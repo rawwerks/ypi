@@ -7,36 +7,18 @@ import {
 	readdirSync,
 	renameSync,
 	rmSync,
-	writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { atomicWriteJson } from "./atomic-file.ts";
 import { normalizeImplementScope, scopesOverlap } from "./implement-scope.ts";
+import {
+	IMPLEMENTER_LEASE_SCHEMA_VERSION,
+	implementerAttemptRef,
+	parseImplementerLeaseRecord,
+	type ImplementerLeaseRecord,
+} from "./implementer-lease.ts";
 
 export const MAX_PARALLEL_IMPLEMENTERS = 3;
-
-export type ImplementerLeaseState =
-	| "reserved"
-	| "worktree-ready"
-	| "ref-verified"
-	| "worktree-removed";
-
-export interface ImplementerLeaseRecord {
-	schemaVersion: 1;
-	token: string;
-	ownerPid: number;
-	childPid?: number;
-	childLaunchStartedAtEpochSeconds?: number;
-	createdAtEpochSeconds: number;
-	root: string;
-	commonGitDir: string;
-	baselineHead: string;
-	scope: string[];
-	state: ImplementerLeaseState;
-	worktreeContainer?: string;
-	worktreeRoot?: string;
-	attemptRef: string;
-	attemptCommit?: string;
-}
 
 export interface RegistryPaths {
 	root: string;
@@ -93,15 +75,25 @@ function acquireRegistryLock(commonGitDir: string, deadlineMilliseconds?: number
 	const deadline = deadlineMilliseconds ?? Date.now() + DEFAULT_LOCK_TIMEOUT_MS;
 	const token = randomBytes(16).toString("hex");
 	while (true) {
+		let created = false;
 		try {
 			mkdirSync(paths.lock, { mode: 0o700 });
-			writeFileSync(
+			created = true;
+			atomicWriteJson(
 				path.join(paths.lock, "owner.json"),
-				`${JSON.stringify({ schemaVersion: 1, token, pid: process.pid, createdAtEpochSeconds: Math.floor(Date.now() / 1000) })}\n`,
-				{ flag: "wx", mode: 0o600 },
+				{
+					schemaVersion: IMPLEMENTER_LEASE_SCHEMA_VERSION,
+					token,
+					pid: process.pid,
+					createdAtEpochSeconds: Math.floor(Date.now() / 1000),
+				},
 			);
 			break;
 		} catch (error) {
+			if (created) {
+				rmSync(paths.lock, { recursive: true, force: true });
+				throw error;
+			}
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 			if (Date.now() >= deadline) {
 				throw new Error(`Implementer lease registry is busy or interrupted at ${paths.lock}. Run rlm_cleanup --repo <checkout> to inspect and recover stale state.`);
@@ -136,50 +128,6 @@ export function withImplementerRegistryLock<T>(
 	}
 }
 
-function validateRecord(value: unknown, expectedToken: string, commonGitDir: string): ImplementerLeaseRecord {
-	if (!value || typeof value !== "object" || Array.isArray(value)) {
-		throw new Error(`Implementer lease ${expectedToken} is malformed`);
-	}
-	const record = value as Partial<ImplementerLeaseRecord>;
-	const validState = record.state === "reserved"
-		|| record.state === "worktree-ready"
-		|| record.state === "ref-verified"
-		|| record.state === "worktree-removed";
-	if (
-		record.schemaVersion !== 1
-		|| record.token !== expectedToken
-		|| !/^[a-f0-9]{32}$/.test(expectedToken)
-		|| !Number.isSafeInteger(record.ownerPid)
-		|| Number(record.ownerPid) <= 0
-		|| (record.childPid !== undefined && (!Number.isSafeInteger(record.childPid) || record.childPid <= 0))
-		|| (
-			record.childLaunchStartedAtEpochSeconds !== undefined
-			&& (!Number.isSafeInteger(record.childLaunchStartedAtEpochSeconds) || record.childLaunchStartedAtEpochSeconds < 0)
-		)
-		|| !Number.isSafeInteger(record.createdAtEpochSeconds)
-		|| Number(record.createdAtEpochSeconds) < 0
-		|| typeof record.root !== "string"
-		|| record.commonGitDir !== commonGitDir
-		|| typeof record.baselineHead !== "string"
-		|| !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(record.baselineHead)
-		|| typeof record.attemptRef !== "string"
-		|| (record.attemptCommit !== undefined && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(record.attemptCommit))
-		|| (record.worktreeContainer !== undefined && typeof record.worktreeContainer !== "string")
-		|| (record.worktreeRoot !== undefined && typeof record.worktreeRoot !== "string")
-		|| !validState
-	) {
-		throw new Error(`Implementer lease ${expectedToken} is malformed`);
-	}
-	const scope = normalizeImplementScope(record.scope);
-	if (scope.join("\0") !== record.scope?.join("\0")) {
-		throw new Error(`Implementer lease ${expectedToken} has a non-canonical scope`);
-	}
-	if (record.attemptRef !== `refs/ypi/attempt-${expectedToken}`) {
-		throw new Error(`Implementer lease ${expectedToken} has an invalid attempt ref`);
-	}
-	return record as ImplementerLeaseRecord;
-}
-
 export function readImplementerLeaseRecords(commonGitDir: string): ImplementerLeaseRecord[] {
 	const paths = implementerRegistryPaths(commonGitDir);
 	if (!existsSync(paths.root)) return [];
@@ -199,7 +147,7 @@ export function readImplementerLeaseRecords(commonGitDir: string): ImplementerLe
 				if (!metadata.isFile() || metadata.isSymbolicLink()) {
 					throw new Error(`Implementer lease ${entry.name} metadata is not a regular file`);
 				}
-				return validateRecord(JSON.parse(readFileSync(recordPath, "utf8")), entry.name, commonGitDir);
+				return parseImplementerLeaseRecord(JSON.parse(readFileSync(recordPath, "utf8")), entry.name, commonGitDir);
 			} catch (error) {
 				const cause = error instanceof Error ? error.message : String(error);
 				throw new Error(`${cause}. Run rlm_cleanup --repo <checkout> and inspect ${recordPath} before admitting more writers.`);
@@ -219,9 +167,7 @@ export function writeImplementerLeaseRecord(record: ImplementerLeaseRecord): voi
 	}
 	assertRegistryDirectory(directory);
 	const target = path.join(directory, "lease.json");
-	const temporary = path.join(directory, `.lease.${process.pid}.${randomBytes(4).toString("hex")}.tmp`);
-	writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-	renameSync(temporary, target);
+	atomicWriteJson(target, record);
 }
 
 function createImplementerLeaseRecord(
@@ -237,11 +183,7 @@ function createImplementerLeaseRecord(
 	);
 	mkdirSync(stagingDirectory, { mode: 0o700 });
 	try {
-		writeFileSync(
-			path.join(stagingDirectory, "lease.json"),
-			`${JSON.stringify(record, null, 2)}\n`,
-			{ flag: "wx", mode: 0o600 },
-		);
+		atomicWriteJson(path.join(stagingDirectory, "lease.json"), record);
 		onStaged?.(record);
 		renameSync(stagingDirectory, finalDirectory);
 	} catch (error) {
@@ -285,7 +227,7 @@ export function reserveImplementerLease(
 		}
 		const token = randomBytes(16).toString("hex");
 		const record: ImplementerLeaseRecord = {
-			schemaVersion: 1,
+			schemaVersion: IMPLEMENTER_LEASE_SCHEMA_VERSION,
 			token,
 			ownerPid: process.pid,
 			createdAtEpochSeconds: Math.floor(Date.now() / 1000),
@@ -294,7 +236,7 @@ export function reserveImplementerLease(
 			baselineHead,
 			scope,
 			state: "reserved",
-			attemptRef: `refs/ypi/attempt-${token}`,
+			attemptRef: implementerAttemptRef(token),
 		};
 		createImplementerLeaseRecord(record, onStaged);
 		onReserved?.(record);

@@ -125,10 +125,15 @@ if [ -n "$PRE_RECOVERY_ROOT" ]; then
 fi
 
 # --- 4. Registered implementer worktrees ---
-IMPLEMENTER_CLEANUP="$(cd "$(dirname "$0")" && pwd)/scripts/cleanup_implementer_workspaces.py"
+IMPLEMENTER_CLEANUP="$(cd "$(dirname "$0")" && pwd)/scripts/cleanup-implementer-workspaces.ts"
 IMPLEMENTER_ARGS=(--repo "$REPO_PATH" --age "$AGE_MIN")
 [ "$FORCE" = true ] && IMPLEMENTER_ARGS+=(--force)
-python3 "$IMPLEMENTER_CLEANUP" "${IMPLEMENTER_ARGS[@]}"
+NODE_BIN="${YPI_NODE_BIN:-node}"
+if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+    echo "rlm_cleanup: Node.js >= 22.19 is required for implementer recovery" >&2
+    exit 127
+fi
+"$NODE_BIN" "$IMPLEMENTER_CLEANUP" "${IMPLEMENTER_ARGS[@]}"
 
 # --- 5. Legacy workspace directories ---
 # Registered ypi_ws_* directories are recovered through their repository lease

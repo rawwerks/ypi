@@ -6,9 +6,12 @@ import path from "node:path";
 import { safeTraceId } from "../env.ts";
 
 export class AsyncAdmissionError extends Error {
-	constructor(message: string, readonly exitCode: number) {
+	readonly exitCode: number;
+
+	constructor(message: string, exitCode: number) {
 		super(message);
 		this.name = "AsyncAdmissionError";
+		this.exitCode = exitCode;
 	}
 }
 

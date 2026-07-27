@@ -273,7 +273,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			...(resources.workspace.childLaunchGate
 				? {
 					launchGate: {
-						launcherPath: path.join(runtime.root, "scripts", "launch_implementer_child.py"),
+						launcherPath: path.join(runtime.root, "scripts", "launch-implementer-child.ts"),
 						...resources.workspace.childLaunchGate,
 					},
 				}

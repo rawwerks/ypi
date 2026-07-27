@@ -14,9 +14,12 @@ export interface ContextSourceOptions {
 }
 
 export class CliInputError extends Error {
-	constructor(message: string, readonly exitCode: number) {
+	readonly exitCode: number;
+
+	constructor(message: string, exitCode: number) {
 		super(message);
 		this.name = "CliInputError";
+		this.exitCode = exitCode;
 	}
 }
 

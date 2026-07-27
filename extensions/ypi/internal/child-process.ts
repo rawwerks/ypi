@@ -47,7 +47,7 @@ function signalledExitCode(signal: NodeJS.Signals | null): number {
 export function runChildProcess(options: ChildProcessOptions): Promise<ChildProcessResult> {
 	return new Promise((resolve, reject) => {
 		const piExecutable = process.env.YPI_PI_BIN || "pi";
-		const executable = options.launchGate ? "python3" : piExecutable;
+		const executable = options.launchGate ? process.env.YPI_NODE_BIN || "node" : piExecutable;
 		const args = options.launchGate
 			? [
 				options.launchGate.launcherPath,

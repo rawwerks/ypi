@@ -18,8 +18,8 @@ import {
 	reserveImplementerLease,
 	withImplementerRegistryLock,
 	writeImplementerLeaseRecord,
-	type ImplementerLeaseRecord,
 } from "./workspace-registry.ts";
+import type { ImplementerLeaseRecord } from "./implementer-lease.ts";
 
 export type ChildMode = "review" | "implement";
 export type WorkspaceMode = "read-only" | "git-worktree";

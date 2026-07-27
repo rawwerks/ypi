@@ -24,6 +24,24 @@ to adapters. It owns:
 Private owners under `extensions/ypi/internal/` implement these policies. An
 adapter must not bypass them or duplicate their decisions.
 
+## Implementer State Ownership
+
+The writable lifecycle has one persisted contract:
+
+- `internal/implementer-lease.ts` owns lease states, object-ID rules, attempt
+  ref naming, and schema validation;
+- `internal/atomic-file.ts` owns durable file replacement;
+- `internal/workspace-registry.ts` owns live admission and registry mutation;
+- `internal/implementer-recovery/` owns stale-state classification, Git
+  salvage, workspace ownership proof, and destructive recovery;
+- `scripts/launch-implementer-child.ts` and
+  `scripts/cleanup-implementer-workspaces.ts` are thin Node entry points.
+
+Live execution and recovery import the same lease contract. Recovery does not
+redeclare the schema, scope normalization, or state names. Destructive
+worktree removal remains private to the recovery workspace owner and occurs
+only after a verified ref or a proven pre-admission state.
+
 ## Adapter Ownership
 
 ### Native Pi Adapter
@@ -54,6 +72,10 @@ batch. The root waits for the full batch before mutating or integrating.
 The `rlm_query` file resolves the checkout, selects the Pi and Node
 executables, and launches the generated adapter. It owns no recursion policy.
 `dist/rlm_query.mjs` must be reproducible from the TypeScript source.
+
+`rlm_cleanup` is likewise a thin shell adapter around the TypeScript recovery
+CLI. It owns generic temporary-file and attempt-ref retention policy, not lease
+schema or worktree salvage behavior.
 
 ## Shared Invariants
 

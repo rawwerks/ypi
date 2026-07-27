@@ -135,7 +135,9 @@ tool execution and again during snapshot verification.
 
 A launch gate records the detached child PID before Pi can begin work. This
 lets recovery distinguish a live child from a dead lease even if the root
-process is killed during spawn.
+process is killed during spawn. The gate and crash recovery run through the
+same Node/TypeScript runtime required by the rest of ypi; implement mode has no
+additional Python dependency.
 
 The worktree contains tracked files only. It does not reproduce ignored files
 or uninitialized submodule contents. Supply required external material through
@@ -185,6 +187,9 @@ cleanup invocation.
 `make test-workspace-concurrent-crash` kills children and a parent with multiple
 live leases, proving exact work preservation, live-lease isolation, registry
 recovery, and a continuously clean real checkout.
+`make test-implementer-recovery` directly exercises the shared lease schema,
+atomic persistence, TypeScript recovery CLI, hostile metadata rejection, and
+the user-facing `rlm_cleanup` adapter.
 
 ## Runtime Configuration
 
@@ -250,6 +255,10 @@ rlm_query
   dist/rlm_query.mjs
     extensions/ypi/cli.ts
     extensions/ypi/runtime-core.ts
+
+rlm_cleanup
+  scripts/cleanup-implementer-workspaces.ts
+    extensions/ypi/internal/implementer-recovery/*
 ```
 
 `scripts/build-runtime-cli --check` proves the generated CLI bundle matches

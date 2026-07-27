@@ -15,6 +15,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   the parent-death window before child execution begins.
 - Single and concurrent `SIGKILL` matrices cover staging, ref creation,
   worktree removal, child death, and a parent death with two live leases.
+- A direct implementer-recovery harness covers the shared lease schema,
+  durable atomic writes, failed ref inspection, wrong-parent refs, symlinked
+  gitlinks, and Python-unreachable cleanup.
 - README lineage now acknowledges the rawwerks/ypi hard fork, Recursive
   Language Models inspiration, and Y-combinator naming.
 - `config/runtime-env.json` and `tests/test_config_surface.sh` now enforce one
@@ -31,6 +34,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   doctor, and troubleshooting guidance uses the source checkout.
 - README, AGENTS.md, the system prompt, runtime contract, skill, and bounded
   development runbook now describe the same final entry paths and safety model.
+- Implementer launch and crash recovery now share the canonical TypeScript
+  lease contract. Thin Node entry points replace the separate Python
+  implementations, and the runtime compiler gate enforces erasable TypeScript
+  syntax supported by the required Node version.
+- Recovery now distinguishes an absent attempt ref from a failed Git
+  inspection and preserves the workspace on uncertain ref state.
 
 ### Removed
 - The alternate native and shell recursion engines and their runtime selectors.
@@ -38,6 +47,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   release automation surfaces.
 - Inherited private workflow state, experiment state, contributed extensions,
   and encryption hooks that were not owned by this fork.
+- The Python launch-gate and implementer-recovery programs, eliminating the
+  hidden Python requirement from writable delegation and disaster recovery.
 
 ### Preserved
 - Push-owner validation, release authorization denial, local hooks, provider

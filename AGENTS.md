@@ -24,6 +24,10 @@ This repository has one recursion engine:
 - `extensions/ypi/native-tool.ts` adapts that engine to Pi's native
   `rlm_query` tool.
 - `extensions/ypi/cli.ts` adapts it to the `rlm_query` shell command.
+- `extensions/ypi/internal/implementer-lease.ts` owns the persisted writer
+  lease contract shared by live execution and crash recovery.
+- `extensions/ypi/internal/implementer-recovery/` owns stale-lease
+  classification, verified salvage, and destructive workspace cleanup.
 - `dist/rlm_query.mjs` is generated and must match the TypeScript source.
 
 Every depth uses the same prompt, runtime, and extension. Review mode is
@@ -168,7 +172,8 @@ agreement.
 - depth, timeout, call-count, session, and isolation guardrails
 - configuration and provider-credential allowlist completeness
 - implementer admission, path-scope confinement, worktree/ref finalization,
-  apply-order invariance, and single/concurrent crash recovery
+  apply-order invariance, direct recovery-module coverage, and
+  single/concurrent crash recovery
 - publication authority and doctor behavior
 
 `make test-extensions` loads the real pinned Pi without a model call.
