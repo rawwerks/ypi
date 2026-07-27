@@ -1,7 +1,7 @@
 # gitleaks config for ypi.
 #
 # Extends the default ruleset and adds one narrow allowlist: the child-process provider
-# env allowlists (extensions/ypi/native-tool.ts and rlm_query) contain Cloudflare env var
+# env allowlist source and generated runtime contain Cloudflare env var
 # NAMES (e.g. CLOUDFLARE_AI_GATEWAY_HOST). These are identifiers passed through to child
 # Pi processes, not credentials, but gitleaks' cloudflare-api-key heuristic flags the bare
 # string. The allowlist is scoped to those two files and to CLOUDFLARE_* identifier tokens
@@ -17,6 +17,6 @@ regexes = [
   '''CLOUDFLARE_[A-Z0-9_]+''',
 ]
 paths = [
-  '''extensions/ypi/native-tool\.ts''',
-  '''rlm_query''',
+  '''extensions/ypi/internal/child-config\.ts''',
+  '''dist/rlm_query\.mjs''',
 ]

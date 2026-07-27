@@ -96,11 +96,6 @@ test_extension_loads() {
 # Test the canonical ypi recursive extension.
 test_extension_loads "recursive.ts" "$PROJECT_DIR/extensions/recursive.ts"
 
-# Test hashline extension (if present — it's in contrib/)
-if [ -f "$PROJECT_DIR/contrib/extensions/hashline.ts" ]; then
-    test_extension_loads "hashline.ts" "$PROJECT_DIR/contrib/extensions/hashline.ts"
-fi
-
 # Test that recursive.ts works with RLM env vars set (as it would in real usage)
 echo ""
 echo "--- Environment integration ---"
@@ -124,7 +119,7 @@ fi
 rm -f "$stderr_file" "$stderr_file.stdout"
 
 # Test the minimal pure-Pi extension mode: only Pi plus the extension files.
-# No ypi launcher, no shell rlm_query helper, no SYSTEM_PROMPT.md, and no jj.
+# No ypi launcher, shell helper, or external system prompt.
 echo ""
 echo "--- Minimal pure-Pi extension mode ---"
 
