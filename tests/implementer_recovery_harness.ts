@@ -19,6 +19,7 @@ import {
 	type ImplementerLeaseRecord,
 } from "../extensions/ypi/internal/implementer-lease.ts";
 import { parseImplementerRecoveryArguments } from "../extensions/ypi/internal/implementer-recovery/cli.ts";
+import { createRecoveryGit } from "../extensions/ypi/internal/implementer-recovery/git.ts";
 import { leaseNeedsRecovery } from "../extensions/ypi/internal/implementer-recovery/service.ts";
 import { acquireWorkspace } from "../extensions/ypi/internal/workspace-policy.ts";
 
@@ -85,6 +86,40 @@ function expectThrow(label: string, expected: string, action: () => unknown): vo
 }
 
 console.log("\n=== Implementer recovery module and CLI harness ===");
+
+{
+	const root = mkdtempSync(path.join(tmpdir(), "ypi_recovery_git_output."));
+	const bin = path.join(root, "bin");
+	mkdirSync(bin);
+	const fakeGit = path.join(bin, "git");
+	writeFileSync(
+		fakeGit,
+		`#!${process.execPath}\nprocess.stdout.write("x".repeat(2 * 1024 * 1024));\n`,
+	);
+	chmodSync(fakeGit, 0o755);
+	const originalPath = process.env.PATH;
+	process.env.PATH = `${bin}${path.delimiter}${originalPath || ""}`;
+	try {
+		try {
+			const output = createRecoveryGit(5_000).run(root, ["large-output"]);
+			record(
+				output.length === 2 * 1024 * 1024,
+				"recovery Git captures inventories above Node's default one-MiB buffer",
+				`captured ${output.length} bytes`,
+			);
+		} catch (error) {
+			record(
+				false,
+				"recovery Git captures inventories above Node's default one-MiB buffer",
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+	} finally {
+		if (originalPath === undefined) delete process.env.PATH;
+		else process.env.PATH = originalPath;
+		rmSync(root, { recursive: true, force: true });
+	}
+}
 
 {
 	const root = mkdtempSync(path.join(tmpdir(), "ypi_atomic_file."));

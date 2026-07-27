@@ -27,6 +27,7 @@ export function createRecoveryGit(
 			env: gitEnvironment(environment),
 			stdio: ["ignore", "pipe", "pipe"],
 			timeout: timeoutMilliseconds,
+			maxBuffer: Infinity,
 		});
 		if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
 			throw new Error(`git ${args.join(" ")} exceeded ${timeoutMilliseconds}ms`);
