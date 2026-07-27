@@ -21,6 +21,7 @@ export interface ChildResourceInput {
 	fullResourceIsolation?: boolean;
 	selectedProvider?: string;
 	mode: ChildMode;
+	scope?: string[];
 }
 
 export interface ChildResourceLease {
@@ -159,6 +160,7 @@ export function acquireChildResources(input: ChildResourceInput): ChildResourceL
 			cwd: input.cwd,
 			childDepth: input.childDepth,
 			mode: input.mode,
+			scope: input.scope,
 			setupDeadlineMilliseconds: input.setupDeadlineMilliseconds,
 		});
 		return {

@@ -26,30 +26,43 @@ Inspect the available surface first.
 Use the native tool for normal delegation:
 
 - `mode=review` is read-only and is the default.
-- `mode=implement` is root-only and may perform one bounded edit/write unit in
-  an existing clean Git checkout.
+- `mode=implement` is root-only and requires a non-empty `scope` of literal
+  repository-relative file or directory path prefixes.
 - `context` carries exact text when the child must inspect a specific input.
 - `fork` copies the parent session into the child when that history is relevant.
 
-Native tool calls are sequential. When the wrapper has enabled the optional
-shell helper, `rlm_query --async` may be used for bounded parallel read-only
-reviews. It returns job paths; the caller owns collection and cancellation.
-Never overlap an implementer with root mutations or another implementer.
+Native tool calls can run in parallel. Before chartering implementers, discover
+the relevant files deterministically, partition them into disjoint scopes, and
+delegate at most three slices. Do not combine root edit/write/bash calls with a
+live implementer batch, and do not integrate one result until every call in the
+batch returns. Overlapping scopes are refused by the runtime.
+
+When the wrapper has enabled the optional shell helper, `rlm_query --async` may
+be used for bounded parallel read-only reviews. It returns job paths; the caller
+owns collection and cancellation.
 
 ## Review And Implementation
 
 A review child returns findings, counterevidence, and verification advice. It
 does not edit files or run process-spawning tools.
 
-An implementer receives only checkout-confined read and edit tools. The parent
-owns commands and tests. On success the runtime snapshots the complete attempt
-at a verified `refs/ypi/attempt-*` reference, restores the clean baseline, and
-reports the reference, commit, changed paths, diffstat, and restoration status.
-The parent must inspect and explicitly apply that snapshot before acceptance.
+An implementer receives worktree-confined read tools and scope-confined edit
+tools in a detached ephemeral Git worktree. Explicit task files listed in the
+prompt remain readable. The user's real checkout remains clean. On success the
+runtime snapshots the complete attempt at a verified
+`refs/ypi/attempt-*` reference, proves the worktree still matches, removes it,
+and reports the scope, reference, commit, changed paths, diffstat, and removal
+status. The parent owns commands and tests and must inspect and explicitly apply
+each result before acceptance. Disjoint refs must apply in either order; never
+auto-resolve a conflict.
 
-If snapshot or reset safety cannot be proven, treat the result as failed
-finalization. Preserve the checkout, reference when available, and writer lock
-for explicit recovery.
+Implementer worktrees contain tracked files only, without ignored files or
+uninitialized submodule contents. Pass such material through `context`, or keep
+the task in the root.
+
+If snapshot or removal safety cannot be proven, treat the result as failed
+finalization. Preserve the isolated worktree, reference when available, and
+lease for explicit `rlm_cleanup` recovery.
 
 ## Engineering Rules
 

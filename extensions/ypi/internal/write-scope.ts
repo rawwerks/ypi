@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { IMPLEMENT_TOOL_ALLOWLIST } from "./child-config.ts";
+import { normalizeImplementScope, pathIsWithinImplementScope } from "./implement-scope.ts";
 
 export interface WriteScopeDecision {
 	allowed: boolean;
@@ -15,7 +16,9 @@ interface ImplementWritePolicy {
 	auditFile: string;
 	baselineIgnoreRoot: string;
 	baselineIndexFile: string;
+	externalReadFiles: string[];
 	gitDir: string;
+	scope: string[];
 	submodulePaths: string[];
 }
 
@@ -79,11 +82,18 @@ function readPolicyFromEnvironment(): ImplementWritePolicy | undefined {
 	const baselineIgnoreRoot = process.env.YPI_IMPLEMENT_BASELINE_IGNORE_ROOT;
 	const baselineIndexFile = process.env.YPI_IMPLEMENT_BASELINE_INDEX;
 	const gitDir = process.env.YPI_IMPLEMENT_GIT_DIR;
+	const scopeFile = process.env.YPI_IMPLEMENT_SCOPE_FILE;
 	const submodulePathsFile = process.env.YPI_IMPLEMENT_SUBMODULES_FILE;
-	if (!auditFile || !baselineIgnoreRoot || !baselineIndexFile || !gitDir || !submodulePathsFile) return undefined;
+	if (!auditFile || !baselineIgnoreRoot || !baselineIndexFile || !gitDir || !scopeFile || !submodulePathsFile) return undefined;
 	try {
+		const scope = normalizeImplementScope(readFileSync(scopeFile, "utf8").split("\0").filter(Boolean));
 		const submodulePaths = readFileSync(submodulePathsFile, "utf8").split("\0").filter(Boolean);
-		return { auditFile, baselineIgnoreRoot, baselineIndexFile, gitDir, submodulePaths };
+		const externalReadFiles = [
+			process.env.CONTEXT,
+			process.env.RLM_PROMPT_FILE,
+			process.env.RLM_ROOT_PROMPT_FILE,
+		].filter((candidate): candidate is string => Boolean(candidate));
+		return { auditFile, baselineIgnoreRoot, baselineIndexFile, externalReadFiles, gitDir, scope, submodulePaths };
 	} catch {
 		return undefined;
 	}
@@ -93,14 +103,15 @@ function isSubmodulePath(relativePath: string, submodulePaths: string[]): boolea
 	return submodulePaths.some((candidate) => relativePath === candidate || relativePath.startsWith(`${candidate}/`));
 }
 
-export function checkImplementWritePath(
+function resolveImplementPath(
 	root: string,
 	cwd: string,
 	requestedPath: unknown,
-	policy?: ImplementWritePolicy,
+	operation: "read" | "write",
+	externalReadFiles: readonly string[] = [],
 ): WriteScopeDecision {
 	if (typeof requestedPath !== "string" || requestedPath.length === 0 || requestedPath.includes("\0")) {
-		return { allowed: false, reason: "Implementer write path is missing or invalid" };
+		return { allowed: false, reason: `Implementer ${operation} path is missing or invalid` };
 	}
 	let canonicalRoot: string;
 	try {
@@ -111,25 +122,78 @@ export function checkImplementWritePath(
 	const absolutePath = path.resolve(cwd, requestedPath);
 	const existing = nearestExistingPath(absolutePath);
 	if (!existing) {
-		return { allowed: false, absolutePath, reason: "Implementer write ancestry could not be verified" };
+		return { allowed: false, absolutePath, reason: `Implementer ${operation} ancestry could not be verified` };
 	}
 	let canonicalCandidate: string;
 	try {
 		const realExisting = realpathSync(existing);
 		canonicalCandidate = path.resolve(realExisting, path.relative(existing, absolutePath));
 	} catch {
-		return { allowed: false, absolutePath, reason: "Implementer write ancestry could not be resolved" };
+		return { allowed: false, absolutePath, reason: `Implementer ${operation} ancestry could not be resolved` };
 	}
 	if (!isWithin(canonicalRoot, canonicalCandidate)) {
-		return { allowed: false, absolutePath, reason: "Implementer write would escape the leased checkout or follow an external symlink" };
+		const isExplicitExternalRead = operation === "read" && externalReadFiles.some((candidate) => {
+			try {
+				return realpathSync(candidate) === canonicalCandidate;
+			} catch {
+				return false;
+			}
+		});
+		if (isExplicitExternalRead) return { allowed: true, absolutePath: canonicalCandidate };
+		return {
+			allowed: false,
+			absolutePath,
+			reason: `Implementer ${operation} would escape the leased checkout or follow an external symlink`,
+		};
 	}
 	const relative = path.relative(canonicalRoot, canonicalCandidate);
 	const components = relative.split(path.sep);
 	if (components.includes(".git")) {
-		return { allowed: false, absolutePath, reason: "Implementer cannot modify repository metadata" };
+		return {
+			allowed: false,
+			absolutePath,
+			reason: operation === "write"
+				? "Implementer cannot modify repository metadata"
+				: "Implementer cannot read repository metadata",
+		};
 	}
 	const relativePath = components.join("/");
+	return { allowed: true, absolutePath, relativePath };
+}
+
+export function checkImplementReadPath(
+	root: string,
+	cwd: string,
+	requestedPath: unknown,
+	policy?: Pick<ImplementWritePolicy, "externalReadFiles" | "submodulePaths">,
+): WriteScopeDecision {
+	const decision = resolveImplementPath(root, cwd, requestedPath, "read", policy?.externalReadFiles);
+	if (!decision.allowed || !policy || decision.relativePath === undefined) return decision;
+	if (isSubmodulePath(decision.relativePath, policy.submodulePaths)) {
+		return {
+			allowed: false,
+			absolutePath: decision.absolutePath,
+			relativePath: decision.relativePath,
+			reason: "Implementer cannot read a submodule path outside the superproject snapshot boundary",
+		};
+	}
+	return decision;
+}
+
+export function checkImplementWritePath(
+	root: string,
+	cwd: string,
+	requestedPath: unknown,
+	policy?: ImplementWritePolicy,
+): WriteScopeDecision {
+	const decision = resolveImplementPath(root, cwd, requestedPath, "write");
+	if (!decision.allowed || decision.relativePath === undefined) return decision;
+	const { absolutePath, relativePath } = decision;
 	if (!policy) return { allowed: true, absolutePath, relativePath };
+	const canonicalRoot = realpathSync(root);
+	if (!pathIsWithinImplementScope(relativePath, policy.scope)) {
+		return { allowed: false, absolutePath, relativePath, reason: `Implementer write is outside its declared scope [${policy.scope.join(", ")}]` };
+	}
 	if (isSubmodulePath(relativePath, policy.submodulePaths)) {
 		return { allowed: false, absolutePath, relativePath, reason: "Implementer cannot modify a submodule path because the superproject cannot snapshot or reset it" };
 	}
@@ -163,8 +227,14 @@ export function registerImplementWriteScope(pi: ExtensionAPI): void {
 		if (!IMPLEMENT_TOOL_SET.has(event.toolName)) {
 			return block(`Implementer tool "${event.toolName}" is outside the explicit confinement allowlist`, ctx);
 		}
+		if (!policy) return block("Implementer confinement metadata is unavailable", ctx);
+		if (event.toolName === "read" || event.toolName === "grep" || event.toolName === "find" || event.toolName === "ls") {
+			const requestedPath = event.toolName === "read" ? event.input.path : event.input.path ?? ".";
+			const decision = checkImplementReadPath(root, ctx.cwd, requestedPath, policy);
+			if (!decision.allowed) return block(decision.reason || "Implementer read blocked", ctx);
+			return undefined;
+		}
 		if (event.toolName !== "write" && event.toolName !== "edit") return undefined;
-		if (!policy) return block("Implementer write confinement metadata is unavailable", ctx);
 		const decision = checkImplementWritePath(root, ctx.cwd, event.input.path, policy);
 		if (!decision.allowed) return block(decision.reason || "Implementer write blocked", ctx);
 		try {

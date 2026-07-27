@@ -12,6 +12,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ensureEnvironment, shouldExposeRecursion } from "./ypi/env.ts";
 import { registerNativeRlmQueryTool } from "./ypi/native-tool.ts";
 import { createRootPromptLease } from "./ypi/internal/root-prompt.ts";
+import { registerRootImplementerBatchPolicy } from "./ypi/internal/root-batch-policy.ts";
 import { registerImplementWriteScope } from "./ypi/internal/write-scope.ts";
 import { patchSystemPrompt } from "./ypi/prompt.ts";
 import { debug, resolveRuntime } from "./ypi/runtime.ts";
@@ -35,6 +36,7 @@ export default function (pi: ExtensionAPI) {
 	registry[ACTIVE_EXTENSION] = { extensionPath: runtime.extensionPath, token };
 	const rootPrompt = createRootPromptLease();
 	ensureEnvironment(runtime);
+	registerRootImplementerBatchPolicy(pi);
 	registerImplementWriteScope(pi);
 	if (shouldExposeRecursion()) {
 		registerNativeRlmQueryTool(pi, runtime);

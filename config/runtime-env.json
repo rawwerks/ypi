@@ -50,6 +50,7 @@
     { "name": "YPI_IMPLEMENT_BASELINE_INDEX", "visibility": "internal" },
     { "name": "YPI_IMPLEMENT_GIT_DIR", "visibility": "internal" },
     { "name": "YPI_IMPLEMENT_ROOT", "visibility": "internal" },
+    { "name": "YPI_IMPLEMENT_SCOPE_FILE", "visibility": "internal" },
     { "name": "YPI_IMPLEMENT_SUBMODULES_FILE", "visibility": "internal" },
     { "name": "YPI_SHELL_HELPER", "visibility": "internal" },
     { "name": "HOME", "visibility": "platform" },

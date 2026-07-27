@@ -19,6 +19,7 @@ import {
 import { formatCombinedChildOutput, normalizeChildOutput, type ChildToolActivity } from "./internal/child-output.ts";
 import { runChildProcess } from "./internal/child-process.ts";
 import { acquireChildResources } from "./internal/child-resources.ts";
+import { normalizeImplementScope } from "./internal/implement-scope.ts";
 import {
 	WorkspaceFinalizationError,
 	type ChildMode,
@@ -54,6 +55,7 @@ export interface RecursiveChildRequest {
 	onChildSpawn?: (pid: number) => void;
 	signal?: AbortSignal;
 	mode?: ChildMode;
+	scope?: string[];
 }
 
 export interface RecursiveChildDetails {
@@ -132,6 +134,16 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 	}
 	if (childDepth > limit) throw new RecursiveChildError(`Max depth exceeded at ${depth}/${limit}`, 1);
 	const requestedMode = request.mode ?? "review";
+	let implementScope: string[] | undefined;
+	if (requestedMode === "implement") {
+		try {
+			implementScope = normalizeImplementScope(request.scope);
+		} catch (error) {
+			throw new RecursiveChildError(error instanceof Error ? error.message : String(error), 1);
+		}
+	} else if (request.scope !== undefined) {
+		throw new RecursiveChildError("Implement scope is valid only with mode=implement", 1);
+	}
 	if (requestedMode === "implement" && (depth > 0 || process.env.RLM_WRITE_MODE_CEILING === "review")) {
 		throw new RecursiveChildError("Writable recursion is root-only and cannot be escalated by a child. Continue implementation in the current agent or delegate a read-only review.", 1);
 	}
@@ -164,6 +176,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		fullResourceIsolation,
 		selectedProvider: provider,
 		mode: requestedMode,
+		scope: implementScope,
 	});
 
 	let workspace: WorkspaceReport | undefined;
@@ -193,6 +206,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			YPI_IMPLEMENT_BASELINE_IGNORE_ROOT: "",
 			YPI_IMPLEMENT_BASELINE_INDEX: "",
 			YPI_IMPLEMENT_GIT_DIR: "",
+			YPI_IMPLEMENT_SCOPE_FILE: "",
 			YPI_IMPLEMENT_SUBMODULES_FILE: "",
 			...resources.workspace.childEnvironment,
 			RLM_WRITE_MODE_CEILING: "review",
@@ -229,6 +243,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		request.onAdmitted?.(callCount);
 		trace(`[${nowTraceTime()}] depth=${depth}→${childDepth} PID=${process.pid} call=${callCount} trace=${process.env.RLM_TRACE_ID || ""} caller=${request.caller} fork=${request.fork === true} mode=${requestedMode} workspace=${resources.workspace.mode}`);
 		const started = Date.now();
+		resources.workspace.prepareChildLaunch();
 		const processResult = await runChildProcess({
 			args,
 			env,
@@ -240,8 +255,29 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			onText: request.onText,
 			onToolActivity: request.onToolActivity,
 			onTextDrain: request.onTextDrain,
-			onSpawn: request.onChildSpawn,
+			onSpawn(pid) {
+				try {
+					resources.workspace.noteChildPid(pid);
+				} catch (error) {
+					try {
+						if (process.platform === "win32") process.kill(pid, "SIGKILL");
+						else process.kill(-pid, "SIGKILL");
+					} catch {
+						// The child may already have exited.
+					}
+					throw error;
+				}
+				request.onChildSpawn?.(pid);
+			},
 			quiesceProcessGroup: resources.workspace.quiesceProcessGroup,
+			...(resources.workspace.childLaunchGate
+				? {
+					launchGate: {
+						launcherPath: path.join(runtime.root, "scripts", "launch_implementer_child.py"),
+						...resources.workspace.childLaunchGate,
+					},
+				}
+				: {}),
 		});
 		const elapsed = Math.max(0, Math.round((Date.now() - started) / 1000));
 		const output = normalizeChildOutput(processResult);
@@ -330,8 +366,9 @@ function formatWorkspaceReport(report: WorkspaceReport): string {
 		...(report.finalHead ? [`Final state: ${displayPath(report.finalHead)}`] : []),
 		...(report.attemptRef ? [`Attempt ref: ${displayPath(report.attemptRef)}`] : []),
 		...(report.attemptCommit ? [`Attempt commit: ${displayPath(report.attemptCommit)}`] : []),
+		...(report.scope ? [`Declared scope: ${report.scope.map(displayPath).join(", ")}`] : []),
 		...(report.diffStat ? [`Diffstat:\n${report.diffStat}`] : []),
-		...(report.treeRestored !== undefined ? [`Tree restored: ${report.treeRestored ? "yes" : "no"}`] : []),
+		...(report.treeRestored !== undefined ? [`Ephemeral worktree removed: ${report.treeRestored ? "yes" : "no"}`] : []),
 		...(!report.reportComplete && report.reportError ? [`Workspace report warning: ${report.reportError}`] : []),
 	].join("\n");
 }

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -95,6 +95,8 @@ done
   echo "YPI_EXPLICIT_RELEASE_REQUEST=\${YPI_EXPLICIT_RELEASE_REQUEST:-unset}"
   echo "YPI_EXPLICIT_NON_OWNED_REMOTE=\${YPI_EXPLICIT_NON_OWNED_REMOTE:-unset}"
   echo "YPI_IMPLEMENT_ROOT=\${YPI_IMPLEMENT_ROOT:-unset}"
+  echo "YPI_IMPLEMENT_SCOPE=$(tr '\\0' ',' < "\${YPI_IMPLEMENT_SCOPE_FILE:-/dev/null}" 2>/dev/null || true)"
+  echo "WORKING_DIR=$PWD"
   echo "SECRET_TOKEN=\${SECRET_TOKEN:-unset}"
   echo "PI_CODING_AGENT_DIR=\${PI_CODING_AGENT_DIR:-unset}"
   echo "PI_PACKAGE_DIR=\${PI_PACKAGE_DIR:-unset}"
@@ -163,6 +165,11 @@ elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "sleep" ]; then
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "write-file" ]; then
   printf '%s\n' 'implemented by child' > implemented.txt
   echo "IMPLEMENT_CHILD_OK"
+elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "write-scope" ]; then
+  SCOPE_PATH=$(tr '\\0' '\\n' < "$YPI_IMPLEMENT_SCOPE_FILE" | head -1)
+  printf '%s\n' "implemented $SCOPE_PATH" > "$SCOPE_PATH"
+  sleep 0.2
+  echo "IMPLEMENT_SCOPE_OK"
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "write-file-fail" ]; then
   printf '%s\n' 'partial implementation' > partial-implemented.txt
   echo "IMPLEMENT_CHILD_FAILED" >&2
@@ -221,7 +228,13 @@ function context(cwd = projectRoot): ExtensionContext {
 
 async function invoke(prompt = "child prompt", signal?: AbortSignal, onUpdate?: (result: any) => void, mode: "review" | "implement" = "review"): Promise<string> {
 	if (!tool) throw new Error("native tool was not registered");
-	const result = await tool.execute("test-call", { prompt, mode }, signal, onUpdate, context());
+	const result = await tool.execute(
+		"test-call",
+		{ prompt, mode, ...(mode === "implement" ? { scope: ["."] } : {}) },
+		signal,
+		onUpdate,
+		context(),
+	);
 	const text = result.content.find((item) => item.type === "text")?.text || "";
 	return text;
 }
@@ -244,7 +257,7 @@ async function run(): Promise<void> {
 	ensureEnvironment(runtime, context());
 	registerNativeRlmQueryTool(pi, runtime);
 	record(Boolean(tool), "native tool registered");
-	record(tool?.executionMode === "sequential", "native tool is a root-mutation batch barrier");
+	record(tool?.executionMode === "parallel", "native tool permits bounded parallel slice calls");
 
 	clearYpiEnv();
 	process.env.RLM_DEPTH = "1";
@@ -372,30 +385,98 @@ async function run(): Promise<void> {
 	process.env.YPI_FAKE_PI_MODE = "write-file";
 	ensureEnvironment(runtime, context(implementRoot));
 	if (!tool) throw new Error("native tool was not registered");
-	const implementResult = await tool.execute("implement-call", { prompt: "bounded implementation", mode: "implement" }, undefined, undefined, context(implementRoot));
+	await expectThrow(
+		"N5a: implement mode requires a declared path scope",
+		"non-empty scope",
+		() => tool!.execute("implement-missing-scope", { prompt: "unscoped implementation", mode: "implement" }, undefined, undefined, context(implementRoot)),
+	);
+	assertNotContains("N5a: missing scope spawns no child", readLog(), "ARGS:");
+	const implementResult = await tool.execute(
+		"implement-call",
+		{ prompt: "bounded implementation", mode: "implement", scope: ["implemented.txt"] },
+		undefined,
+		undefined,
+		context(implementRoot),
+	);
 	const implementText = implementResult.content.find((item) => item.type === "text")?.text || "";
 	assertContains("N5a: one clean-Git implementer executes", implementText, "IMPLEMENT_CHILD_OK");
 	assertContains("N5a: implementer result reports changed path", implementText, "implemented.txt");
 	record(
-		implementResult.details?.workspace?.workspaceMode === "git-snapshot"
+		implementResult.details?.workspace?.workspaceMode === "git-worktree"
 			&& implementResult.details?.workspace?.reportComplete === true
 			&& implementResult.details?.workspace?.treeRestored === true
 			&& Boolean(implementResult.details?.workspace?.attemptRef)
 			&& Boolean(implementResult.details?.workspace?.attemptCommit),
-		"N5a: implementer returns a complete snapshot/reset report",
+		"N5a: implementer returns a complete worktree/ref report",
 		JSON.stringify(implementResult.details),
 	);
 	assertContains("N5a: implementer receives the explicit confined tool allowlist", readLog(), "--tools read,grep,find,ls,edit,write,rlm_query");
 	assertNotContains("N5a: implementer excludes process-spawning bash", readLog(), "--tools read,grep,find,ls,bash");
 	assertContains("N5a: implementer forces canonical-only extension mode", readLog(), "--no-extensions");
 	assertContains("N5a: implementer forces exact confinement extension", readLog(), `-e ${runtime.extensionPath}`);
-	assertContains("N5a: implementer receives its exact write-scope root", readLog(), `YPI_IMPLEMENT_ROOT=${implementRoot}`);
+	const loggedImplementRoot = /^YPI_IMPLEMENT_ROOT=(.+)$/m.exec(readLog())?.[1] || "";
+	record(
+		Boolean(loggedImplementRoot)
+			&& loggedImplementRoot !== implementRoot
+			&& loggedImplementRoot.includes("ypi_ws_"),
+		"N5a: implementer receives an isolated write-scope root",
+		loggedImplementRoot,
+	);
+	assertContains("N5a: implementer receives its declared scope", readLog(), "YPI_IMPLEMENT_SCOPE=implemented.txt");
 	record(!existsSync(path.join(implementRoot, "implemented.txt")), "N5a: implementer edits leave the root checkout clean");
 	const implementAttemptRef = implementResult.details?.workspace?.attemptRef || "";
 	const implementedFromRef = spawnSync("git", ["show", `${implementAttemptRef}:implemented.txt`], { cwd: implementRoot, encoding: "utf8", env: fixtureGitEnv() });
 	record(implementedFromRef.status === 0 && implementedFromRef.stdout === "implemented by child\n", "N5a: salvage ref contains the exact child edit");
-	const implementLock = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "ypi-implementer.lock"], { cwd: implementRoot, encoding: "utf8", env: fixtureGitEnv() }).stdout.trim();
-	record(!existsSync(implementLock), "N5a: implementer releases writer lease after reporting");
+	const implementCommonDir = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: implementRoot, encoding: "utf8", env: fixtureGitEnv() }).stdout.trim();
+	const implementLeases = path.join(implementCommonDir, "ypi-implementers", "leases");
+	record(!existsSync(implementLeases) || readdirSync(implementLeases).length === 0, "N5a: implementer releases writer lease after reporting");
+
+	const parallelImplementRoot = mkdtempSync(path.join(scratch, "implement-parallel."));
+	spawnSync("git", ["init", "-q"], { cwd: parallelImplementRoot, env: fixtureGitEnv() });
+	writeFileSync(path.join(parallelImplementRoot, "base.txt"), "base\n");
+	spawnSync("git", ["add", "base.txt"], { cwd: parallelImplementRoot, env: fixtureGitEnv() });
+	spawnSync("git", ["-c", "user.name=ypi-test", "-c", "user.email=ypi@example.invalid", "commit", "-qm", "base"], { cwd: parallelImplementRoot, env: fixtureGitEnv() });
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
+	process.env.RLM_JSON = "0";
+	process.env.YPI_FAKE_PI_MODE = "write-scope";
+	ensureEnvironment(runtime, context(parallelImplementRoot));
+	const parallelResults = await Promise.all([
+		tool.execute(
+			"parallel-a",
+			{ prompt: "implement slice a", mode: "implement", scope: ["slice-a.txt"] },
+			undefined,
+			undefined,
+			context(parallelImplementRoot),
+		),
+		tool.execute(
+			"parallel-b",
+			{ prompt: "implement slice b", mode: "implement", scope: ["slice-b.txt"] },
+			undefined,
+			undefined,
+			context(parallelImplementRoot),
+		),
+	]);
+	record(
+		parallelResults.every((result) => result.details?.workspace?.reportComplete === true)
+			&& parallelResults.every((result) => Boolean(result.details?.workspace?.attemptRef))
+			&& !existsSync(path.join(parallelImplementRoot, "slice-a.txt"))
+			&& !existsSync(path.join(parallelImplementRoot, "slice-b.txt")),
+		"N5a3: two disjoint native implement calls run concurrently and leave the root clean",
+		JSON.stringify(parallelResults.map((result) => result.details?.workspace)),
+	);
+	const parallelRefs = parallelResults.map((result) => result.details?.workspace?.attemptRef || "");
+	const parallelA = spawnSync("git", ["show", `${parallelRefs[0]}:slice-a.txt`], { cwd: parallelImplementRoot, encoding: "utf8", env: fixtureGitEnv() });
+	const parallelB = spawnSync("git", ["show", `${parallelRefs[1]}:slice-b.txt`], { cwd: parallelImplementRoot, encoding: "utf8", env: fixtureGitEnv() });
+	record(
+		parallelA.status === 0
+			&& parallelA.stdout === "implemented slice-a.txt\n"
+			&& parallelB.status === 0
+			&& parallelB.stdout === "implemented slice-b.txt\n",
+		"N5a3: each parallel native result returns its own exact slice ref",
+	);
 
 	// N5a2: git hooks export GIT_DIR (and friends) into the environment. The
 	// lease's VCS checks must inspect the leased checkout, not whatever
@@ -421,7 +502,13 @@ async function run(): Promise<void> {
 	process.env.GIT_WORK_TREE = hookVictimRoot;
 	try {
 		ensureEnvironment(runtime, context(hookImplementRoot));
-		const hookImplementResult = await tool.execute("implement-hook-call", { prompt: "bounded implementation under git hook env", mode: "implement" }, undefined, undefined, context(hookImplementRoot));
+		const hookImplementResult = await tool.execute(
+			"implement-hook-call",
+			{ prompt: "bounded implementation under git hook env", mode: "implement", scope: ["implemented.txt"] },
+			undefined,
+			undefined,
+			context(hookImplementRoot),
+		);
 		const hookImplementText = hookImplementResult.content.find((item) => item.type === "text")?.text || "";
 		assertContains("N5a2: implementer lease ignores inherited GIT_DIR/GIT_WORK_TREE", hookImplementText, "IMPLEMENT_CHILD_OK");
 	} finally {
@@ -442,7 +529,13 @@ async function run(): Promise<void> {
 	process.env.YPI_FAKE_PI_MODE = "write-file-fail";
 	ensureEnvironment(runtime, context(failingImplementRoot));
 	try {
-		await tool.execute("implement-failure", { prompt: "bounded failing implementation", mode: "implement" }, undefined, undefined, context(failingImplementRoot));
+		await tool.execute(
+			"implement-failure",
+			{ prompt: "bounded failing implementation", mode: "implement", scope: ["partial-implemented.txt"] },
+			undefined,
+			undefined,
+			context(failingImplementRoot),
+		);
 		record(false, "N5a: failed implementer returns its changed-path report", "expected failure");
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -450,11 +543,11 @@ async function run(): Promise<void> {
 			message.includes("partial-implemented.txt")
 				&& message.includes("report: complete")
 				&& message.includes("Attempt ref:")
-				&& message.includes("Tree restored: yes"),
-			"N5a: failed implementer returns its salvage ref and reset report",
+				&& message.includes("Ephemeral worktree removed: yes"),
+			"N5a: failed implementer returns its worktree/ref report",
 			message,
 		);
-		record(!existsSync(path.join(failingImplementRoot, "partial-implemented.txt")), "N5a: failed implementer also restores the clean checkout");
+		record(!existsSync(path.join(failingImplementRoot, "partial-implemented.txt")), "N5a: failed implementer also leaves the root checkout clean");
 	}
 
 	const cancelledImplementRoot = mkdtempSync(path.join(scratch, "implement-cancelled."));
@@ -472,16 +565,22 @@ async function run(): Promise<void> {
 	const cancellation = new AbortController();
 	setTimeout(() => cancellation.abort(), 150);
 	try {
-		await tool.execute("implement-cancelled", { prompt: "bounded cancelled implementation", mode: "implement" }, cancellation.signal, undefined, context(cancelledImplementRoot));
-		record(false, "N5a: cancelled implementer uses snapshot/reset", "expected cancellation");
+		await tool.execute(
+			"implement-cancelled",
+			{ prompt: "bounded cancelled implementation", mode: "implement", scope: ["interrupted-implemented.txt"] },
+			cancellation.signal,
+			undefined,
+			context(cancelledImplementRoot),
+		);
+		record(false, "N5a: cancelled implementer preserves a worktree/ref result", "expected cancellation");
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		record(
-			message.includes("Child Pi cancelled")
-				&& message.includes("interrupted-implemented.txt")
-				&& message.includes("Tree restored: yes")
-				&& !existsSync(path.join(cancelledImplementRoot, "interrupted-implemented.txt")),
-			"N5a: cancelled implementer uses snapshot/reset",
+				message.includes("Child Pi cancelled")
+					&& message.includes("interrupted-implemented.txt")
+					&& message.includes("Ephemeral worktree removed: yes")
+					&& !existsSync(path.join(cancelledImplementRoot, "interrupted-implemented.txt")),
+				"N5a: cancelled implementer preserves a worktree/ref result",
 			message,
 		);
 	}
@@ -500,16 +599,22 @@ async function run(): Promise<void> {
 	process.env.YPI_FAKE_PI_MODE = "write-then-sleep";
 	ensureEnvironment(runtime, context(timedImplementRoot));
 	try {
-		await tool.execute("implement-timeout", { prompt: "bounded timed implementation", mode: "implement" }, undefined, undefined, context(timedImplementRoot));
-		record(false, "N5a: timed-out implementer uses snapshot/reset", "expected timeout");
+		await tool.execute(
+			"implement-timeout",
+			{ prompt: "bounded timed implementation", mode: "implement", scope: ["interrupted-implemented.txt"] },
+			undefined,
+			undefined,
+			context(timedImplementRoot),
+		);
+		record(false, "N5a: timed-out implementer preserves a worktree/ref result", "expected timeout");
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		record(
-			message.includes("timed out")
-				&& message.includes("interrupted-implemented.txt")
-				&& message.includes("Tree restored: yes")
-				&& !existsSync(path.join(timedImplementRoot, "interrupted-implemented.txt")),
-			"N5a: timed-out implementer uses snapshot/reset",
+				message.includes("timed out")
+					&& message.includes("interrupted-implemented.txt")
+					&& message.includes("Ephemeral worktree removed: yes")
+					&& !existsSync(path.join(timedImplementRoot, "interrupted-implemented.txt")),
+				"N5a: timed-out implementer preserves a worktree/ref result",
 			message,
 		);
 	}
@@ -527,14 +632,20 @@ async function run(): Promise<void> {
 	process.env.YPI_PI_BIN = path.join(scratch, "missing-pi");
 	ensureEnvironment(runtime, context(spawnFailureRoot));
 	try {
-		await tool.execute("implement-spawn-failure", { prompt: "bounded missing executable", mode: "implement" }, undefined, undefined, context(spawnFailureRoot));
+		await tool.execute(
+			"implement-spawn-failure",
+			{ prompt: "bounded missing executable", mode: "implement", scope: ["."] },
+			undefined,
+			undefined,
+			context(spawnFailureRoot),
+		);
 		record(false, "N5a: spawn failure still finalizes workspace", "expected spawn error");
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		record(
 			message.includes("ENOENT")
 				&& message.includes("Attempt ref:")
-				&& message.includes("Tree restored: yes")
+				&& message.includes("Ephemeral worktree removed: yes")
 				&& spawnSync("git", ["status", "--porcelain=v2", "--untracked-files=all"], { cwd: spawnFailureRoot, encoding: "utf8", env: fixtureGitEnv() }).stdout.trim() === "",
 			"N5a: spawn failure still finalizes workspace",
 			message,
@@ -554,13 +665,25 @@ async function run(): Promise<void> {
 	process.env.YPI_FAKE_PI_MODE = "write-background";
 	ensureEnvironment(runtime, context(descendantRoot));
 	if (!tool) throw new Error("native tool was not registered");
-	await tool.execute("implement-descendant", { prompt: "bounded descendant cleanup", mode: "implement" }, undefined, undefined, context(descendantRoot));
+	await tool.execute(
+		"implement-descendant",
+		{ prompt: "bounded descendant cleanup", mode: "implement", scope: ["descendant-write.txt"] },
+		undefined,
+		undefined,
+		context(descendantRoot),
+	);
 	await new Promise((resolve) => setTimeout(resolve, 1_200));
 	record(!existsSync(path.join(descendantRoot, "descendant-write.txt")), "N5a: writer lease cleanup terminates surviving child process-group descendants");
 	process.env.YPI_FAKE_PI_MODE = "write-background-inherited-pipes";
 	ensureEnvironment(runtime, context(descendantRoot));
 	const inheritedStarted = Date.now();
-	await tool.execute("implement-descendant-inherited", { prompt: "bounded inherited-pipe cleanup", mode: "implement" }, undefined, undefined, context(descendantRoot));
+	await tool.execute(
+		"implement-descendant-inherited",
+		{ prompt: "bounded inherited-pipe cleanup", mode: "implement", scope: ["inherited-descendant-write.txt"] },
+		undefined,
+		undefined,
+		context(descendantRoot),
+	);
 	record(Date.now() - inheritedStarted < 5_000, "N5a: inherited descendant pipes cannot hold writer completion open");
 	record(!existsSync(path.join(descendantRoot, "inherited-descendant-write.txt")), "N5a: early process-group sweep prevents inherited-pipe descendant writes");
 

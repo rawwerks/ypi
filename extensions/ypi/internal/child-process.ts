@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import type { CostSummary } from "../guardrails.ts";
 import {
@@ -23,6 +24,11 @@ export interface ChildProcessOptions {
 	onTextDrain?: () => Promise<void>;
 	onSpawn?: (pid: number) => void;
 	quiesceProcessGroup?: boolean;
+	launchGate?: {
+		launcherPath: string;
+		pidFile: string;
+		readyFile: string;
+	};
 }
 
 export interface ChildProcessResult extends ChildOutputSnapshot {
@@ -40,13 +46,42 @@ function signalledExitCode(signal: NodeJS.Signals | null): number {
 
 export function runChildProcess(options: ChildProcessOptions): Promise<ChildProcessResult> {
 	return new Promise((resolve, reject) => {
-		const child = spawn(process.env.YPI_PI_BIN || "pi", options.args, {
+		const piExecutable = process.env.YPI_PI_BIN || "pi";
+		const executable = options.launchGate ? "python3" : piExecutable;
+		const args = options.launchGate
+			? [
+				options.launchGate.launcherPath,
+				"--pid-file",
+				options.launchGate.pidFile,
+				"--ready-file",
+				options.launchGate.readyFile,
+				"--owner-pid",
+				String(process.pid),
+				"--",
+				piExecutable,
+				...options.args,
+			]
+			: options.args;
+		const child = spawn(executable, args, {
 			cwd: options.cwd,
 			env: options.env,
 			stdio: ["pipe", "pipe", "pipe"],
 			detached: process.platform !== "win32",
 		});
-		if (child.pid) options.onSpawn?.(child.pid);
+		if (child.pid) {
+			try {
+				options.onSpawn?.(child.pid);
+				if (options.launchGate) {
+					writeFileSync(options.launchGate.readyFile, `${child.pid}\n`, { flag: "wx", mode: 0o600 });
+				}
+			} catch (error) {
+				const target = process.platform === "win32" ? child.pid : -child.pid;
+				try { process.kill(target, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+				child.on("error", () => {});
+				reject(error);
+				return;
+			}
+		}
 		// Pi's non-interactive stdin path preserves the exact task without CLI
 		// option parsing, @file wrappers, or ARG_MAX exposure.
 		child.stdin.on("error", (error: NodeJS.ErrnoException) => {

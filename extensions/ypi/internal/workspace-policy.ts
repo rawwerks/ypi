@@ -1,17 +1,41 @@
-import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readFileSync,
+	readdirSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { normalizeImplementScope, pathIsWithinImplementScope } from "./implement-scope.ts";
+import {
+	implementerLeaseDirectory,
+	readImplementerLeaseRecords,
+	removeImplementerLeaseRecord,
+	reserveImplementerLease,
+	withImplementerRegistryLock,
+	writeImplementerLeaseRecord,
+	type ImplementerLeaseRecord,
+} from "./workspace-registry.ts";
 
 export type ChildMode = "review" | "implement";
-export type WorkspaceMode = "read-only" | "git-snapshot";
-export type WorkspaceLifecycleStage = "before-snapshot" | "before-ref-update" | "after-snapshot";
+export type WorkspaceMode = "read-only" | "git-worktree";
+export type WorkspaceLifecycleStage =
+	| "after-lease-staged"
+	| "after-lease-reserved"
+	| "after-container-recorded"
+	| "after-container-created"
+	| "after-owner-marker-created"
+	| "after-worktree-created"
+	| "before-snapshot"
+	| "before-ref-update"
+	| "after-snapshot"
+	| "before-worktree-remove"
+	| "before-container-remove"
+	| "after-worktree-remove";
 
 export interface WorkspaceReport {
 	requestedMode: ChildMode;
@@ -28,6 +52,7 @@ export interface WorkspaceReport {
 	reportComplete: boolean;
 	reportError?: string;
 	leaseId?: string;
+	scope?: string[];
 }
 
 export interface WorkspaceLease {
@@ -36,6 +61,12 @@ export interface WorkspaceLease {
 	readOnly: boolean;
 	quiesceProcessGroup: boolean;
 	childEnvironment: NodeJS.ProcessEnv;
+	childLaunchGate?: {
+		pidFile: string;
+		readyFile: string;
+	};
+	prepareChildLaunch(): void;
+	noteChildPid(pid: number): void;
 	finalize(): WorkspaceReport;
 	cleanup(): void;
 }
@@ -44,6 +75,7 @@ export interface WorkspacePolicyInput {
 	cwd: string;
 	childDepth: number;
 	mode: ChildMode;
+	scope?: string[];
 	setupDeadlineMilliseconds?: number;
 	lifecycleHook?: (stage: WorkspaceLifecycleStage) => void;
 }
@@ -64,24 +96,22 @@ interface Gitlink {
 	initialized: boolean;
 }
 
-interface WriterLock {
-	token: string;
-	path: string;
-	release(): void;
-}
-
 interface ConfinementState {
 	auditFile: string;
 	baselineIgnoreRoot: string;
 	baselineIndexFile: string;
+	childPidFile: string;
+	childReadyFile: string;
 	gitDir: string;
+	scopeFile: string;
+	scope: string[];
 	submodulePathsFile: string;
 	gitlinks: Gitlink[];
 }
 
 const WORKSPACE_ADMISSION_TIMEOUT_MS = 5_000;
 const WORKSPACE_FINALIZATION_TIMEOUT_MS = 120_000;
-const ZERO_OID = "0000000000000000000000000000000000000000";
+const INTERNAL_GIT_CONFIG = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"];
 
 function remainingSetupMilliseconds(input: WorkspacePolicyInput): number {
 	if (input.setupDeadlineMilliseconds === undefined) return WORKSPACE_ADMISSION_TIMEOUT_MS;
@@ -133,7 +163,7 @@ function setupGit(
 	environment: NodeJS.ProcessEnv = {},
 	stdinText?: string,
 ): ReturnType<typeof spawnSync> {
-	const result = spawnSync("git", args, {
+	const result = spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
 		cwd: root,
 		encoding: "utf8",
 		input: stdinText,
@@ -168,7 +198,7 @@ function finalizationGit(
 	stdinText?: string,
 	preserveOutput = false,
 ): string {
-	const result = spawnSync("git", args, {
+	const result = spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
 		cwd: root,
 		encoding: "utf8",
 		input: stdinText,
@@ -201,6 +231,8 @@ function readOnlyLease(cwd: string): WorkspaceLease {
 			treeRestored: true,
 			reportComplete: true,
 		}),
+		prepareChildLaunch() {},
+		noteChildPid() {},
 		cleanup() {},
 	};
 }
@@ -211,32 +243,6 @@ function parseNulPaths(value: string): string[] {
 
 function uniquePaths(...groups: string[][]): string[] {
 	return [...new Set(groups.flat())].sort((a, b) => a.localeCompare(b));
-}
-
-function acquireWriterLock(lockPath: string): WriterLock {
-	const token = randomBytes(16).toString("hex");
-	try {
-		mkdirSync(lockPath, { mode: 0o700 });
-		writeFileSync(path.join(lockPath, "owner"), `${token}\n`, { mode: 0o600 });
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-			throw new Error(`Another ypi implementer or interrupted snapshot lifecycle owns this repository at ${lockPath}. Recover its work and remove the lock only after inspection.`);
-		}
-		throw error;
-	}
-	return {
-		token,
-		path: lockPath,
-		release() {
-			try {
-				if (readFileSync(path.join(lockPath, "owner"), "utf8").trim() === token) {
-					rmSync(lockPath, { recursive: true, force: true });
-				}
-			} catch {
-				// Uncertain ownership is preserved for manual inspection.
-			}
-		},
-	};
 }
 
 function gitPath(input: WorkspacePolicyInput, root: string, name: string): string | undefined {
@@ -315,14 +321,19 @@ function createConfinementState(
 	input: WorkspacePolicyInput,
 	root: string,
 	baselineHead: string,
-	writer: WriterLock,
+	leaseDirectory: string,
+	scope: string[],
 ): ConfinementState {
-	const auditFile = path.join(writer.path, "writes");
-	const baselineIgnoreRoot = path.join(writer.path, "baseline-ignore");
-	const baselineIndexFile = path.join(writer.path, "baseline-index");
-	const submodulePathsFile = path.join(writer.path, "submodules");
+	const auditFile = path.join(leaseDirectory, "writes");
+	const baselineIgnoreRoot = path.join(leaseDirectory, "baseline-ignore");
+	const baselineIndexFile = path.join(leaseDirectory, "baseline-index");
+	const childPidFile = path.join(leaseDirectory, "child-pid");
+	const childReadyFile = path.join(leaseDirectory, "child-ready");
+	const scopeFile = path.join(leaseDirectory, "scope");
+	const submodulePathsFile = path.join(leaseDirectory, "submodules");
 	mkdirSync(baselineIgnoreRoot, { mode: 0o700 });
 	writeFileSync(auditFile, "", { mode: 0o600 });
+	writeFileSync(scopeFile, scope.join("\0"), { mode: 0o600 });
 	checkedSetupGit(
 		input,
 		root,
@@ -337,11 +348,18 @@ function createConfinementState(
 	);
 	writeFileSync(submodulePathsFile, gitlinks.map((entry) => entry.path).join("\0"), { mode: 0o600 });
 	materializeBaselineIgnoreFiles(input, root, baselineHead, baselineIgnoreRoot);
-	return { auditFile, baselineIgnoreRoot, baselineIndexFile, gitDir, submodulePathsFile, gitlinks };
-}
-
-function gitRelativePath(root: string, candidate: string): string {
-	return path.relative(root, candidate).split(path.sep).join("/");
+	return {
+		auditFile,
+		baselineIgnoreRoot,
+		baselineIndexFile,
+		childPidFile,
+		childReadyFile,
+		gitDir,
+		scopeFile,
+		scope,
+		submodulePathsFile,
+		gitlinks,
+	};
 }
 
 function checkIgnored(
@@ -360,7 +378,7 @@ function checkIgnored(
 		]
 		: ["check-ignore", "-q", "-z", "--stdin"];
 	const environment = baseline ? { GIT_INDEX_FILE: baseline.baselineIndexFile } : {};
-	const result = spawnSync("git", args, {
+	const result = spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
 		cwd: root,
 		encoding: "utf8",
 		input: `${relativePath}\0`,
@@ -381,6 +399,9 @@ function auditedPaths(confinement: ConfinementState, root: string): string[] {
 	if (!existsSync(confinement.auditFile)) throw new Error("Implementer write audit is missing");
 	const paths = parseNulPaths(readFileSync(confinement.auditFile, "utf8"));
 	for (const relativePath of paths) {
+		if (!pathIsWithinImplementScope(relativePath, confinement.scope)) {
+			throw new Error(`Implementer write audit contains a path outside declared scope: ${relativePath}`);
+		}
 		const absolutePath = path.resolve(root, ...relativePath.split("/"));
 		if (!existsSync(absolutePath)) continue;
 		if (isWithinSubmodule(relativePath, confinement.gitlinks)) {
@@ -402,6 +423,9 @@ function assertSubmodulesUnchanged(root: string, gitlinks: Gitlink[]): void {
 		if (!entry.initialized) {
 			if (existsSync(path.join(submoduleRoot, ".git"))) {
 				throw new Error(`Previously uninitialized submodule was initialized during implementation: ${entry.path}`);
+			}
+			if (existsSync(submoduleRoot) && readdirSync(submoduleRoot).length > 0) {
+				throw new Error(`Implementer created content inside an uninitialized submodule path: ${entry.path}`);
 			}
 			continue;
 		}
@@ -430,7 +454,7 @@ function assertCheckoutOwnership(root: string, baselineHead: string, baselineTre
 }
 
 function bestEffortChangedPaths(root: string, baselineHead: string): { paths: string[]; finalHead?: string } {
-	const command = (args: string[]) => spawnSync("git", args, {
+	const command = (args: string[]) => spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
 		cwd: root,
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
@@ -449,69 +473,267 @@ function bestEffortChangedPaths(root: string, baselineHead: string): { paths: st
 	};
 }
 
-function sanitizeLeaseId(value: string): string {
-	const safe = value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 64);
-	return safe || randomBytes(8).toString("hex");
+function assertPathsWithinScope(paths: string[], scope: string[]): void {
+	const outside = paths.filter((candidate) => !pathIsWithinImplementScope(candidate, scope));
+	if (outside.length > 0) {
+		throw new Error(`Snapshot contains paths outside declared scope: ${outside.join(", ")}`);
+	}
 }
 
-function createGitSnapshotLease(input: WorkspacePolicyInput, root: string): WorkspaceLease {
-	const lockPath = gitPath(input, root, "ypi-implementer.lock");
-	if (!lockPath) {
-		throw new Error("Implement mode could not resolve the existing Git checkout's writer lease path. Continue implementation in the root session.");
+function assertSnapshotPathsReviewable(
+	root: string,
+	paths: string[],
+	confinement: ConfinementState,
+): void {
+	for (const relativePath of paths) {
+		if (isWithinSubmodule(relativePath, confinement.gitlinks)) {
+			throw new Error(`Snapshot contains a submodule path that cannot be represented by the superproject: ${relativePath}`);
+		}
+		if (checkIgnored(root, relativePath, confinement)) {
+			throw new Error(`Snapshot contains a path ignored by the baseline checkout: ${relativePath}`);
+		}
+		if (checkIgnored(root, relativePath, undefined)) {
+			throw new Error(`Snapshot contains a path ignored by the final checkout: ${relativePath}`);
+		}
 	}
-	if (existsSync(lockPath)) {
-		throw new Error(`Another ypi implementer or interrupted snapshot lifecycle owns this repository at ${lockPath}. Recover its work and remove the lock only after inspection.`);
-	}
-	assertAdmissibleCheckout(input, root);
-	const writer = acquireWriterLock(lockPath);
+}
 
+function assertNoUnsnapshottedIgnoredPaths(root: string): void {
+	const ignored = parseNulPaths(finalizationGit(
+		root,
+		["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+		"Ignored worktree inventory",
+		{},
+		undefined,
+		true,
+	));
+	if (ignored.length > 0) {
+		throw new Error(`Implementer worktree contains ignored paths that cannot be snapshotted: ${ignored.join(", ")}`);
+	}
+}
+
+function assertRootCheckoutUntouched(root: string, baselineHead: string, baselineTree: string): void {
+	const head = finalizationGit(root, ["rev-parse", "HEAD"], "Root checkout HEAD verification");
+	const indexTree = finalizationGit(root, ["write-tree"], "Root checkout index verification");
+	const status = finalizationGit(
+		root,
+		["status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none"],
+		"Root checkout cleanliness verification",
+	);
+	if (head !== baselineHead || indexTree !== baselineTree || status) {
+		throw new Error("The root checkout changed while implementer worktrees were live; integration must wait for every slice to finish");
+	}
+}
+
+function persistLeaseRecord(record: ImplementerLeaseRecord): void {
+	withImplementerRegistryLock(record.commonGitDir, () => {
+		const current = readImplementerLeaseRecords(record.commonGitDir)
+			.find((candidate) => candidate.token === record.token);
+		if (!current || current.ownerPid !== process.pid) {
+			throw new Error(`Implementer lease ${record.token.slice(0, 12)} is no longer owned by this process`);
+		}
+		writeImplementerLeaseRecord(record);
+	});
+}
+
+function removeSetupLease(record: ImplementerLeaseRecord): void {
+	withImplementerRegistryLock(record.commonGitDir, () => {
+		const current = readImplementerLeaseRecords(record.commonGitDir)
+			.find((candidate) => candidate.token === record.token);
+		if (current?.ownerPid === process.pid) removeImplementerLeaseRecord(record.commonGitDir, record.token);
+	});
+}
+
+function bestEffortDiscardSetupWorktree(root: string, record: ImplementerLeaseRecord): string | undefined {
+	if (record.worktreeContainer && record.worktreeRoot) {
+		if (
+			!path.isAbsolute(record.worktreeContainer)
+			|| !path.isAbsolute(record.worktreeRoot)
+			|| path.basename(record.worktreeContainer) !== `ypi_ws_${record.token}`
+			|| record.worktreeRoot !== path.join(record.worktreeContainer, "checkout")
+		) {
+			return "recorded setup workspace paths are invalid";
+		}
+	}
+	if (record.worktreeContainer && existsSync(record.worktreeContainer)) {
+		try {
+			const container = lstatSync(record.worktreeContainer);
+			const markerPath = path.join(record.worktreeContainer, "owner");
+			const marker = lstatSync(markerPath);
+			if (
+				!container.isDirectory()
+				|| container.isSymbolicLink()
+				|| path.basename(record.worktreeContainer) !== `ypi_ws_${record.token}`
+				|| record.worktreeRoot !== path.join(record.worktreeContainer, "checkout")
+				|| !marker.isFile()
+				|| marker.isSymbolicLink()
+				|| readFileSync(markerPath, "utf8").trim() !== record.token
+			) {
+				throw new Error("workspace ownership marker does not prove setup-cleanup authority");
+			}
+		} catch {
+			if (record.worktreeRoot && existsSync(record.worktreeRoot)) {
+				return "workspace ownership marker is unavailable";
+			}
+			try {
+				const entries = readdirSync(record.worktreeContainer);
+				if (entries.length === 0) {
+					rmSync(record.worktreeContainer);
+					return undefined;
+				}
+				const markerPath = path.join(record.worktreeContainer, "owner");
+				if (entries.length !== 1 || entries[0] !== "owner") {
+					return "unmarked workspace container has unexpected content";
+				}
+				const marker = lstatSync(markerPath);
+				const actual = readFileSync(markerPath);
+				const expected = Buffer.from(`${record.token}\n`);
+				if (
+					!marker.isFile()
+					|| marker.isSymbolicLink()
+					|| actual.length > expected.length
+					|| !expected.subarray(0, actual.length).equals(actual)
+				) {
+					return "workspace ownership marker is invalid";
+				}
+				rmSync(markerPath);
+				rmSync(record.worktreeContainer);
+				return undefined;
+			} catch {
+				return "workspace ownership marker is unavailable";
+			}
+		}
+	}
+	if (record.worktreeRoot && existsSync(record.worktreeRoot)) {
+		if (!record.worktreeContainer || !existsSync(record.worktreeContainer)) {
+			return "workspace container is unavailable";
+		}
+			const result = spawnSync("git", [...INTERNAL_GIT_CONFIG, "worktree", "remove", "--force", record.worktreeRoot], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+			timeout: WORKSPACE_FINALIZATION_TIMEOUT_MS,
+			env: vcsEnvironment(),
+		});
+		if (result.status !== 0) return stderr(result) || "git worktree remove failed";
+	}
+	if (record.worktreeContainer && existsSync(record.worktreeContainer)) {
+		rmSync(record.worktreeContainer, { recursive: true, force: true });
+	}
+	return undefined;
+}
+
+function createGitWorktreeLease(
+	input: WorkspacePolicyInput,
+	root: string,
+	scope: string[],
+): WorkspaceLease {
+	assertAdmissibleCheckout(input, root);
+	const baselineHead = checkedSetupGit(input, root, ["rev-parse", "HEAD"], "Git HEAD check");
+	if (!baselineHead) {
+		throw new Error("Implement mode requires an existing Git HEAD. Continue implementation in the root session.");
+	}
+	const baselineTree = checkedSetupGit(input, root, ["rev-parse", `${baselineHead}^{tree}`], "Baseline tree lookup");
+	const commonGitDir = checkedSetupGit(
+		input,
+		root,
+		["rev-parse", "--path-format=absolute", "--git-common-dir"],
+		"Common Git directory discovery",
+	);
+	const record = reserveImplementerLease(
+		commonGitDir,
+		root,
+		baselineHead,
+		scope,
+		input.setupDeadlineMilliseconds,
+		() => input.lifecycleHook?.("after-lease-reserved"),
+		() => input.lifecycleHook?.("after-lease-staged"),
+	);
+
+	let worktreeRoot = "";
 	try {
-		// Recheck under the lease so two contenders cannot race admission.
 		assertAdmissibleCheckout(input, root);
-		const baselineHead = checkedSetupGit(input, root, ["rev-parse", "HEAD"], "Git HEAD check");
-		if (!baselineHead) throw new Error("Implement mode requires an existing Git HEAD. Continue implementation in the root session.");
-		const baselineTree = checkedSetupGit(input, root, ["rev-parse", `${baselineHead}^{tree}`], "Baseline tree lookup");
-		const confinement = createConfinementState(input, root, baselineHead, writer);
-		const attemptRef = `refs/ypi/attempt-${sanitizeLeaseId(writer.token)}`;
-		const snapshotIndexFile = path.join(writer.path, "snapshot-index");
+		record.worktreeContainer = path.join(tmpdir(), `ypi_ws_${record.token}`);
+		record.worktreeRoot = path.join(record.worktreeContainer, "checkout");
+		worktreeRoot = record.worktreeRoot;
+		withImplementerRegistryLock(commonGitDir, () => {
+			writeImplementerLeaseRecord(record);
+		}, input.setupDeadlineMilliseconds);
+		input.lifecycleHook?.("after-container-recorded");
+		mkdirSync(record.worktreeContainer, { mode: 0o700 });
+		input.lifecycleHook?.("after-container-created");
+		writeFileSync(path.join(record.worktreeContainer, "owner"), `${record.token}\n`, { flag: "wx", mode: 0o600 });
+		input.lifecycleHook?.("after-owner-marker-created");
+		withImplementerRegistryLock(commonGitDir, () => {
+			checkedSetupGit(
+				input,
+				root,
+				["worktree", "add", "--detach", worktreeRoot, baselineHead],
+				"Detached implementer worktree creation",
+			);
+			record.state = "worktree-ready";
+			writeImplementerLeaseRecord(record);
+			input.lifecycleHook?.("after-worktree-created");
+		}, input.setupDeadlineMilliseconds);
+		const leaseDirectory = implementerLeaseDirectory(commonGitDir, record.token);
+		const confinement = createConfinementState(input, worktreeRoot, baselineHead, leaseDirectory, scope);
+		const snapshotIndexFile = path.join(leaseDirectory, "snapshot-index");
 		let finalized: WorkspaceReport | undefined;
 		let finalizationError: WorkspaceFinalizationError | undefined;
-		let releaseAllowed = false;
 
 		return {
-			cwd: root,
-			mode: "git-snapshot",
+			cwd: worktreeRoot,
+			mode: "git-worktree",
 			readOnly: false,
 			quiesceProcessGroup: true,
+			childLaunchGate: {
+				pidFile: confinement.childPidFile,
+				readyFile: confinement.childReadyFile,
+			},
 			childEnvironment: {
-				YPI_IMPLEMENT_ROOT: root,
+				YPI_IMPLEMENT_ROOT: worktreeRoot,
 				YPI_IMPLEMENT_AUDIT_FILE: confinement.auditFile,
 				YPI_IMPLEMENT_BASELINE_IGNORE_ROOT: confinement.baselineIgnoreRoot,
 				YPI_IMPLEMENT_BASELINE_INDEX: confinement.baselineIndexFile,
 				YPI_IMPLEMENT_GIT_DIR: confinement.gitDir,
+				YPI_IMPLEMENT_SCOPE_FILE: confinement.scopeFile,
 				YPI_IMPLEMENT_SUBMODULES_FILE: confinement.submodulePathsFile,
+			},
+			prepareChildLaunch() {
+				if (finalized || finalizationError) {
+					throw new Error("Implementer workspace is no longer available for child launch");
+				}
+				record.childLaunchStartedAtEpochSeconds = Math.floor(Date.now() / 1000);
+				persistLeaseRecord(record);
+			},
+			noteChildPid(pid: number) {
+				if (!Number.isSafeInteger(pid) || pid <= 0 || finalized || finalizationError) return;
+				record.childPid = pid;
+				persistLeaseRecord(record);
 			},
 			finalize() {
 				if (finalized) return finalized;
 				if (finalizationError) throw finalizationError;
 
 				let attemptCommit: string | undefined;
-				let refVerified = false;
+				let refVerified = record.state === "ref-verified" || record.state === "worktree-removed";
 				let diffStat: string | undefined;
-				let changedPaths = bestEffortChangedPaths(root, baselineHead).paths;
+				let changedPaths = bestEffortChangedPaths(worktreeRoot, baselineHead).paths;
 				try {
 					input.lifecycleHook?.("before-snapshot");
-					auditedPaths(confinement, root);
-					assertSubmodulesUnchanged(root, confinement.gitlinks);
-					assertCheckoutOwnership(root, baselineHead, baselineTree);
+					auditedPaths(confinement, worktreeRoot);
+					assertSubmodulesUnchanged(worktreeRoot, confinement.gitlinks);
+					assertNoUnsnapshottedIgnoredPaths(worktreeRoot);
+					assertCheckoutOwnership(worktreeRoot, baselineHead, baselineTree);
+					assertRootCheckoutUntouched(root, baselineHead, baselineTree);
 
 					const snapshotEnvironment = { GIT_INDEX_FILE: snapshotIndexFile };
-					finalizationGit(root, ["read-tree", baselineHead], "Snapshot index initialization", snapshotEnvironment);
-					finalizationGit(root, ["add", "-A", "--", "."], "Snapshot staging", snapshotEnvironment);
-					const snapshotTree = finalizationGit(root, ["write-tree"], "Snapshot tree creation", snapshotEnvironment);
+					finalizationGit(worktreeRoot, ["read-tree", baselineHead], "Snapshot index initialization", snapshotEnvironment);
+					finalizationGit(worktreeRoot, ["add", "-A", "--", "."], "Snapshot staging", snapshotEnvironment);
+					const snapshotTree = finalizationGit(worktreeRoot, ["write-tree"], "Snapshot tree creation", snapshotEnvironment);
 					attemptCommit = finalizationGit(
-						root,
-						["commit-tree", snapshotTree, "-p", baselineHead, "-m", `ypi implementer attempt ${writer.token.slice(0, 12)}`],
+						worktreeRoot,
+						["commit-tree", snapshotTree, "-p", baselineHead, "-m", `ypi implementer attempt ${record.token.slice(0, 12)}`],
 						"Snapshot commit creation",
 						{
 							...snapshotEnvironment,
@@ -521,117 +743,133 @@ function createGitSnapshotLease(input: WorkspacePolicyInput, root: string): Work
 							GIT_COMMITTER_EMAIL: "ypi@localhost",
 						},
 					);
-					input.lifecycleHook?.("before-ref-update");
-					finalizationGit(root, ["update-ref", attemptRef, attemptCommit, ZERO_OID], "Snapshot ref creation");
-					const verifiedCommit = finalizationGit(root, ["rev-parse", "--verify", `${attemptRef}^{commit}`], "Snapshot ref verification");
-					const verifiedTree = finalizationGit(root, ["rev-parse", `${verifiedCommit}^{tree}`], "Snapshot tree verification");
-					if (verifiedCommit !== attemptCommit || verifiedTree !== snapshotTree) {
-						throw new Error("Snapshot ref verification did not resolve to the captured tree");
-					}
-					refVerified = true;
-
 					changedPaths = parseNulPaths(finalizationGit(
-						root,
+						worktreeRoot,
 						["diff", "--name-only", "-z", "--no-renames", baselineHead, attemptCommit, "--"],
 						"Snapshot changed-path report",
 						{},
 						undefined,
 						true,
 					));
+					assertPathsWithinScope(changedPaths, scope);
+					assertSnapshotPathsReviewable(worktreeRoot, changedPaths, confinement);
 					diffStat = finalizationGit(
-						root,
+						worktreeRoot,
 						["diff", "--stat", "--no-ext-diff", "--no-renames", baselineHead, attemptCommit, "--"],
 						"Snapshot diffstat report",
 					);
+
+					input.lifecycleHook?.("before-ref-update");
+					finalizationGit(
+						worktreeRoot,
+						["update-ref", record.attemptRef, attemptCommit, "0".repeat(baselineHead.length)],
+						"Snapshot ref creation",
+					);
+					const verifiedCommit = finalizationGit(worktreeRoot, ["rev-parse", "--verify", `${record.attemptRef}^{commit}`], "Snapshot ref verification");
+					const verifiedTree = finalizationGit(worktreeRoot, ["rev-parse", `${verifiedCommit}^{tree}`], "Snapshot tree verification");
+					if (verifiedCommit !== attemptCommit || verifiedTree !== snapshotTree) {
+						throw new Error("Snapshot ref verification did not resolve to the captured tree");
+					}
+					refVerified = true;
+					record.attemptCommit = attemptCommit;
+					record.state = "ref-verified";
+					persistLeaseRecord(record);
 					input.lifecycleHook?.("after-snapshot");
 
-					// Capture again immediately before rollback. Any drift after the
-					// verified ref makes reset unsafe and leaves the checkout untouched.
-					auditedPaths(confinement, root);
-					assertSubmodulesUnchanged(root, confinement.gitlinks);
-					assertCheckoutOwnership(root, baselineHead, baselineTree);
-					finalizationGit(root, ["add", "-A", "--", "."], "Pre-reset tree verification staging", snapshotEnvironment);
-					const preResetTree = finalizationGit(root, ["write-tree"], "Pre-reset tree verification", snapshotEnvironment);
-					if (preResetTree !== snapshotTree) {
-						throw new Error("Checkout changed after the salvage ref was captured; reset was refused");
+					auditedPaths(confinement, worktreeRoot);
+					assertSubmodulesUnchanged(worktreeRoot, confinement.gitlinks);
+					assertNoUnsnapshottedIgnoredPaths(worktreeRoot);
+					assertCheckoutOwnership(worktreeRoot, baselineHead, baselineTree);
+					finalizationGit(worktreeRoot, ["add", "-A", "--", "."], "Pre-removal tree verification staging", snapshotEnvironment);
+					const finalWorktreeTree = finalizationGit(worktreeRoot, ["write-tree"], "Pre-removal tree verification", snapshotEnvironment);
+					if (finalWorktreeTree !== snapshotTree) {
+						throw new Error("Implementer worktree changed after the salvage ref was captured; removal was refused");
 					}
+					assertRootCheckoutUntouched(root, baselineHead, baselineTree);
 
-					finalizationGit(root, ["reset", "--hard", baselineHead], "Baseline reset");
-					finalizationGit(root, ["clean", "-fd"], "Non-ignored checkout cleanup");
-					assertSubmodulesUnchanged(root, confinement.gitlinks);
-					const finalHead = finalizationGit(root, ["rev-parse", "HEAD"], "Restored HEAD verification");
-					const finalTree = finalizationGit(root, ["write-tree"], "Restored index verification");
-					const finalStatus = finalizationGit(
-						root,
-						["status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none"],
-						"Restored checkout verification",
-					);
-					if (finalHead !== baselineHead || finalTree !== baselineTree || finalStatus) {
-						throw new Error("Checkout did not return to the clean baseline after snapshot");
-					}
+					withImplementerRegistryLock(commonGitDir, () => {
+						input.lifecycleHook?.("before-worktree-remove");
+						finalizationGit(root, ["worktree", "remove", "--force", worktreeRoot], "Ephemeral worktree removal");
+						record.state = "worktree-removed";
+						writeImplementerLeaseRecord(record);
+						input.lifecycleHook?.("before-container-remove");
+						if (record.worktreeContainer) rmSync(record.worktreeContainer, { recursive: true, force: true });
+						input.lifecycleHook?.("after-worktree-remove");
+						removeImplementerLeaseRecord(commonGitDir, record.token);
+					});
+					assertRootCheckoutUntouched(root, baselineHead, baselineTree);
 
 					finalized = {
 						requestedMode: "implement",
 						effectiveMode: "implement",
-						workspaceMode: "git-snapshot",
-						workspaceRoot: root,
+						workspaceMode: "git-worktree",
+						workspaceRoot: worktreeRoot,
 						baselineHead,
-						finalHead,
+						finalHead: baselineHead,
 						changedPaths,
 						diffStat,
-						attemptRef,
+						attemptRef: record.attemptRef,
 						attemptCommit,
 						treeRestored: true,
 						reportComplete: true,
-						leaseId: writer.token.slice(0, 12),
+						leaseId: record.token.slice(0, 12),
+						scope,
 					};
-					releaseAllowed = true;
 					return finalized;
 				} catch (error) {
 					const cause = error instanceof Error ? error.message : String(error);
-					const state = bestEffortChangedPaths(root, baselineHead);
+					const state = bestEffortChangedPaths(worktreeRoot, baselineHead);
+					const worktreePresent = existsSync(worktreeRoot);
 					const report: WorkspaceReport = {
 						requestedMode: "implement",
 						effectiveMode: "implement",
-						workspaceMode: "git-snapshot",
-						workspaceRoot: root,
+						workspaceMode: "git-worktree",
+						workspaceRoot: worktreeRoot,
 						baselineHead,
 						finalHead: state.finalHead,
 						changedPaths: uniquePaths(changedPaths, state.paths),
 						diffStat,
-						attemptRef: refVerified ? attemptRef : undefined,
-						attemptCommit: refVerified ? attemptCommit : undefined,
-						treeRestored: false,
+						attemptRef: refVerified ? record.attemptRef : undefined,
+						attemptCommit: refVerified ? attemptCommit || record.attemptCommit : undefined,
+						treeRestored: !worktreePresent,
 						reportComplete: false,
 						reportError: cause,
-						leaseId: writer.token.slice(0, 12),
+						leaseId: record.token.slice(0, 12),
+						scope,
 					};
 					const preservation = refVerified
-						? `The attempted work has a verified snapshot at ${attemptRef}; verify it before recovery.`
-						: "No verified salvage ref was available, so no reset or clean was attempted and the worktree remains the primary copy.";
+						? `The attempted work has a verified snapshot at ${record.attemptRef}.`
+						: `No verified salvage ref is available; the isolated worktree at ${worktreeRoot} remains the primary copy.`;
 					finalizationError = new WorkspaceFinalizationError(
-						`Implementer snapshot/reset failed: ${cause}. ${preservation} The writer lock remains at ${writer.path}.`,
+						`Implementer worktree finalization failed: ${cause}. ${preservation} The lease remains at ${leaseDirectory}; run rlm_cleanup --repo ${root} only after the owner and child processes stop.`,
 						report,
 					);
 					throw finalizationError;
 				}
 			},
-			cleanup() {
-				if (releaseAllowed) writer.release();
-			},
+			cleanup() {},
 		};
 	} catch (error) {
-		writer.release();
-		throw error;
+		const cleanupError = bestEffortDiscardSetupWorktree(root, record);
+		if (!cleanupError) {
+			try {
+				removeSetupLease(record);
+			} catch (registryError) {
+				const message = registryError instanceof Error ? registryError.message : String(registryError);
+				throw new Error(`${error instanceof Error ? error.message : String(error)}. Setup worktree was removed, but lease cleanup failed: ${message}`);
+			}
+			throw error;
+		}
+		throw new Error(`${error instanceof Error ? error.message : String(error)}. Setup cleanup failed: ${cleanupError}. Recover the retained lease at ${implementerLeaseDirectory(commonGitDir, record.token)}.`);
 	}
 }
 
 export function acquireWorkspace(input: WorkspacePolicyInput): WorkspaceLease {
 	if (input.mode === "review") return readOnlyLease(input.cwd);
-
+	const scope = normalizeImplementScope(input.scope);
 	const gitRootResult = setupGit(input, input.cwd, ["rev-parse", "--show-toplevel"]);
 	if (gitRootResult.status !== 0) {
 		throw new Error("Implement mode requires an existing clean Git checkout. No version-control system was installed or initialized; continue implementation in the root session.");
 	}
-	return createGitSnapshotLease(input, output(gitRootResult));
+	return createGitWorktreeLease(input, output(gitRootResult), scope);
 }
