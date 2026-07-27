@@ -103,6 +103,41 @@ if documented_env != public:
         f"missing={sorted(public - documented_env)} extra={sorted(documented_env - public)}"
     )
 
+node_consumers = {
+    str(source.relative_to(root))
+    for source in [
+        root / "rlm_query",
+        root / "rlm_cleanup",
+        root / "extensions/ypi/internal/child-process.ts",
+    ]
+    if "YPI_NODE_BIN" in source.read_text()
+}
+expected_node_consumers = {
+    "rlm_query",
+    "rlm_cleanup",
+    "extensions/ypi/internal/child-process.ts",
+}
+if node_consumers != expected_node_consumers:
+    raise SystemExit(
+        "config surface: YPI_NODE_BIN consumer contract drift: "
+        f"actual={sorted(node_consumers)} expected={sorted(expected_node_consumers)}"
+    )
+node_row = re.search(
+    r"^\|\s*`YPI_NODE_BIN`\s*\|[^|]*\|([^|]*)\|$",
+    readme.read_text(),
+    re.MULTILINE,
+)
+node_purpose = node_row.group(1).lower() if node_row else ""
+required_node_roles = {"shell recursion", "recovery", "implementer launch"}
+missing_node_roles = sorted(
+    role for role in required_node_roles if role not in node_purpose
+)
+if missing_node_roles:
+    raise SystemExit(
+        "config surface: README YPI_NODE_BIN purpose omits runtime roles: "
+        + ", ".join(missing_node_roles)
+    )
+
 cli_source = (root / "extensions/ypi/cli.ts").read_text()
 parse_block = cli_source.split("function parseFlags", 1)[1].split("function parentContext", 1)[0]
 actual_flags = set(re.findall(r'case "(--[a-z-]+)"', parse_block))

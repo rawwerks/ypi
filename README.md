@@ -225,7 +225,7 @@ against the source and must contain exactly the public variables.
 | `RLM_TIMEOUT` | unset | Optional wall-clock seconds for the whole tree. |
 | `RLM_TRACE_ID` | random | Sanitized tree identifier used in telemetry and session filenames. |
 | `YPI_EXTENSION_DEBUG` | `0` | Set to `1` for extension diagnostics. |
-| `YPI_NODE_BIN` | `node` | Node executable used by the shell adapter. |
+| `YPI_NODE_BIN` | `node` | Node executable used by shell recursion, recovery, and native implementer launch adapters. |
 | `YPI_PI_BIN` | repository dependency, then `PATH` | Explicit Pi executable override. |
 | `YPI_STALL_WARNING_SECONDS` | `600` | Idle seconds before an observe-only child warning. |
 <!-- runtime-env:end -->
