@@ -190,6 +190,18 @@ console.log("\n=== Implementer recovery module and CLI harness ===");
 			&& readdirSync(root).join("\0") === "state",
 		"durable atomic writer replaces state without exposing temp artifacts",
 	);
+	const restrictiveTarget = path.join(root, "restrictive-umask");
+	const originalUmask = process.umask(0o777);
+	try {
+		atomicWriteFile(restrictiveTarget, "private\n", { mode: 0o600 });
+	} finally {
+		process.umask(originalUmask);
+	}
+	record(
+		(statSync(restrictiveTarget).mode & 0o777) === 0o600,
+		"atomic writer enforces the requested mode under a restrictive umask",
+		`mode=${(statSync(restrictiveTarget).mode & 0o777).toString(8)}`,
+	);
 	rmSync(root, { recursive: true, force: true });
 }
 

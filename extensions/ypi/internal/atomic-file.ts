@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import {
 	closeSync,
 	constants,
+	fchmodSync,
 	fsyncSync,
 	openSync,
 	renameSync,
@@ -35,11 +36,13 @@ export function atomicWriteFile(
 	);
 	let descriptor: number | undefined;
 	try {
+		const mode = options.mode ?? 0o600;
 		descriptor = openSync(
 			temporary,
 			constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-			options.mode ?? 0o600,
+			mode,
 		);
+		fchmodSync(descriptor, mode);
 		writeFileSync(descriptor, content);
 		fsyncSync(descriptor);
 		try {
