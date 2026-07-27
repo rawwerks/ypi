@@ -6,21 +6,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
-- Crash-safe root implementer finalization now captures the complete attempt in
-  a verified `refs/ypi/attempt-*` reference, rechecks the tree immediately
-  before rollback, restores the clean baseline, and reports the snapshot and
-  restoration evidence.
-- A five-stage `SIGKILL` crash matrix proves lock retention, second-writer
-  rejection, snapshot availability when expected, and mechanical recovery.
+- Root-chartered implementers now accept explicit repository-relative path
+  scopes. Up to three disjoint children can edit detached ephemeral Git
+  worktrees concurrently and return verified `refs/ypi/attempt-*` references.
+- A persisted common-Git-directory lease registry enforces overlap and
+  concurrency admission. `rlm_cleanup` salvages dead worktrees to exact verified
+  refs before removal and leaves live owners untouched. A PID launch gate closes
+  the parent-death window before child execution begins.
+- Single and concurrent `SIGKILL` matrices cover staging, ref creation,
+  worktree removal, child death, and a parent death with two live leases.
+- README lineage now acknowledges the rawwerks/ypi hard fork, Recursive
+  Language Models inspiration, and Y-combinator naming.
 - `config/runtime-env.json` and `tests/test_config_surface.sh` now enforce one
   runtime-variable and shell-flag registry across code and README.
 
 ### Changed
 - The canonical TypeScript runtime is now the only recursion engine used by the
   native tool and shell adapter.
-- Writable delegation is Git-only, root-only, sequential, and confined to one
-  existing clean checkout. Implementers cannot spawn shell commands or write
-  outside the auditable snapshot boundary.
+- Writable delegation is Git-only and root-only. Implementers cannot spawn shell
+  commands or write outside their runtime-enforced slices; the user's real
+  checkout remains clean until the root explicitly integrates returned refs.
 - The repository is source-distributed from
   `github.com/ruslanvasylev/ypi`; `package.json` is private and all setup,
   doctor, and troubleshooting guidance uses the source checkout.

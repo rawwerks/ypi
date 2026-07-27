@@ -10,11 +10,12 @@ and eval surfaces. It does not introduce another orchestrator or VCS.
 ## Scope and non-goals
 
 The root agent owns the goal, decomposition, parent-side adjudication, and final
-diff acceptance. Read-only children own reviews and focused probes. One bounded
-implementation unit may be delegated with `rlm_query` `mode=implement` after its
-scope and gates are explicit; never run parallel implementers or distribute
-overlapping runtime edits. Do not add a second orchestration owner or result
-validator. This runbook and its persisted envelope are the proof-bound path.
+diff acceptance. Read-only children own reviews and focused probes. The root may
+delegate up to three bounded `mode=implement` slices after deterministic
+discovery makes their path scopes explicit and disjoint. The root remains the
+single integration head; descendants cannot request writable authority. Do not
+add a second orchestration owner or result validator. This runbook and its
+persisted envelope are the proof-bound path.
 
 ## Create the envelope once
 
@@ -147,15 +148,16 @@ never consumes a child-call slot.
 
 1. **Discover deterministically.** Use `rg`, Python, source inspection, and
    existing validators before asking a model.
-2. **Choose one implementation head.** Explore and decide in the root. Once a
-   bounded unit has explicit files, constraints, and tests, delegate it to one
-   `mode=implement` child or implement it directly when writing the charter
-   would cost as much as the edit. The root reviews the attempt reference,
-   changed scope, snapshot diff, and restoration verdict before applying it and
-   running focused gates.
+2. **Choose one root integration head.** Explore and decide in the root. Once
+   bounded units have explicit, non-overlapping file scopes, constraints, and
+   tests, delegate up to three `mode=implement` children in one native batch.
+   Implement directly when partitioning would cost as much as the edits. Wait
+   for the full batch, review each attempt reference, declared scope, snapshot
+   diff, and worktree-removal verdict, then apply the refs without automatic
+   conflict resolution and run focused gates.
 3. **Run three independent reviews in one turn.** Do not expose sibling reports:
    - runtime/lifecycle: deadlines, cancellation, process groups, output,
-     async, snapshot/reset, and recovery;
+     async, worktree/ref finalization, and recovery;
    - entry/evidence: routing, prompt authority, source-checkout resolution,
      generated artifacts, eval honesty, and delivery gates;
    - security/cleanup: path containment, permissions, temp ownership,
@@ -190,12 +192,13 @@ Mechanical discovery stays in deterministic tools. A cheaper model is allowed
 only for a bounded synthesis call launched in its own shell process with an
 explicit provider/model route; do not set global depth routing.
 
-Native calls are sequential so a shared-checkout implementer cannot overlap
-root mutations. Parallel evidence uses at most three shell `rlm_query --async`
-read-only jobs. Record each returned job, output, sentinel, and PID, then
-collect every required result explicitly. The repository has no automatic
-completion watcher. If the root cannot keep ownership of collection and
-cancellation, stay sequential.
+Native calls may run in parallel. Writable fan-out is capped at three and
+requires mechanically disjoint declared scopes; do not include root mutators in
+the same batch or integrate before all results return. Parallel shell
+`rlm_query --async` remains read-only. Record each returned job, output,
+sentinel, and PID, then collect every required result explicitly. The
+repository has no automatic completion watcher. If the root cannot keep
+ownership of collection and cancellation, stay sequential.
 
 ## Freeze before provider-backed evaluation
 

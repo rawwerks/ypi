@@ -27,9 +27,9 @@ This repository has one recursion engine:
 - `dist/rlm_query.mjs` is generated and must match the TypeScript source.
 
 Every depth uses the same prompt, runtime, and extension. Review mode is
-read-only by default. Writable delegation is root-only, sequential, and
-limited to one bounded implementer in an existing clean Git checkout.
-Descendants cannot escalate writable authority.
+read-only by default. Writable delegation is root-only and limited to three
+concurrent implementers with mechanically enforced, disjoint path scopes in an
+existing clean Git checkout. Descendants cannot escalate writable authority.
 
 The root wrapper enables the shell helper and includes its runtime source in
 the child prompt for self-inspection. Direct extension use exposes only the
@@ -78,16 +78,23 @@ a concrete result over adding another child.
 
 Native `mode=review` is the default. It is appropriate for audits, research,
 and counterevidence. Native `mode=implement` is allowed only from the root for
-one edit/write unit with explicit scope and verification. Never run parallel
-implementers. The parent owns commands, tests, final diff review, and
-acceptance.
+bounded edit/write units with explicit scope and verification. Derive slices
+from deterministic file discovery before issuing parallel calls. Never admit
+overlapping scopes, mutate the real checkout while implementers are live, or
+integrate one result before the full batch returns. The parent owns commands,
+tests, final diff review, integration, and acceptance.
 
-The implementer edits the existing checkout under an exclusive lock. On
-success, the runtime records the complete attempt at a verified
-`refs/ypi/attempt-*` reference, restores the clean baseline, and reports the
-reference, commit, changed paths, diffstat, and restoration verdict. The root
-must inspect and explicitly apply the snapshot. On any unproven snapshot or
-reset state, the checkout and lock are retained for recovery.
+Each implementer edits its own detached ephemeral Git worktree. On success, the
+runtime records the complete attempt at a verified `refs/ypi/attempt-*`
+reference, removes the worktree, and reports the declared scope, reference,
+commit, changed paths, diffstat, and removal verdict. The real checkout remains
+clean until the root inspects and explicitly applies the refs. Applying
+disjoint refs must be order-independent; surface any conflict as a confinement
+defect. On unproven snapshot or removal state, the isolated worktree and lease
+are retained for `rlm_cleanup` recovery.
+
+Implementer worktrees contain tracked files only. Pass ignored-file or
+uninitialized-submodule context explicitly, or keep the task in the root.
 
 Shell `rlm_query --async` is for bounded read-only fan-out. It prints job,
 output, sentinel, and PID data. There is no automatic repository completion
@@ -95,7 +102,7 @@ watcher; the caller owns collection and cancellation.
 
 For large, proof-bound, or self-hosting changes, read
 `docs/bounded-recursive-development.md` before the first child call. Use its
-single persisted envelope, disjoint reviewers, one implementation head,
+single persisted envelope, disjoint reviewers, one root integration head,
 continuation-without-reset rule, and freeze-before-live-model gate.
 
 ## Git Workflow
@@ -160,7 +167,8 @@ agreement.
 - shell, native, and shared-runtime behavior
 - depth, timeout, call-count, session, and isolation guardrails
 - configuration and provider-credential allowlist completeness
-- implementer admission, write confinement, snapshot/reset, and crash recovery
+- implementer admission, path-scope confinement, worktree/ref finalization,
+  apply-order invariance, and single/concurrent crash recovery
 - publication authority and doctor behavior
 
 `make test-extensions` loads the real pinned Pi without a model call.

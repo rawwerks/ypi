@@ -10,7 +10,14 @@ recursion runtime with two adapters:
 
 The `ypi` launcher loads the extension, the repository prompt, and the bounded
 delegation skill. Review children are read-only by default. A root agent can
-charter one bounded implementer in an existing clean Git checkout.
+charter up to three bounded implementers on disjoint declared path scopes in an
+existing clean Git checkout.
+
+## Lineage
+
+This project is a hard fork of [rawwerks/ypi](https://github.com/rawwerks/ypi).
+Its recursive delegation model is inspired by the Recursive Language Models
+line of work. The name applies the Y-combinator idea of recursion to Pi.
 
 ## Source Setup
 
@@ -62,6 +69,7 @@ The native tool accepts:
 | `context` | Optional exact context text. |
 | `fork` | Copy the current parent session into the child session before execution. |
 | `mode` | `review` by default, or root-only `implement`. |
+| `scope` | Required for `implement`: literal repository-relative file or directory path prefixes owned by that child. |
 
 The shell adapter reads standard input when `RLM_STDIN` marks it as explicit or
 when stdin is non-interactive. A non-empty read wins; otherwise it falls back
@@ -113,47 +121,70 @@ admits it only when all of these are true:
 
 - the current directory belongs to an existing, ordinary, clean Git checkout;
 - no Git operation is in progress and sparse checkout is disabled;
-- no other implementer or interrupted lifecycle owns the repository lock;
+- a non-empty repository-relative path scope is declared;
+- the scope does not overlap any live implementer lease and the three-lease
+  concurrency cap has room;
 - the canonical extension and write-confinement hooks are active.
 
-No secondary Git worktree is created. The implementer edits the existing
-checkout under one exclusive lock and receives only
-`read,grep,find,ls,edit,write,rlm_query`. It cannot use `bash`. Writes outside
-the checkout, through escaping symlinks, inside `.git`, inside submodules, or
-to paths ignored by the baseline or final ignore rules are blocked.
+Each implementer edits a detached ephemeral Git worktree at the shared baseline
+and receives only `read,grep,find,ls,edit,write,rlm_query`. It cannot use
+`bash`. The user's real checkout remains clean. Writes outside the declared
+scope or worktree, through escaping symlinks, inside `.git`, inside submodules,
+or to paths ignored by the baseline or final ignore rules are blocked both at
+tool execution and again during snapshot verification.
+
+A launch gate records the detached child PID before Pi can begin work. This
+lets recovery distinguish a live child from a dead lease even if the root
+process is killed during spawn.
+
+The worktree contains tracked files only. It does not reproduce ignored files
+or uninitialized submodule contents. Supply required external material through
+`context`, or keep that task in the root.
 
 After the child exits, the parent runtime:
 
-1. verifies the original HEAD, index, submodules, ignore policy, and audited
-   write set;
+1. verifies the worktree and real checkout baselines, submodules, ignore
+   policy, audited write set, and declared scope;
 2. stages the entire attempt in a temporary index;
 3. creates a commit and a new verified `refs/ypi/attempt-*` reference;
-4. stages again immediately before rollback and requires the tree to match the
-   verified snapshot;
-5. resets the checkout to the baseline, removes only non-ignored untracked
-   files, and proves HEAD, index, status, and submodules are restored;
-6. reports changed paths, baseline, attempt reference, commit, diffstat, and
-   `Tree restored: yes`, then releases the lock.
+4. stages again immediately before removal and requires the worktree to match
+   the verified reference;
+5. removes the ephemeral worktree and persisted lease while proving the real
+   checkout stayed clean;
+6. reports scope, changed paths, baseline, attempt reference, commit, diffstat,
+   and `Ephemeral worktree removed: yes`.
 
-The root must inspect the snapshot before accepting it:
+Derive disjoint slices from deterministic discovery before issuing parallel
+implement calls. Do not mutate the real checkout or integrate any result until
+all calls in that batch return. The extension blocks root mutators and unknown
+tools that share an assistant tool batch with an implement call. The root must
+inspect every result before accepting it:
 
 ```bash
 git show --stat refs/ypi/attempt-EXAMPLE
 git diff HEAD refs/ypi/attempt-EXAMPLE --
-git cherry-pick refs/ypi/attempt-EXAMPLE
+git cherry-pick -n refs/ypi/attempt-EXAMPLE
 ```
 
-If snapshot creation or reset cannot be proven safe, finalization fails loudly.
-Before a verified reference exists, the dirty checkout remains the primary
-copy. After verification, both the reference and checkout state are retained.
-In either case the lock remains for explicit recovery.
+For disjoint scopes, applying refs in any order must produce the same tree. A
+conflict is evidence of a confinement or partitioning defect; surface it
+instead of resolving it automatically.
 
-`make test-workspace-crash` sends `SIGKILL` before snapshot, during staging,
-before reference update, after verified snapshot but before reset, and during
-reset. Every case must retain the lock, reject a second implementer, and remain
-mechanically recoverable. Attempt references are retained by default;
-`./rlm_cleanup --repo PATH` previews references older than seven days and
-requires `--force` to remove them.
+If snapshot or removal cannot be proven safe, finalization fails loudly. Before
+a verified reference exists, the isolated worktree remains the primary copy.
+After verification, the reference is authoritative and the worktree is retained
+until recovery completes. `./rlm_cleanup --repo PATH` is dry-run by default;
+with `--force` it leaves live processes untouched, snapshots each dead lease to
+a verified attempt ref, proves the worktree still matches, removes it, and
+prunes stale worktree metadata. Attempt refs have a separate seven-day cleanup
+threshold.
+Refs created or confirmed during lease recovery are never expired in that same
+cleanup invocation.
+
+`make test-workspace-crash` covers single-lease interruption points.
+`make test-workspace-concurrent-crash` kills children and a parent with multiple
+live leases, proving exact work preservation, live-lease isolation, registry
+recovery, and a continuously clean real checkout.
 
 ## Runtime Configuration
 

@@ -35,8 +35,10 @@ adapter must not bypass them or duplicate their decisions.
 - live progress and cancellation bridging;
 - tool-result presentation.
 
-Native requests are sequential. This prevents a root mutation from overlapping
-the single shared-checkout implementer.
+Native requests may execute in parallel. Implement requests carry explicit path
+scopes; the shared registry admits at most three and refuses component-overlap.
+The extension blocks root mutators and unknown tools from a mixed implementer
+batch. The root waits for the full batch before mutating or integrating.
 
 ### Shell Adapter
 
@@ -90,25 +92,37 @@ Implement mode is available only to depth 0 and only in an existing clean Git
 checkout. It refuses:
 
 - dirty, sparse, non-Git, or operation-in-progress checkouts;
-- a second or descendant writer;
+- a missing, invalid, or overlapping scope;
+- admission beyond the three-implementer cap, or a descendant writer;
 - a missing canonical extension;
 - submodule mutation;
-- writes outside the checkout, through symlink escapes, inside `.git`, or to
-  ignored paths.
+- writes outside the declared scope or worktree, through symlink escapes,
+  inside `.git`, or to ignored paths.
 
-The implementer has no shell process tool. After it exits, the runtime captures
-the complete tree through a temporary index, creates a commit, verifies a new
-`refs/ypi/attempt-*` reference, stages again to detect drift, resets to the
-baseline, removes only non-ignored untracked files, and verifies the restored
-HEAD, index, status, and submodules.
+Each implementer has no shell process tool and edits a detached ephemeral Git
+worktree at the common baseline. The user's real checkout stays clean. After
+the child exits, the runtime captures the complete worktree through a temporary
+index, verifies that every changed path belongs to the declared scope, creates
+a commit and `refs/ypi/attempt-*` reference, stages again to detect drift, then
+removes the worktree and lease.
 
-The lock is released only after complete snapshot and restoration proof. Any
-failure retains the lock and checkout. A verified reference is reported when
-available; otherwise the checkout remains the only authoritative copy.
+The persisted lease records owner and child PIDs, baseline, scope, worktree,
+and ref state. Any uncertain failure retains it. A verified reference is
+reported when available; otherwise the isolated worktree remains the primary
+copy. A launch gate persists the detached child PID before releasing Pi, so a
+parent death cannot create an unregistered writer. `rlm_cleanup` never removes
+a live lease. For a dead lease it snapshots the exact current worktree when
+needed, verifies the ref and worktree trees match, removes the worktree, and
+prunes stale Git metadata. A recovered ref is not eligible for age-based
+expiration until a later cleanup invocation.
 
-`tests/workspace_crash_matrix.ts` kills the lifecycle at five distinct points
-and proves lock retention, second-writer rejection, snapshot availability when
-expected, and mechanical baseline recovery.
+Worktrees contain tracked files only. Ignored files and uninitialized submodule
+content must arrive through explicit context or remain root-owned.
+
+`tests/workspace_crash_matrix.ts` covers single-lease interruption.
+`tests/workspace_concurrent_crash_matrix.ts` kills children at six stages and a
+parent with two leases. It proves work preservation, live-lease isolation,
+registry recovery, and a continuously clean real checkout.
 
 ## Default Guardrails
 
