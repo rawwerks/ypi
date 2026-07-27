@@ -70,7 +70,6 @@ assert_contains "tarball ships canonical runtime core" "package/extensions/ypi/r
 assert_contains "tarball ships internal child-process owner" "package/extensions/ypi/internal/child-process.ts" "$TARBALL_LIST"
 assert_contains "tarball ships internal child-output owner" "package/extensions/ypi/internal/child-output.ts" "$TARBALL_LIST"
 assert_contains "tarball ships implementer write-scope owner" "package/extensions/ypi/internal/write-scope.ts" "$TARBALL_LIST"
-assert_contains "tarball ships retained native fallback" "package/extensions/ypi/legacy-native-tool.ts" "$TARBALL_LIST"
 assert_contains "tarball ships system prompt" "package/SYSTEM_PROMPT.md" "$TARBALL_LIST"
 assert_contains "tarball ships bounded delegation skill" "package/skills/bounded-recursive-delegation/SKILL.md" "$TARBALL_LIST"
 assert_not_contains "tarball excludes the wrapper launcher" "package/ypi" "$TARBALL_LIST"
@@ -92,20 +91,14 @@ if command -v pi >/dev/null 2>&1; then
 printf '%s\n' PACKED_NATIVE_EXEC_OK
 FAKEPI
 		chmod +x "$FAKE_PI"
-		if bun "$PROJECT_DIR/tests/installed_extension_harness.ts" "$EXT" "$FAKE_PI" canonical >"$TEST_TMP/execute.out" 2>"$TEST_TMP/execute.err" \
-			&& grep -q 'INSTALLED_EXTENSION_EXECUTION=PASS implementation=canonical' "$TEST_TMP/execute.out"; then
-			pass "installed pi-recursive native tool executes through canonical runtime"
-		else
-			fail "installed pi-recursive native tool executes through canonical runtime" "$(tail -4 "$TEST_TMP/execute.err")"
-		fi
-		if bun "$PROJECT_DIR/tests/installed_extension_harness.ts" "$EXT" "$FAKE_PI" legacy >"$TEST_TMP/execute-legacy.out" 2>"$TEST_TMP/execute-legacy.err" \
-			&& grep -q 'INSTALLED_EXTENSION_EXECUTION=PASS implementation=legacy' "$TEST_TMP/execute-legacy.out"; then
-			pass "installed pi-recursive native tool executes through retained fallback"
-		else
-			fail "installed pi-recursive native tool executes through retained fallback" "$(tail -4 "$TEST_TMP/execute-legacy.err")"
-		fi
+			if bun "$PROJECT_DIR/tests/installed_extension_harness.ts" "$EXT" "$FAKE_PI" >"$TEST_TMP/execute.out" 2>"$TEST_TMP/execute.err" \
+				&& grep -q 'INSTALLED_EXTENSION_EXECUTION=PASS' "$TEST_TMP/execute.out"; then
+				pass "installed pi-recursive native tool executes through canonical runtime"
+			else
+				fail "installed pi-recursive native tool executes through canonical runtime" "$(tail -4 "$TEST_TMP/execute.err")"
+			fi
 
-		ERRF="$TEST_TMP/load.err"
+			ERRF="$TEST_TMP/load.err"
 		set +e
 		YPI_EXTENSION_DEBUG=1 RLM_MAX_DEPTH=2 timeout 30 pi --no-extensions -e "$EXT" --list-models test >"$TEST_TMP/load.out" 2>"$ERRF"
 		LOAD_RC=$?

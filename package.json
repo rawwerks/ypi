@@ -45,7 +45,6 @@
   "files": [
     "ypi",
     "rlm_query",
-    "rlm_query.legacy",
     "rlm_cost",
     "rlm_parse_json",
     "rlm_sessions",

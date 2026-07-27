@@ -6,7 +6,6 @@ RELEASING.md
 .githooks/
 
 # Version control
-.jj/
 .git/
 .gitmodules
 

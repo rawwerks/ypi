@@ -25,7 +25,6 @@ record(!checkImplementWritePath(root, root, "../outside.ts").allowed, "parent tr
 record(!checkImplementWritePath(root, root, path.join(outside, "secret.txt")).allowed, "absolute outside path is blocked");
 record(!checkImplementWritePath(root, root, "escape/new.ts").allowed, "symlink escape is blocked");
 record(!checkImplementWritePath(root, root, ".git/config").allowed, "Git metadata write is blocked");
-record(!checkImplementWritePath(root, root, ".jj/repo").allowed, "jj metadata write is blocked");
 record(!checkImplementWritePath(root, root, "").allowed, "empty write path is blocked");
 
 let toolCallHandler: ((event: any, ctx: any) => unknown) | undefined;

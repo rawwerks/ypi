@@ -28,9 +28,6 @@ export RLM_MODEL="${RLM_MODEL:-google/gemini-3-flash-preview}"
 export RLM_MAX_DEPTH="${RLM_MAX_DEPTH:-3}"
 export RLM_MAX_CALLS="${RLM_MAX_CALLS:-128}"
 E2E_MAX_CALLS_DEFAULT="$RLM_MAX_CALLS"
-# E2E tasks are read-only probes; choose no-jj mode explicitly.
-export RLM_JJ=0
-
 PASS=0
 FAIL=0
 SKIP=0

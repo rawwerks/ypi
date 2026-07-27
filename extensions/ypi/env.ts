@@ -97,7 +97,6 @@ export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext, p
 	process.env.RLM_MAX_DEPTH = process.env.RLM_MAX_DEPTH || String(DEFAULT_MAX_DEPTH);
 	process.env.RLM_MAX_CALLS = process.env.RLM_MAX_CALLS || String(DEFAULT_MAX_CALLS);
 	process.env.RLM_SYSTEM_PROMPT = process.env.RLM_SYSTEM_PROMPT || runtime.systemPromptPath;
-	process.env.RLM_JJ = process.env.RLM_JJ || "auto";
 	process.env.RLM_EXTENSIONS = process.env.RLM_EXTENSIONS || "1";
 	process.env.RLM_JSON = process.env.RLM_JSON || "1";
 	process.env.RLM_SHARED_SESSIONS = process.env.RLM_SHARED_SESSIONS || "1";
@@ -105,7 +104,6 @@ export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext, p
 	// Dollar caps are deliberately unsupported. Cost remains observable telemetry,
 	// never an admission or termination condition.
 	delete process.env.RLM_BUDGET;
-	delete process.env.RLM_UNSAFE_NO_JJ_WRITE;
 	// RLM_START_TIME anchors the wall-clock timeout budget at the moment a recursion tree
 	// begins, not at extension load. Seeding it here would freeze a long-running root Pi's
 	// budget at session start; the native tool and shell rlm_query set it at the depth-0 call.

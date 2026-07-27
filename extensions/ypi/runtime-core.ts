@@ -60,7 +60,6 @@ export interface RecursiveChildDetails {
 	caller: "tool" | "cli";
 	exitCode: number;
 	signal: NodeJS.Signals | null;
-	jj: "jj" | "none" | "off";
 	readOnly: boolean;
 	requestedMode: ChildMode;
 	workspace: WorkspaceReport;
@@ -252,7 +251,6 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			caller: request.caller,
 			exitCode: processResult.code,
 			signal: processResult.signal,
-			jj: resources.workspace.mode === "jj" ? "jj" : resources.workspace.mode === "read-only" ? "off" : "none",
 			readOnly: resources.workspace.readOnly,
 			requestedMode,
 			workspace,
@@ -290,7 +288,6 @@ function formatWorkspaceReport(report: WorkspaceReport): string {
 		paths.length > 0 ? `Changed paths (${report.changedPaths.length}): ${paths.join(", ")}${report.changedPaths.length > paths.length ? ", …" : ""}` : "Changed paths: none",
 		...(report.baselineHead ? [`Baseline: ${displayPath(report.baselineHead)}`] : []),
 		...(report.finalHead ? [`Final state: ${displayPath(report.finalHead)}`] : []),
-		...(report.jjChangeId ? [`jj change: ${displayPath(report.jjChangeId)}`] : []),
 		...(!report.reportComplete && report.reportError ? [`Workspace report warning: ${report.reportError}`] : []),
 	].join("\n");
 }

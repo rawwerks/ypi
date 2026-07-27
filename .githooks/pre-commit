@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pre-commit hook for ypi
-# Safety net for direct git usage. jj bypasses this entirely.
+# Safety net for direct Git usage.
 #
 # Install: git config core.hooksPath .githooks
 

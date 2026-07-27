@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 # rlm_query — thin CLI adapter for ypi's canonical TypeScript recursion runtime.
-# Set YPI_LEGACY_IMPL=1 to use the retained shell implementation during the
-# convergence window; the fallback remains shipped and tested.
 
 set -euo pipefail
 
@@ -44,11 +42,6 @@ if ! YPI_PI_BIN="$(resolve_pi_bin)"; then
     exit 127
 fi
 export YPI_PI_BIN
-if [ "${YPI_LEGACY_IMPL:-0}" = "1" ]; then
-    export YPI_RLM_IMPLEMENTATION=legacy
-    exec "$SCRIPT_DIR/rlm_query.legacy" "$@"
-fi
-export YPI_RLM_IMPLEMENTATION=canonical
 
 NODE_BIN="${YPI_NODE_BIN:-node}"
 if ! command -v "$NODE_BIN" >/dev/null 2>&1; then

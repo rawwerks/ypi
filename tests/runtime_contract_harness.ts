@@ -152,11 +152,10 @@ function baseEnv(label: string): Record<string, string> {
 		YPI_FAKE_PI_LOG: logFile,
 		YPI_EXTENSION_ROOT: projectRoot,
 		YPI_EXTENSION_PATH: runtime.extensionPath,
-		RLM_DEPTH: "0",
-		RLM_MAX_DEPTH: "2",
-		RLM_JSON: "0",
-		RLM_JJ: "auto",
-		RLM_SHARED_SESSIONS: "0",
+			RLM_DEPTH: "0",
+			RLM_MAX_DEPTH: "2",
+			RLM_JSON: "0",
+			RLM_SHARED_SESSIONS: "0",
 		RLM_PROVIDER: "contract-provider",
 		RLM_MODEL: "contract-model",
 		RLM_THINKING_LEVEL: "contract-thinking",
@@ -258,7 +257,7 @@ async function run(): Promise<void> {
 	contains("wrapper prompt exposes runtime-core source", selfHostingPrompt, "export async function runRecursiveChild");
 	contains("wrapper prompt exposes internal runtime owners", selfHostingPrompt, "// child-process.ts");
 	contains("wrapper prompt exposes CLI adapter source", selfHostingPrompt, "export async function main");
-	record(!selfHostingPrompt.includes("# rlm_query — Recursive Language Model sub-call for Pi."), "wrapper prompt does not promote retained legacy CLI as an active owner");
+	record(!selfHostingPrompt.includes("# rlm_query — Recursive Language Model sub-call for Pi."), "wrapper prompt embeds only the thin CLI launcher");
 	process.env.CONTEXT = contextFile;
 	process.env.RLM_PROMPT_FILE = staleRootPromptFile;
 	const taskFilePrompt = buildYpiPrompt(runtime);
@@ -321,15 +320,15 @@ async function run(): Promise<void> {
 		`native=${JSON.stringify(malformedNative.error)} CLI code=${malformedCli.code}`,
 	);
 
-	const noJjNative = await invokeNative({ ...baseEnv("native-no-jj-choice"), RLM_JJ: "auto" }, prompt);
-	const noJjCli = await invokeCli({ ...baseEnv("cli-no-jj-choice"), RLM_JJ: "auto" }, prompt);
+	const reviewNative = await invokeNative(baseEnv("native-read-only"), prompt);
+	const reviewCli = await invokeCli(baseEnv("cli-read-only"), prompt);
 	record(
-		!noJjNative.error
-			&& noJjCli.code === 0
-			&& noJjNative.observation?.ARGS.includes("<--exclude-tools><bash,edit,write>") === true
-			&& noJjCli.observation?.ARGS.includes("<--exclude-tools><bash,edit,write>") === true,
-		"both adapters silently choose read-only review in a non-jj checkout",
-		`native=${JSON.stringify(noJjNative.error)} CLI=${JSON.stringify(noJjCli.error)}`,
+		!reviewNative.error
+			&& reviewCli.code === 0
+			&& reviewNative.observation?.ARGS.includes("<--exclude-tools><bash,edit,write>") === true
+			&& reviewCli.observation?.ARGS.includes("<--exclude-tools><bash,edit,write>") === true,
+		"both adapters choose read-only review without workspace setup",
+		`native=${JSON.stringify(reviewNative.error)} CLI=${JSON.stringify(reviewCli.error)}`,
 	);
 
 	const extensionsOffNative = await invokeNative({ ...baseEnv("native-ext-off"), RLM_CHILD_EXTENSIONS: "0", RLM_ROOT_PROMPT_FILE: staleRootPromptFile }, prompt);
@@ -377,15 +376,6 @@ async function run(): Promise<void> {
 			syntaxNative.observation?.ARGS.includes(syntaxPrompt) !== true && syntaxCli.observation?.ARGS.includes(syntaxPrompt) !== true,
 			`both adapters keep Pi-like prompt ${syntaxPrompt} out of argv`,
 		);
-	}
-
-	const legacyCli = await invokeCli({ ...baseEnv("cli-legacy"), YPI_LEGACY_IMPL: "1" }, prompt);
-	record(legacyCli.code === 0, "retained CLI fallback remains executable", legacyCli.error);
-	if (legacyCli.observation) {
-		equal("retained CLI fallback preserves prompt content", legacyCli.observation.PROMPT_CONTENT, prompt);
-		equal("retained CLI fallback preserves context content", legacyCli.observation.CONTEXT_CONTENT, "CONTRACT_CONTEXT");
-	} else {
-		record(false, "retained CLI fallback emitted a child observation");
 	}
 
 	clearRuntimeEnv();

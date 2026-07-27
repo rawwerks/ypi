@@ -164,8 +164,7 @@ stderr_file="$MIN_ROOT/minimal.stderr"
 stdout_file="$MIN_ROOT/minimal.stdout"
 set +e
 env -u YPI_EXTENSION_ROOT -u YPI_EXTENSION_PATH \
-    RLM_JJ=0 \
-    RLM_DEPTH=0 RLM_MAX_DEPTH=1 \
+	    RLM_DEPTH=0 RLM_MAX_DEPTH=1 \
     YPI_EXTENSION_DEBUG=1 \
     timeout 15 pi --no-extensions \
     -e "$MIN_ROOT/extensions/recursive.ts" --list-models test \

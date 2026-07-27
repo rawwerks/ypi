@@ -126,8 +126,6 @@ for var in $(env | grep '^YPI_' | cut -d= -f1); do unset "$var"; done
 # use the mock. A live parent ypi session exports YPI_PI_BIN to the real pi;
 # without this override unit tests accidentally make real model calls.
 export YPI_PI_BIN="$MOCK_BIN/pi"
-# The unit harness explicitly chooses no-jj read-only children.
-export RLM_JJ=0
 # Disable JSON mode in unit tests — mock pi doesn't output JSON
 export RLM_JSON=0
 
@@ -291,15 +289,6 @@ OUTPUT=$(
 )
 assert_contains "T8b: ypi extension passed to child" "-e $PROJECT_DIR/extensions/recursive.ts" "$OUTPUT"
 assert_not_contains "T8b: no duplicate system prompt with extension" "--system-prompt" "$OUTPUT"
-
-# T8c: the retained fallback embeds its own active implementation when it must
-# self-host without the canonical extension, not the thin canonical launcher.
-OUTPUT=$(
-    CONTEXT="$TEST_TMP/ctx.txt" YPI_LEGACY_IMPL=1 RLM_EXTENSIONS=0 \
-    RLM_DEPTH=0 RLM_MAX_DEPTH=3 rlm_query "Legacy self-host source?"
-)
-assert_contains "T8c: retained fallback embeds active legacy source" "LEGACY_SELF_SOURCE=1" "$OUTPUT"
-assert_not_contains "T8c: retained fallback does not embed thin launcher" "THIN_SELF_SOURCE=1" "$OUTPUT"
 
 # T9: missing system prompt file → no --system-prompt arg
 OUTPUT=$(

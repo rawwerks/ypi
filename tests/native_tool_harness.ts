@@ -62,8 +62,6 @@ function clearYpiEnv(): void {
 	process.env.TMPDIR = scratch;
 	process.env.YPI_PI_BIN = fakePi;
 	process.env.YPI_FAKE_PI_LOG = logFile;
-	// The harness explicitly chooses no-jj read-only mode unless a case overrides it.
-	process.env.RLM_JJ = "0";
 }
 
 function resetLog(): void {
@@ -348,14 +346,13 @@ async function run(): Promise<void> {
 	resetLog();
 	process.env.RLM_DEPTH = "0";
 	process.env.RLM_MAX_DEPTH = "2";
-	process.env.RLM_JJ = "0";
 	process.env.RLM_JSON = "0";
 	ensureEnvironment(runtime, context());
 	const readOnlyText = await invoke();
 	assertContains("N5: child stdout returned", readOnlyText, "FAKE_CHILD_OK");
-	assertContains("N5: no-jj child excludes built-in mutators", readLog(), "--exclude-tools bash,edit,write");
+	assertContains("N5: review child excludes built-in mutators", readLog(), "--exclude-tools bash,edit,write");
 	assertContains("N5: review child receives no write-scope authority", readLog(), "YPI_IMPLEMENT_ROOT=unset");
-	assertNotContains("N5: no-jj child avoids a global tool allowlist", readLog(), "--tools ");
+	assertNotContains("N5: review child avoids a global tool allowlist", readLog(), "--tools ");
 
 	const implementRoot = mkdtempSync(path.join(scratch, "implement-git."));
 	spawnSync("git", ["init", "-q"], { cwd: implementRoot, env: fixtureGitEnv() });
@@ -465,7 +462,6 @@ async function run(): Promise<void> {
 	resetLog();
 	process.env.RLM_DEPTH = "0";
 	process.env.RLM_MAX_DEPTH = "2";
-	process.env.RLM_JJ = "0";
 	process.env.RLM_JSON = "0";
 	process.env.YPI_FAKE_PI_MODE = "huge";
 	ensureEnvironment(runtime, context());
@@ -785,7 +781,6 @@ async function run(): Promise<void> {
 	process.env.RLM_DEPTH = "0";
 	process.env.RLM_MAX_DEPTH = "2";
 	process.env.RLM_JSON = "0";
-	process.env.RLM_JJ = "0";
 	process.env.YPI_FAKE_PI_MODE = "sleep";
 	ensureEnvironment(runtime, context());
 	const controller = new AbortController();
@@ -818,29 +813,6 @@ async function run(): Promise<void> {
 	const cancelledCostLedger = readFileSync(process.env.RLM_COST_FILE || "", "utf8");
 	assertContains("N13c: known pre-cancel cost remains recorded", cancelledCostLedger, '"cost":0.25');
 	assertContains("N13c: cancellation marks final cost boundary incomplete", cancelledCostLedger, '"incomplete":true');
-
-	// N14: convergence keeps the incumbent native implementation available as
-	// an explicit one-release fallback; it is retained, not silently removed.
-	clearYpiEnv();
-	resetLog();
-	process.env.RLM_DEPTH = "0";
-	process.env.RLM_MAX_DEPTH = "2";
-	process.env.RLM_JSON = "0";
-	process.env.RLM_JJ = "0";
-	process.env.YPI_LEGACY_IMPL = "1";
-	let legacyTool: Tool | undefined;
-	const legacyPi = {
-		...pi,
-		registerTool(registered: Tool) {
-			legacyTool = registered;
-		},
-	} as ExtensionAPI;
-	ensureEnvironment(runtime, context(), legacyPi);
-	registerNativeRlmQueryTool(legacyPi, runtime);
-	if (!legacyTool) throw new Error("legacy native tool was not registered");
-	const legacyResult = await legacyTool.execute("legacy-call", { prompt: "legacy fallback" }, undefined, undefined, context());
-	const legacyText = legacyResult.content.find((item) => item.type === "text")?.text || "";
-	assertContains("N14: legacy native fallback remains executable", legacyText, "FAKE_CHILD_OK");
 
 	console.log("");
 	console.log(`Results: ${pass} passed, ${fail} failed`);

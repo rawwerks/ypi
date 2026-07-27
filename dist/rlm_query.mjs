@@ -34,8 +34,7 @@ function resolveRuntime(importMetaUrl) {
     rlmQueryPath: path.join(root, "rlm_query"),
     runtimeCorePath: path.join(root, "extensions", "ypi", "runtime-core.ts"),
     runtimeInternalDir: path.join(root, "extensions", "ypi", "internal"),
-    cliAdapterPath: path.join(root, "extensions", "ypi", "cli.ts"),
-    legacyRlmQueryPath: path.join(root, "rlm_query.legacy")
+    cliAdapterPath: path.join(root, "extensions", "ypi", "cli.ts")
   };
 }
 function debug(message) {
@@ -113,13 +112,11 @@ function ensureEnvironment(runtime, ctx, pi) {
   process.env.RLM_MAX_DEPTH = process.env.RLM_MAX_DEPTH || String(DEFAULT_MAX_DEPTH);
   process.env.RLM_MAX_CALLS = process.env.RLM_MAX_CALLS || String(DEFAULT_MAX_CALLS);
   process.env.RLM_SYSTEM_PROMPT = process.env.RLM_SYSTEM_PROMPT || runtime.systemPromptPath;
-  process.env.RLM_JJ = process.env.RLM_JJ || "auto";
   process.env.RLM_EXTENSIONS = process.env.RLM_EXTENSIONS || "1";
   process.env.RLM_JSON = process.env.RLM_JSON || "1";
   process.env.RLM_SHARED_SESSIONS = process.env.RLM_SHARED_SESSIONS || "1";
   process.env.RLM_TRACE_ID = safeTraceId(process.env.RLM_TRACE_ID || randomBytes(4).toString("hex"));
   delete process.env.RLM_BUDGET;
-  delete process.env.RLM_UNSAFE_NO_JJ_WRITE;
   process.env.YPI_EXTENSION_ROOT = runtime.root;
   process.env.YPI_EXTENSION_PATH = runtime.extensionPath;
   ensureCallCounterFile();
@@ -1040,8 +1037,8 @@ function runChildProcess(options) {
 }
 
 // extensions/ypi/internal/child-resources.ts
-import { chmodSync as chmodSync3, copyFileSync as copyFileSync2, existsSync as existsSync7, mkdirSync as mkdirSync4, mkdtempSync as mkdtempSync4, readFileSync as readFileSync4, rmSync as rmSync5, writeFileSync as writeFileSync4 } from "node:fs";
-import { homedir, tmpdir as tmpdir6 } from "node:os";
+import { chmodSync as chmodSync3, copyFileSync as copyFileSync2, existsSync as existsSync7, mkdirSync as mkdirSync4, mkdtempSync as mkdtempSync3, readFileSync as readFileSync4, rmSync as rmSync5, writeFileSync as writeFileSync4 } from "node:fs";
+import { homedir, tmpdir as tmpdir5 } from "node:os";
 import path8 from "node:path";
 
 // extensions/ypi/internal/task-files.ts
@@ -1075,12 +1072,10 @@ asks for it or the task context is absent or explicitly insufficient.
 // extensions/ypi/internal/workspace-policy.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync3, mkdtempSync as mkdtempSync3, readFileSync as readFileSync3, realpathSync as realpathSync2, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
-import { tmpdir as tmpdir5 } from "node:os";
+import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync3, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
 import path7 from "node:path";
 var WORKSPACE_CLEANUP_TIMEOUT_MS = 2000;
 var WORKSPACE_ADMISSION_TIMEOUT_MS = 5000;
-var jjCommand = () => process.env.YPI_JJ_BIN || "jj";
 function remainingSetupMilliseconds(input) {
   if (input.setupDeadlineMilliseconds === undefined)
     return WORKSPACE_ADMISSION_TIMEOUT_MS;
@@ -1166,69 +1161,6 @@ function acquireWriterLock(lockPath) {
     }
   };
 }
-function createJjLease(input, jjRoot) {
-  let repoMetadata;
-  try {
-    repoMetadata = realpathSync2(path7.join(jjRoot, ".jj", "repo"));
-  } catch {
-    throw new Error("Implement mode could not resolve the existing jj repository's shared metadata. Continue implementation in the root session.");
-  }
-  const writer = acquireWriterLock(path7.join(repoMetadata, "ypi-implementer.lock"));
-  const workspacePath = mkdtempSync3(path7.join(tmpdir5(), `ypi_ws_d${input.childDepth}_`));
-  const suffix = path7.basename(workspacePath).replace(/^ypi_ws_/, "");
-  const name = `ypi-d${input.childDepth}-${process.pid}-${suffix}`;
-  try {
-    const add = run(input, jjCommand(), ["workspace", "add", "--name", name, workspacePath], jjRoot);
-    assertWithinDeadline(input, add, "jj workspace add");
-    if (add.status !== 0) {
-      throw new Error("Implement mode could not create an isolated workspace in the repository's existing jj setup. Continue implementation in the root session.");
-    }
-    const baseline = run(input, jjCommand(), ["log", "-r", "@", "--no-graph", "-T", "change_id"], workspacePath);
-    assertWithinDeadline(input, baseline, "jj baseline capture");
-    const baselineHead = baseline.status === 0 ? output(baseline) : "";
-    if (!baselineHead)
-      throw new Error("Implement mode could not capture the jj workspace baseline. Continue implementation in the root session.");
-    let finalized;
-    return {
-      cwd: workspacePath,
-      mode: "jj",
-      readOnly: false,
-      quiesceProcessGroup: true,
-      finalize() {
-        if (finalized)
-          return finalized;
-        const summary = spawnSync(jjCommand(), ["diff", "--summary", "--from", baselineHead, "--to", "@"], { cwd: workspacePath, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: WORKSPACE_CLEANUP_TIMEOUT_MS, env: vcsEnvironment() });
-        const change = spawnSync(jjCommand(), ["log", "-r", "@", "--no-graph", "-T", "change_id"], { cwd: workspacePath, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: WORKSPACE_CLEANUP_TIMEOUT_MS, env: vcsEnvironment() });
-        const changedPaths = summary.status === 0 ? String(summary.stdout || "").split(/\r?\n/).map((line) => line.replace(/^\S+\s+/, "").trim()).filter(Boolean) : [];
-        const finalHead = change.status === 0 ? String(change.stdout || "").trim() : undefined;
-        finalized = {
-          requestedMode: "implement",
-          effectiveMode: "implement",
-          workspaceMode: "jj",
-          workspaceRoot: workspacePath,
-          baselineHead,
-          finalHead,
-          changedPaths,
-          reportComplete: summary.status === 0 && Boolean(finalHead),
-          reportError: summary.status === 0 && finalHead ? undefined : "Could not read final jj workspace state",
-          leaseId: writer.token.slice(0, 12),
-          jjChangeId: finalHead
-        };
-        return finalized;
-      },
-      cleanup() {
-        spawnSync(jjCommand(), ["workspace", "forget", name], { cwd: jjRoot, stdio: "ignore", timeout: WORKSPACE_CLEANUP_TIMEOUT_MS, env: vcsEnvironment() });
-        rmSync4(workspacePath, { recursive: true, force: true });
-        writer.release();
-      }
-    };
-  } catch (error) {
-    spawnSync(jjCommand(), ["workspace", "forget", name], { cwd: jjRoot, stdio: "ignore", timeout: WORKSPACE_CLEANUP_TIMEOUT_MS, env: vcsEnvironment() });
-    rmSync4(workspacePath, { recursive: true, force: true });
-    writer.release();
-    throw error;
-  }
-}
 function gitPath(input, root, name) {
   const result = run(input, "git", ["rev-parse", "--path-format=absolute", "--git-path", name], root);
   assertWithinDeadline(input, result, `git path lookup for ${name}`);
@@ -1305,46 +1237,39 @@ function createGitSharedLease(input, root) {
 function acquireWorkspace(input) {
   if (input.mode === "review")
     return readOnlyLease(input.cwd);
-  const jjRootResult = run(input, jjCommand(), ["root"]);
-  assertWithinDeadline(input, jjRootResult, "jj discovery");
-  if (jjRootResult.status === 0)
-    return createJjLease(input, output(jjRootResult));
   const gitRootResult = run(input, "git", ["rev-parse", "--show-toplevel"]);
   assertWithinDeadline(input, gitRootResult, "Git discovery");
   if (gitRootResult.status !== 0) {
-    throw new Error("Implement mode requires an existing clean Git or jj checkout. No version-control system was installed or initialized; continue implementation in the root session.");
+    throw new Error("Implement mode requires an existing clean Git checkout. No version-control system was installed or initialized; continue implementation in the root session.");
   }
   const gitRoot = output(gitRootResult);
-  if (existsSync6(path7.join(gitRoot, ".jj"))) {
-    throw new Error("This checkout already contains jj metadata but jj is unavailable. No version-control tooling was installed; continue implementation in the root session.");
-  }
   return createGitSharedLease(input, gitRoot);
 }
 
 // extensions/ypi/internal/child-resources.ts
 function createContextFile(input) {
   if (input.context !== undefined) {
-    const contextPath = path8.join(mkdtempSync4(path8.join(tmpdir6(), "ypi_ctx_")), "context.txt");
+    const contextPath = path8.join(mkdtempSync3(path8.join(tmpdir5(), "ypi_ctx_")), "context.txt");
     writeFileSync4(contextPath, input.context);
     return contextPath;
   }
   const inheritedPath = input.contextPath || process.env.CONTEXT;
   if (inheritedPath && existsSync7(inheritedPath)) {
-    const contextPath = path8.join(mkdtempSync4(path8.join(tmpdir6(), "ypi_ctx_")), "context.txt");
+    const contextPath = path8.join(mkdtempSync3(path8.join(tmpdir5(), "ypi_ctx_")), "context.txt");
     copyFileSync2(inheritedPath, contextPath);
     return contextPath;
   }
   return;
 }
 function createPromptFile(prompt) {
-  const promptPath = path8.join(mkdtempSync4(path8.join(tmpdir6(), "ypi_prompt_")), "prompt.txt");
+  const promptPath = path8.join(mkdtempSync3(path8.join(tmpdir5(), "ypi_prompt_")), "prompt.txt");
   writeFileSync4(promptPath, prompt);
   return promptPath;
 }
 function createStandaloneSystemPrompt(input, promptFile, contextFile) {
   if (!input.systemPromptPath || !existsSync7(input.systemPromptPath))
     return;
-  const outputPath = path8.join(mkdtempSync4(path8.join(tmpdir6(), "ypi_system_")), "system-prompt.md");
+  const outputPath = path8.join(mkdtempSync3(path8.join(tmpdir5(), "ypi_system_")), "system-prompt.md");
   const section = renderActiveTaskFilesSection({
     contextPath: contextFile,
     promptPath: promptFile,
@@ -1429,7 +1354,7 @@ function acquireChildResources(input) {
     contextFile = createContextFile(input);
     standaloneSystemPromptFile = createStandaloneSystemPrompt(input, promptFile, contextFile);
     if (input.fullResourceIsolation) {
-      isolatedPiRoot = mkdtempSync4(path8.join(tmpdir6(), "ypi_isolated_pi_"));
+      isolatedPiRoot = mkdtempSync3(path8.join(tmpdir5(), "ypi_isolated_pi_"));
       chmodSync3(isolatedPiRoot, 448);
       const isolatedAgentDir = path8.join(isolatedPiRoot, "agent");
       mkdirSync4(isolatedAgentDir, { recursive: true, mode: 448 });
@@ -1649,7 +1574,6 @@ async function runRecursiveChild(runtime, request) {
       caller: request.caller,
       exitCode: processResult.code,
       signal: processResult.signal,
-      jj: resources.workspace.mode === "jj" ? "jj" : resources.workspace.mode === "read-only" ? "off" : "none",
       readOnly: resources.workspace.readOnly,
       requestedMode,
       workspace,
@@ -1684,7 +1608,6 @@ function formatWorkspaceReport(report) {
     paths.length > 0 ? `Changed paths (${report.changedPaths.length}): ${paths.join(", ")}${report.changedPaths.length > paths.length ? ", …" : ""}` : "Changed paths: none",
     ...report.baselineHead ? [`Baseline: ${displayPath(report.baselineHead)}`] : [],
     ...report.finalHead ? [`Final state: ${displayPath(report.finalHead)}`] : [],
-    ...report.jjChangeId ? [`jj change: ${displayPath(report.jjChangeId)}`] : [],
     ...!report.reportComplete && report.reportError ? [`Workspace report warning: ${report.reportError}`] : []
   ].join(`
 `);

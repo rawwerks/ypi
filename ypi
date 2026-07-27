@@ -22,7 +22,6 @@
 #   RLM_CHILD_MODELS   — comma-separated child-depth model list (depth 1,2,...)
 #   RLM_CHILD_PROVIDERS — comma-separated child-depth provider list (depth 1,2,...)
 #   RLM_CHILD_THINKING_LEVELS — comma-separated child-depth thinking list (depth 1,2,...)
-#   RLM_JJ             — existing-jj detection policy (default: auto; never initializes a VCS)
 #   RLM_EXTENSIONS     — set to "0" to disable Pi extensions (default: 1)
 #   RLM_AMBIENT_EXTENSIONS — ambient extension policy for the root session:
 #                        "1" always allow, "0" always isolate, unset/"auto"
@@ -107,7 +106,6 @@ export RLM_MAX_CALLS="${RLM_MAX_CALLS:-128}"
 [ -n "${RLM_CHILD_PROVIDERS:-}" ] && export RLM_CHILD_PROVIDERS
 [ -n "${RLM_CHILD_THINKING_LEVELS:-}" ] && export RLM_CHILD_THINKING_LEVELS
 [ -n "${PI_TRACE_FILE:-}" ]      && export PI_TRACE_FILE
-export RLM_JJ="${RLM_JJ:-auto}"
 export RLM_EXTENSIONS="${RLM_EXTENSIONS:-1}"
 [ -n "${RLM_CHILD_EXTENSIONS:-}" ] && export RLM_CHILD_EXTENSIONS
 [ -n "${RLM_CHILD_DISCOVERY:-}" ]  && export RLM_CHILD_DISCOVERY

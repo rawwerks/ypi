@@ -1,7 +1,6 @@
 import { Type } from "typebox";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { canExecute, readCostSummary } from "./guardrails.ts";
-import { registerLegacyNativeRlmQueryTool } from "./legacy-native-tool.ts";
 import { appendRuntimeTrace, formatRecursiveResultForTool, runRecursiveChild, type ChildToolActivity } from "./runtime-core.ts";
 import type { YpiRuntime } from "./runtime.ts";
 import { debug } from "./runtime.ts";
@@ -17,17 +16,12 @@ const RlmQueryParams = Type.Object({
 		description: "Copy the current session file into the child session before running.",
 	})),
 	mode: Type.Optional(Type.String({
-		description: "review (default, read-only) or implement (one exclusive writer in an existing clean Git/jj checkout).",
+		description: "review (default, read-only) or implement (one exclusive writer in an existing clean Git checkout).",
 		pattern: "^(review|implement)$",
 	})),
 });
 
 export function registerNativeRlmQueryTool(pi: ExtensionAPI, runtime: YpiRuntime): void {
-	if (process.env.YPI_LEGACY_IMPL === "1") {
-		registerLegacyNativeRlmQueryTool(pi, runtime);
-		return;
-	}
-
 	const tool = defineTool({
 		name: "rlm_query",
 		label: "Recursive query",

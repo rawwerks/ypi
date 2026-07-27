@@ -62,8 +62,6 @@ assert_contains "tarball contains bounded delegation skill" "package/skills/boun
 assert_contains "tarball contains internal CLI-input owner" "package/extensions/ypi/internal/cli-input.ts" "$TARBALL_LIST"
 assert_contains "tarball contains thin CLI adapter" "package/extensions/ypi/cli.ts" "$TARBALL_LIST"
 assert_contains "tarball contains generated Node CLI projection" "package/dist/rlm_query.mjs" "$TARBALL_LIST"
-assert_contains "tarball contains retained native fallback" "package/extensions/ypi/legacy-native-tool.ts" "$TARBALL_LIST"
-assert_contains "tarball contains retained CLI fallback" "package/rlm_query.legacy" "$TARBALL_LIST"
 assert_contains "tarball contains cleanup helper" "package/rlm_cleanup" "$TARBALL_LIST"
 assert_contains "tarball contains installed doctor" "package/scripts/doctor" "$TARBALL_LIST"
 assert_contains "tarball contains Pi compatibility pin" "package/.pi-version" "$TARBALL_LIST"
@@ -115,7 +113,7 @@ cat > "$TEST_TMP/mock-bin/pi" <<'MOCK_PI'
 [ -f "${RLM_SYSTEM_PROMPT:-}" ] || { echo "missing packaged system prompt" >&2; exit 90; }
 [ -f "${YPI_EXTENSION_ROOT:-}/extensions/ypi/runtime-core.ts" ] || { echo "missing packaged runtime root" >&2; exit 91; }
 [ -f "${YPI_EXTENSION_PATH:-}" ] || { echo "missing packaged extension path" >&2; exit 92; }
-printf 'PACKED_CHILD_OK implementation=%s\n' "${YPI_RLM_IMPLEMENTATION:-unset}"
+printf '%s\n' PACKED_CHILD_OK
 MOCK_PI
 chmod +x "$TEST_TMP/mock-bin/pi"
 set +e
@@ -125,25 +123,12 @@ PACKED_RLM_OUTPUT="$(env -u RLM_BUDGET -u RLM_COST_FILE -u RLM_TIMEOUT -u RLM_ST
 	YPI_PI_BIN="$TEST_TMP/mock-bin/pi" \
 	RLM_DEPTH=0 RLM_MAX_DEPTH=2 RLM_CALL_COUNT=0 RLM_MAX_CALLS=8 \
 	RLM_CALL_COUNTER_FILE="$TEST_TMP/packed-canonical.counter" RLM_TRACE_ID=packed-canonical \
-	RLM_JSON=0 RLM_JJ=auto RLM_SHARED_SESSIONS=0 \
-	"$RLM_BIN" "Packed runtime smoke" 2>&1)"
+		RLM_JSON=0 RLM_SHARED_SESSIONS=0 \
+		"$RLM_BIN" "Packed runtime smoke" 2>&1)"
 PACKED_RLM_RC=$?
 set -e
 if [ "$PACKED_RLM_RC" -eq 0 ]; then pass "installed canonical CLI exits cleanly"; else fail "installed canonical CLI exits cleanly" "rc=$PACKED_RLM_RC $PACKED_RLM_OUTPUT"; fi
-assert_contains "installed rlm_query executes canonical runtime" "PACKED_CHILD_OK implementation=canonical" "$PACKED_RLM_OUTPUT"
-set +e
-PACKED_LEGACY_OUTPUT="$(env -u RLM_BUDGET -u RLM_COST_FILE -u RLM_TIMEOUT -u RLM_START_TIME \
-	HOME="$TEST_TMP/home" \
-	PATH="$TEST_TMP/mock-bin:$(dirname "$(command -v node)"):/usr/bin:/bin" \
-	YPI_PI_BIN="$TEST_TMP/mock-bin/pi" YPI_LEGACY_IMPL=1 \
-	RLM_DEPTH=0 RLM_MAX_DEPTH=2 RLM_CALL_COUNT=0 RLM_MAX_CALLS=8 \
-	RLM_CALL_COUNTER_FILE="$TEST_TMP/packed-legacy.counter" RLM_TRACE_ID=packed-legacy \
-	RLM_JSON=0 RLM_JJ=auto RLM_SHARED_SESSIONS=0 \
-	"$RLM_BIN" "Packed legacy smoke" 2>&1)"
-PACKED_LEGACY_RC=$?
-set -e
-if [ "$PACKED_LEGACY_RC" -eq 0 ]; then pass "installed retained CLI exits cleanly"; else fail "installed retained CLI exits cleanly" "rc=$PACKED_LEGACY_RC $PACKED_LEGACY_OUTPUT"; fi
-assert_contains "installed rlm_query retains executable CLI fallback" "PACKED_CHILD_OK implementation=legacy" "$PACKED_LEGACY_OUTPUT"
+assert_contains "installed rlm_query executes canonical runtime" "PACKED_CHILD_OK" "$PACKED_RLM_OUTPUT"
 
 RUN_LOG="$TEST_TMP/ypi-version.log"
 NODE_BIN="$(dirname "$(command -v node)")"
@@ -203,7 +188,7 @@ DIRECT_BUNDLE_OUTPUT="$(env -u YPI_EXTENSION_ROOT -u YPI_EXTENSION_PATH -u RLM_S
 	YPI_PI_BIN="$TEST_TMP/mock-bin/pi" CONTEXT="$TEST_TMP/ctx.txt" \
 	RLM_DEPTH=0 RLM_MAX_DEPTH=2 RLM_CALL_COUNT=0 RLM_MAX_CALLS=8 \
 	RLM_CALL_COUNTER_FILE="$TEST_TMP/direct-bundle.counter" RLM_TRACE_ID=direct-bundle \
-	RLM_JSON=0 RLM_JJ=auto RLM_SHARED_SESSIONS=0 \
+		RLM_JSON=0 RLM_SHARED_SESSIONS=0 \
 	node "$UNPACKED/dist/rlm_query.mjs" "Direct bundle root smoke" 2>&1 || true)"
 assert_contains "direct generated bundle resolves its packaged root" "PACKED_CHILD_OK" "$DIRECT_BUNDLE_OUTPUT"
 assert_not_contains "direct generated bundle avoids source-relative root failure" "missing packaged" "$DIRECT_BUNDLE_OUTPUT"
