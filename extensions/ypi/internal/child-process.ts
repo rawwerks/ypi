@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import type { CostSummary } from "../guardrails.ts";
+import { atomicCreateFile } from "./atomic-file.ts";
 import {
 	createBoundedCapture,
 	createJsonDecoder,
@@ -72,7 +72,7 @@ export function runChildProcess(options: ChildProcessOptions): Promise<ChildProc
 			try {
 				options.onSpawn?.(child.pid);
 				if (options.launchGate) {
-					writeFileSync(options.launchGate.readyFile, `${child.pid}\n`, { flag: "wx", mode: 0o600 });
+					atomicCreateFile(options.launchGate.readyFile, `${child.pid}\n`, { mode: 0o600 });
 				}
 			} catch (error) {
 				const target = process.platform === "win32" ? child.pid : -child.pid;

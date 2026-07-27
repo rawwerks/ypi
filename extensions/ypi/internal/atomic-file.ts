@@ -4,6 +4,7 @@ import {
 	constants,
 	fchmodSync,
 	fsyncSync,
+	linkSync,
 	openSync,
 	renameSync,
 	rmSync,
@@ -24,11 +25,11 @@ function syncDirectory(directory: string): void {
 	}
 }
 
-export function atomicWriteFile(
+function writeDurableTemporary(
 	target: string,
 	content: string | Uint8Array,
-	options: AtomicWriteOptions = {},
-): void {
+	mode: number,
+): string {
 	const directory = path.dirname(target);
 	const temporary = path.join(
 		directory,
@@ -36,7 +37,6 @@ export function atomicWriteFile(
 	);
 	let descriptor: number | undefined;
 	try {
-		const mode = options.mode ?? 0o600;
 		descriptor = openSync(
 			temporary,
 			constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
@@ -50,8 +50,7 @@ export function atomicWriteFile(
 		} finally {
 			descriptor = undefined;
 		}
-		renameSync(temporary, target);
-		syncDirectory(directory);
+		return temporary;
 	} catch (error) {
 		if (descriptor !== undefined) {
 			try {
@@ -60,6 +59,39 @@ export function atomicWriteFile(
 				// Preserve the original write failure.
 			}
 		}
+		rmSync(temporary, { force: true });
+		throw error;
+	}
+}
+
+export function atomicWriteFile(
+	target: string,
+	content: string | Uint8Array,
+	options: AtomicWriteOptions = {},
+): void {
+	const directory = path.dirname(target);
+	const temporary = writeDurableTemporary(target, content, options.mode ?? 0o600);
+	try {
+		renameSync(temporary, target);
+		syncDirectory(directory);
+	} catch (error) {
+		rmSync(temporary, { force: true });
+		throw error;
+	}
+}
+
+export function atomicCreateFile(
+	target: string,
+	content: string | Uint8Array,
+	options: AtomicWriteOptions = {},
+): void {
+	const directory = path.dirname(target);
+	const temporary = writeDurableTemporary(target, content, options.mode ?? 0o600);
+	try {
+		linkSync(temporary, target);
+		rmSync(temporary);
+		syncDirectory(directory);
+	} catch (error) {
 		rmSync(temporary, { force: true });
 		throw error;
 	}

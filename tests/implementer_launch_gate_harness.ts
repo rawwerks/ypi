@@ -2,15 +2,19 @@ import { spawn, type ChildProcess } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	readdirSync,
 	rmSync,
+	statSync,
 	symlinkSync,
 	watch,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { atomicCreateFile } from "../extensions/ypi/internal/atomic-file.ts";
 import { parseLaunchGateArguments } from "../extensions/ypi/internal/launch-gate.ts";
 
 const launcher = path.resolve(import.meta.dir, "..", "scripts", "launch-implementer-child.ts");
@@ -93,6 +97,57 @@ async function waitForPidOrExit(
 
 console.log("\n=== Implementer launch-gate harness ===");
 const root = mkdtempSync(path.join(tmpdir(), "ypi_launch_gate."));
+
+{
+	const childProcessSource = readFileSync(
+		path.resolve(import.meta.dir, "..", "extensions", "ypi", "internal", "child-process.ts"),
+		"utf8",
+	);
+	record(
+		childProcessSource.includes("atomicCreateFile(options.launchGate.readyFile"),
+		"child-process publishes the ready signal with an atomic create-only primitive",
+	);
+}
+
+{
+	const directory = path.join(root, "atomic-ready");
+	const target = path.join(directory, "ready");
+	const symlinkTarget = path.join(directory, "symlink-target");
+	const symlinkSignal = path.join(directory, "symlink-ready");
+	mkdirSync(directory);
+	atomicCreateFile(target, "123\n", { mode: 0o600 });
+	record(
+		readFileSync(target, "utf8") === "123\n"
+			&& (statSync(target).mode & 0o777) === 0o600
+			&& readdirSync(directory).join("\0") === "ready",
+		"atomic create-only publication exposes one complete private signal",
+	);
+	let preservedExisting = false;
+	try {
+		atomicCreateFile(target, "replacement\n", { mode: 0o600 });
+	} catch (error) {
+		preservedExisting = (error as NodeJS.ErrnoException).code === "EEXIST"
+			&& readFileSync(target, "utf8") === "123\n"
+			&& readdirSync(directory).join("\0") === "ready";
+	}
+	record(
+		preservedExisting,
+		"atomic create-only publication preserves an existing signal",
+	);
+	writeFileSync(symlinkTarget, "preserve\n", { mode: 0o600 });
+	symlinkSync(symlinkTarget, symlinkSignal);
+	let preservedSymlink = false;
+	try {
+		atomicCreateFile(symlinkSignal, "replacement\n", { mode: 0o600 });
+	} catch (error) {
+		preservedSymlink = (error as NodeJS.ErrnoException).code === "EEXIST"
+			&& readFileSync(symlinkTarget, "utf8") === "preserve\n";
+	}
+	record(
+		preservedSymlink,
+		"atomic create-only publication refuses a pre-existing symlink",
+	);
+}
 
 {
 	const parsed = parseLaunchGateArguments([
