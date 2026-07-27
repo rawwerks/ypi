@@ -1,5 +1,5 @@
 #!/bin/bash
-# doctor — verify the host `pi` runtime is the one ypi / pi-recursive need.
+# doctor — verify the host `pi` runtime is the one ypi needs.
 #
 # The most common ypi setup failure is a wrong or stale `pi`:
 #   * the OLD package (@mariozechner/pi-coding-agent) shadowing the new one, or
@@ -70,7 +70,7 @@ REAL="$(readlink -f "$PI_BIN" 2>/dev/null || echo "$PI_BIN")"
 case "$REAL" in
     *"$OLD_PKG"*)
         bad "pi is the OLD package: $OLD_PKG"
-        echo -e "${DIM}  ypi/pi-recursive require ${PKG}; the old package is shadowing it.${RESET}"
+        echo -e "${DIM}  ypi requires ${PKG}; the old package is shadowing it.${RESET}"
         fixln "bun add -g ${PKG}@${PINNED}   (or repoint ~/.bun/bin/pi at the @earendil-works cli.js)"
         exit 1 ;;
     *"$PKG"*)

@@ -38,13 +38,6 @@ KNOWN_GOOD=$(tr -d '[:space:]' < "$PROJECT_DIR/.pi-version")
 PINNED=$(node -e "const p=require('$PROJECT_DIR/package.json'); console.log(p.dependencies['@earendil-works/pi-coding-agent'] || '')")
 PI_MANIFEST=$(node -e "const p=require('$PROJECT_DIR/package.json'); console.log((p.pi?.extensions || []).join('\\n'))")
 PI_SKILLS=$(node -e "const p=require('$PROJECT_DIR/package.json'); console.log((p.pi?.skills || []).join('\\n'))")
-LATEST=""
-if command -v bun &>/dev/null; then
-    LATEST=$(bun pm view @earendil-works/pi-coding-agent version 2>/dev/null | tail -1 | tr -d '[:space:]' || true)
-elif command -v npm &>/dev/null; then
-    LATEST=$(npm view @earendil-works/pi-coding-agent version 2>/dev/null | tr -d '[:space:]' || true)
-fi
-
 # HARD: the pin must be internally consistent — .pi-version and the package.json
 # dependency must agree. This can never silently drift.
 if [ -n "$KNOWN_GOOD" ] && [ "$KNOWN_GOOD" = "$PINNED" ]; then
@@ -52,18 +45,6 @@ if [ -n "$KNOWN_GOOD" ] && [ "$KNOWN_GOOD" = "$PINNED" ]; then
 else
     fail "pinned Pi consistent (.pi-version == package.json)" ".pi-version=$KNOWN_GOOD package.json=$PINNED"
 fi
-
-# ADVISORY: upstream advancing past the pin is a re-pin SIGNAL, not a failure.
-# (Previously a hard fail, which turned CI red every time pi published a release.)
-if [ -z "$LATEST" ]; then
-    echo "  ! upstream Pi version unknown (offline?) — drift advisory skipped"
-elif [ "$KNOWN_GOOD" != "$LATEST" ]; then
-    echo "  ! advisory: newer Pi available (pinned=$KNOWN_GOOD, latest=$LATEST) — re-pin via: scripts/check-upstream"
-else
-    echo "  ✓ pinned Pi is the latest upstream release ($LATEST)"
-fi
-
-echo ""
 
 if [ "$PI_MANIFEST" = "./extensions/recursive.ts" ]; then
     pass "pi package manifest exposes only canonical extension"
@@ -112,9 +93,8 @@ test_extension_loads() {
     rm -f "$stderr_file" "$stderr_file.stdout"
 }
 
-# Test canonical ypi recursive extension and compatibility alias
+# Test the canonical ypi recursive extension.
 test_extension_loads "recursive.ts" "$PROJECT_DIR/extensions/recursive.ts"
-test_extension_loads "ypi.ts" "$PROJECT_DIR/extensions/ypi.ts"
 
 # Test hashline extension (if present — it's in contrib/)
 if [ -f "$PROJECT_DIR/contrib/extensions/hashline.ts" ]; then

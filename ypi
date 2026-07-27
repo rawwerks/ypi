@@ -116,8 +116,7 @@ export RLM_SHARED_SESSIONS="${RLM_SHARED_SESSIONS:-1}"
 # Session tree tracing — generate a trace ID that links all recursive sessions
 export RLM_TRACE_ID="${RLM_TRACE_ID:-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 
-# Canonical ypi extension. Keep extensions/ypi.ts as a compatibility alias,
-# but load recursive.ts so the wrapper and direct-extension path share runtime.
+# Canonical ypi extension. The wrapper and direct-extension path share runtime.
 YPI_EXTENSION="$SCRIPT_DIR/extensions/recursive.ts"
 if [ ! -f "$YPI_EXTENSION" ]; then
     echo "ypi: missing extension: $YPI_EXTENSION" >&2

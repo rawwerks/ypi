@@ -12,7 +12,6 @@
   },
   "include": [
     "extensions/recursive.ts",
-    "extensions/ypi.ts",
     "extensions/ypi/**/*.ts"
   ]
 }

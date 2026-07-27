@@ -17,21 +17,21 @@ expect_pass() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then pass "$la
 expect_fail() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then fail "$label" "unexpected authorization"; else pass "$label"; fi; }
 
 echo ""
-echo "=== Publication and release authority ==="
+echo "=== Delivery and release authority ==="
 expect_pass "owned HTTPS remote allowed" "$VALIDATE" https://github.com/ruslanvasylev/ypi.git
 expect_pass "owned SSH remote allowed" "$VALIDATE" git@github.com:ruslanvasylev/ypi.git
 expect_pass "owned ssh URL allowed" "$VALIDATE" ssh://git@github.com/ruslanvasylev/ypi.git
-expect_fail "non-owned upstream denied" "$VALIDATE" https://github.com/rawwerks/ypi.git
+expect_fail "non-owned upstream denied" "$VALIDATE" https://github.com/otherowner/ypi.git
 expect_fail "lookalike owner denied" "$VALIDATE" https://github.com/ruslanvasylev-evil/ypi.git
 expect_fail "embedded owner text denied" "$VALIDATE" https://github.com/other/ruslanvasylev-ypi.git
 expect_fail "unparseable remote denied" "$VALIDATE" not-a-remote
 expect_fail "arbitrary host with owned-looking path denied" "$VALIDATE" https://attacker.invalid/ruslanvasylev/ypi.git
-expect_fail "dot-segment owner escape denied" "$VALIDATE" https://github.com/ruslanvasylev/../rawwerks/ypi.git
+expect_fail "dot-segment owner escape denied" "$VALIDATE" https://github.com/ruslanvasylev/../otherowner/ypi.git
 expect_fail "ambiguous SCP-like URL denied" "$VALIDATE" evil.invalid:ignored@github.com:ruslanvasylev/ypi.git
 expect_fail "percent-encoded path denied" "$VALIDATE" https://github.com/ruslanvasylev%2Frawwerks/ypi.git
 expect_fail "local filesystem remote denied outside tests" "$VALIDATE" "$ROOT/.git"
 expect_pass "local filesystem fixture allowed only by test marker" env YPI_ALLOW_LOCAL_REMOTE_FOR_TESTS=1 "$VALIDATE" "$ROOT/.git"
-expect_fail "environment cannot authorize a non-owned remote" env YPI_EXPLICIT_NON_OWNED_REMOTE=github.com/rawwerks/ypi "$VALIDATE" https://github.com/rawwerks/ypi.git
+expect_fail "environment cannot authorize a non-owned remote" env YPI_EXPLICIT_NON_OWNED_REMOTE=github.com/otherowner/ypi "$VALIDATE" https://github.com/otherowner/ypi.git
 
 expect_fail "release denied without explicit user request" "$RELEASE"
 expect_pass "release helper accepts explicit user request marker" env YPI_EXPLICIT_RELEASE_REQUEST=1 "$RELEASE"
@@ -58,43 +58,23 @@ else
   fail "explicit release request authorizes owned release ref" "hook rejected"
 fi
 
-MULTI_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ypi_multi_push.XXXXXX")"
-git -C "$MULTI_TMP" init -q
+MULTI_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/ypi_multi_push.XXXXXX")"
+MULTI_TMP="$MULTI_PARENT/repo"
+git clone -q --no-checkout "$ROOT" "$MULTI_TMP"
 mkdir -p "$MULTI_TMP/scripts"
 ln -s "$VALIDATE" "$MULTI_TMP/scripts/validate-push-owner"
 ln -s "$RELEASE" "$MULTI_TMP/scripts/assert-release-authorized"
-git -C "$MULTI_TMP" remote add origin https://github.com/ruslanvasylev/ypi.git
+git -C "$MULTI_TMP" remote set-url origin https://github.com/ruslanvasylev/ypi.git
 git -C "$MULTI_TMP" remote set-url --add --push origin https://github.com/ruslanvasylev/ypi.git
-git -C "$MULTI_TMP" remote set-url --add --push origin https://github.com/rawwerks/ypi.git
+git -C "$MULTI_TMP" remote set-url --add --push origin https://github.com/otherowner/ypi.git
 if (cd "$MULTI_TMP" && printf 'refs/heads/feature abc refs/heads/feature def\n' | YPI_SKIP_PUSH_CHECKS=1 "$HOOK" origin https://github.com/ruslanvasylev/ypi.git >/dev/null 2>&1); then
   fail "every configured push URL is owner-validated" "second non-owned pushurl was authorized"
 else
   pass "every configured push URL is owner-validated"
 fi
-rm -rf "$MULTI_TMP"
+rm -rf "$MULTI_PARENT"
 
-PUBLISH_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ypi_publish_policy.XXXXXX")"
-cat > "$PUBLISH_TMP/npm-publish" <<'MOCK'
-#!/usr/bin/env bash
-touch "$YPI_PUBLISH_PROBE"
-MOCK
-chmod +x "$PUBLISH_TMP/npm-publish"
-set +e
-YPI_PUBLISH_PROBE="$PUBLISH_TMP/published" PATH="$PUBLISH_TMP:$PATH" "$ROOT/scripts/publish-packages" >"$PUBLISH_TMP/out" 2>&1
-PUBLISH_RC=$?
-set -e
-if [ "$PUBLISH_RC" -ne 0 ] && [ ! -e "$PUBLISH_TMP/published" ] && grep -q 'DENIED' "$PUBLISH_TMP/out"; then pass "package publication aborts before mutation without user authority"; else fail "package publication aborts before mutation without user authority" "rc=$PUBLISH_RC out=$(cat "$PUBLISH_TMP/out")"; fi
-rm -rf "$PUBLISH_TMP"
-if grep -q 'scripts/assert-release-authorized' "$ROOT/scripts/publish-packages"; then pass "package publication has an authority gate"; else fail "package publication has an authority gate" "missing guard"; fi
 if grep -q 'Never release, publish, tag, or ask whether to release' "$ROOT/SYSTEM_PROMPT.md"; then pass "system prompt carries release prohibition"; else fail "system prompt carries release prohibition" "missing rule"; fi
-if grep -q 'scripts/assert-release-authorized' "$ROOT/.prose/release.prose" && ! grep -q 'confirm_release' "$ROOT/.prose/release.prose"; then pass "release workflow gates authority without prompting"; else fail "release workflow gates authority without prompting" "missing early guard or stale confirmation prompt"; fi
-if ! grep -q 'v{new_version}' "$ROOT/.prose/release.prose" && grep -q "strict numeric semver\|\\\\d\*" "$ROOT/.prose/release.prose"; then pass "release workflow never interpolates model text into shell commands"; else fail "release version shell boundary" "unsafe model interpolation or missing validation"; fi
-if RELEASE_PROSE="$ROOT/.prose/release.prose" python3 - <<'PY'
-import os
-text = open(os.environ["RELEASE_PROSE"]).read()
-assert text.index("make release-preflight") < text.index("git commit -m") < text.index("git tag") < text.index("scripts/publish-packages")
-PY
-then pass "release validation precedes commit, tag, and publication"; else fail "release ordering" "mutation appears before preflight"; fi
 if grep -q 'validate-push-owner' "$ROOT/scripts/land" && grep -q -- '--no-follow-tags' "$ROOT/scripts/land" && grep -q 'HEAD:refs/heads/' "$ROOT/scripts/land" && ! grep -q 'to publish to npm' "$ROOT/scripts/land"; then pass "landing validates all origin targets and pushes only one branch"; else fail "landing publication boundary" "unsafe landing text"; fi
 if grep -q 'git diff --quiet' "$ROOT/scripts/land" && grep -q 'HEAD_BEFORE' "$ROOT/scripts/land"; then pass "landing binds validation to a clean unchanged commit"; else fail "landing exact-state gate" "missing clean/HEAD checks"; fi
 

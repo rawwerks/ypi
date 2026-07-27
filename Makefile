@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-guardrails test-native test-runtime-contract test-eval-contracts test-workspace-policy test-write-scope test-publication-policy typecheck-runtime build-runtime-cli check-runtime-cli test-provider-allowlist test-extensions test-consumer-pack test-pi-recursive-pack build-pi-recursive test-e2e test-recursion-e2e test-extension-recursion-e2e test-parity-e2e eval-depth-ablation eval-runtime-parity test-fast doctor test-doctor check-release-consistency test-release-consistency test-install-from-registry publish publish-dry pre-push-checks check-upstream install-hooks release-preflight land ci-status ci-last-failure clean
+.PHONY: test test-unit test-guardrails test-native test-runtime-contract test-eval-contracts test-workspace-policy test-write-scope test-publication-policy typecheck-runtime build-runtime-cli check-runtime-cli test-provider-allowlist test-extensions test-e2e test-recursion-e2e test-extensions-e2e eval-depth-ablation eval-runtime-parity test-fast doctor test-doctor pre-push-checks check-upstream install-hooks land ci-status ci-last-failure clean
 
 # Fast tests — no LLM calls, uses mock pi
 test-unit:
@@ -14,8 +14,7 @@ test-native:
 	@echo "Running native extension tool tests..."
 	@bash tests/test_native_tool.sh
 
-# Shared native/CLI runtime contract — no LLM calls, freezes parity and known divergences
-# before duplicated policy is converged behind one engine.
+# Shared native/CLI runtime contract — no LLM calls.
 test-runtime-contract:
 	@echo "Running recursion runtime contract tests..."
 	@bash tests/test_runtime_contract.sh
@@ -58,39 +57,13 @@ test-doctor:
 	@echo "Running doctor tests..."
 	@bash tests/test_doctor.sh
 
-# Two-package lockstep + changelog invariants (no LLM)
-check-release-consistency:
-	@scripts/check-release-consistency
-
-test-release-consistency:
-	@echo "Running release-consistency tests..."
-	@bash tests/test_release_consistency.sh
-
 # All fast tests (no LLM calls)
-test-fast: typecheck-runtime check-runtime-cli test-unit test-guardrails test-native test-runtime-contract test-eval-contracts test-workspace-policy test-write-scope test-publication-policy test-provider-allowlist test-doctor test-release-consistency
+test-fast: typecheck-runtime check-runtime-cli test-unit test-guardrails test-native test-runtime-contract test-eval-contracts test-workspace-policy test-write-scope test-publication-policy test-provider-allowlist test-doctor
 
 # Extension compatibility — requires real pi installed
 test-extensions:
 	@echo "Running extension tests..."
 	@bash tests/test_extensions.sh
-
-test-consumer-pack:
-	@echo "Running packed consumer tests..."
-	@bash tests/test_consumer_pack.sh
-
-# Stage the pi-recursive pure-extension publish view from canonical root source
-build-pi-recursive:
-	@scripts/build-pi-recursive
-
-# Packed-consumer smoke for the pure-extension pi-recursive package
-test-pi-recursive-pack:
-	@echo "Running pi-recursive pack tests..."
-	@bash tests/test_pi_recursive_pack.sh
-
-# Real registry-install smoke (GATED: network + published pkg). Skips unless
-# YPI_TEST_REGISTRY_INSTALL=1. Proves `pi install npm:pi-recursive` end-to-end.
-test-install-from-registry:
-	@bash tests/test_install_from_registry.sh
 
 # Extension E2E tests — REAL LLM calls, tests extension API compatibility
 test-extensions-e2e:
@@ -106,14 +79,6 @@ test-e2e:
 test-recursion-e2e:
 	@echo "Running recursion e2e test (real LLM calls)..."
 	@RLM_PROVIDER="$${RLM_PROVIDER:-openrouter}" RLM_MODEL="$${RLM_MODEL:-openai/gpt-5.5:xhigh}" bash tests/test_e2e.sh E9
-
-test-extension-recursion-e2e:
-	@echo "Running pure extension native-tool recursion e2e test (real LLM calls)..."
-	@PI_E2E_PROVIDER="$${PI_E2E_PROVIDER:-openrouter}" PI_E2E_MODEL="$${PI_E2E_MODEL:-openai/gpt-5.5:xhigh}" bash pure-extension/test.sh
-
-test-parity-e2e:
-	@echo "Running wrapper/direct-extension parity e2e test (real LLM calls)..."
-	@PI_E2E_PROVIDER="$${PI_E2E_PROVIDER:-openrouter}" PI_E2E_MODEL="$${PI_E2E_MODEL:-openai/gpt-5.5:xhigh}" bash pure-extension/compare.sh
 
 # Manual paid evaluations. Run independent conditions concurrently rather than
 # adding these long-running model calls to the default test target.
@@ -141,20 +106,9 @@ check-upstream:
 install-hooks:
 	@scripts/install-hooks
 
-# One-command release preflight (hooks + tests + upstream dry-run)
-release-preflight:
-	@scripts/release-preflight
-
-# Deterministic-ish land helper (preflight + encrypt-check + push + optional agent audit)
+# Validate and push the current feature branch to the owner-verified origin.
 land:
 	@scripts/land
-
-# Publish ypi + pi-recursive to npm in lockstep (sops-backed npm-publish wrapper)
-publish:
-	@scripts/publish-packages
-
-publish-dry:
-	@scripts/publish-packages --dry-run
 
 # CI helper: show recent runs (usage: make ci-status [N])
 ci-status:

@@ -15,10 +15,4 @@ make test-fast
 echo "==> make test-extensions"
 make test-extensions
 
-echo "==> make test-consumer-pack"
-make test-consumer-pack
-
-echo "==> make test-pi-recursive-pack"
-make test-pi-recursive-pack
-
 echo "✅ pre-push checks passed"
