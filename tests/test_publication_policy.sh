@@ -28,7 +28,7 @@ expect_fail "unparseable remote denied" "$VALIDATE" not-a-remote
 expect_fail "arbitrary host with owned-looking path denied" "$VALIDATE" https://attacker.invalid/ruslanvasylev/ypi.git
 expect_fail "dot-segment owner escape denied" "$VALIDATE" https://github.com/ruslanvasylev/../otherowner/ypi.git
 expect_fail "ambiguous SCP-like URL denied" "$VALIDATE" evil.invalid:ignored@github.com:ruslanvasylev/ypi.git
-expect_fail "percent-encoded path denied" "$VALIDATE" https://github.com/ruslanvasylev%2Frawwerks/ypi.git
+expect_fail "percent-encoded path denied" "$VALIDATE" https://github.com/ruslanvasylev%2Fotherowner/ypi.git
 expect_fail "local filesystem remote denied outside tests" "$VALIDATE" "$ROOT/.git"
 expect_pass "local filesystem fixture allowed only by test marker" env YPI_ALLOW_LOCAL_REMOTE_FOR_TESTS=1 "$VALIDATE" "$ROOT/.git"
 expect_fail "environment cannot authorize a non-owned remote" env YPI_EXPLICIT_NON_OWNED_REMOTE=github.com/otherowner/ypi "$VALIDATE" https://github.com/otherowner/ypi.git
@@ -42,7 +42,7 @@ if printf 'refs/heads/feature abc refs/heads/feature def\n' | YPI_SKIP_PUSH_CHEC
 else
   fail "owned feature push passes hook policy" "hook rejected"
 fi
-if printf 'refs/heads/feature abc refs/heads/feature def\n' | YPI_SKIP_PUSH_CHECKS=1 "$HOOK" upstream https://github.com/rawwerks/ypi.git >/dev/null 2>&1; then
+if printf 'refs/heads/feature abc refs/heads/feature def\n' | YPI_SKIP_PUSH_CHECKS=1 "$HOOK" upstream https://github.com/otherowner/ypi.git >/dev/null 2>&1; then
   fail "quality-check skip cannot bypass non-owned denial" "hook authorized upstream"
 else
   pass "quality-check skip cannot bypass non-owned denial"
@@ -75,7 +75,7 @@ fi
 rm -rf "$MULTI_PARENT"
 
 if grep -q 'Never release, publish, tag, or ask whether to release' "$ROOT/SYSTEM_PROMPT.md"; then pass "system prompt carries release prohibition"; else fail "system prompt carries release prohibition" "missing rule"; fi
-if grep -q 'validate-push-owner' "$ROOT/scripts/land" && grep -q -- '--no-follow-tags' "$ROOT/scripts/land" && grep -q 'HEAD:refs/heads/' "$ROOT/scripts/land" && ! grep -q 'to publish to npm' "$ROOT/scripts/land"; then pass "landing validates all origin targets and pushes only one branch"; else fail "landing publication boundary" "unsafe landing text"; fi
+if grep -q 'validate-push-owner' "$ROOT/scripts/land" && grep -q -- '--no-follow-tags' "$ROOT/scripts/land" && grep -q 'HEAD:refs/heads/' "$ROOT/scripts/land" && grep -q 'never merges, tags, publishes, or releases' "$ROOT/scripts/land"; then pass "landing validates all origin targets and pushes only one branch"; else fail "landing publication boundary" "unsafe landing text"; fi
 if grep -q 'git diff --quiet' "$ROOT/scripts/land" && grep -q 'HEAD_BEFORE' "$ROOT/scripts/land"; then pass "landing binds validation to a clean unchanged commit"; else fail "landing exact-state gate" "missing clean/HEAD checks"; fi
 
 echo ""

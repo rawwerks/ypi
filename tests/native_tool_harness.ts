@@ -725,7 +725,7 @@ async function run(): Promise<void> {
 	process.env.RLM_JSON = "0";
 	process.env.SECRET_TOKEN = "must-not-leak";
 	process.env.YPI_EXPLICIT_RELEASE_REQUEST = "1";
-	process.env.YPI_EXPLICIT_NON_OWNED_REMOTE = "github.com/rawwerks/ypi";
+	process.env.YPI_EXPLICIT_NON_OWNED_REMOTE = "github.com/otherowner/ypi";
 	ensureEnvironment(runtime, context());
 	await invoke();
 	assertContains("N9: child env drops ambient secret", readLog(), "SECRET_TOKEN=unset");
@@ -844,7 +844,7 @@ async function run(): Promise<void> {
 	const toolText = await invoke("tool progress", undefined, (update) => toolProgress.push(update));
 	const renderedProgress = toolProgress.map((update) => update.content?.find((item: any) => item.type === "text")?.text || "").join("\n");
 	assertContains("N10e: tool-only work produces activity before final text", renderedProgress, "… bash");
-	assertContains("N10e: elapsed heartbeat advances without assistant prose", renderedProgress, "elapsed 0m01s");
+	assertContains("N10e: elapsed heartbeat advances without assistant text", renderedProgress, "elapsed 0m01s");
 	assertContains("N10e: stale watchdog warns without terminating", renderedProgress, "still running — cancel manually if desired");
 	assertContains("N10e: child completes after stale warning", toolText, "TOOLS_DONE");
 	assertNotContains("N10e: progress never exposes tool args", renderedProgress, "ARG_SECRET");

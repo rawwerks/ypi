@@ -6,37 +6,38 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
-- A canonical TypeScript recursion runtime core now owns child planning, guardrails, routing, resources, environment projection, bounded spawning, result classification, and cleanup for both native and CLI calls. The Pi tool and Node CLI are thin adapters; the incumbent native and shell engines remain available through `YPI_LEGACY_IMPL=1` during convergence.
-- An executable native/CLI runtime contract freezes shared behavior and names any intentional divergence; the initial stabilized contract passes with no known deterministic divergences.
-- A strict TypeScript runtime typecheck and deterministic generated-CLI freshness check now run in `test-fast`.
-- A bounded recursive-development runbook now defines a persisted non-secret trace/counter/cost envelope, continuation without reset, three disjoint review charters, one implementation head, parent adjudication, and freeze-before-live-model evidence.
-- The packaged `bounded-recursive-delegation` skill teaches review-versus-implement selection, one-writer topology, parent diff absorption, deduplication, and publication authority without per-repository instruction copies.
-- Automatic private trace and cost ledgers plus native live progress show elapsed time, the four most recent sanitized tool activities, completed cost, and observe-only stale warnings.
-- The root launcher now auto-detects ambient extension safety: the user's ambient Pi packages stay loaded unless `scripts/detect-ambient-recursion-conflict` finds another recursion-extension copy, in which case the launch isolates fail-closed and `ypi-doctor` reports the conflicting entries. `RLM_AMBIENT_EXTENSIONS=1`/`0` force either mode; children remain canonical-only by default.
-- Publication helpers and the pre-push hook validate every actual push URL and fail closed on non-owned targets; ambient environment markers cannot grant a non-owned exception, and release/package publication paths require a user-initiated root-session marker that is stripped from children.
+- Crash-safe root implementer finalization now captures the complete attempt in
+  a verified `refs/ypi/attempt-*` reference, rechecks the tree immediately
+  before rollback, restores the clean baseline, and reports the snapshot and
+  restoration evidence.
+- A five-stage `SIGKILL` crash matrix proves lock retention, second-writer
+  rejection, snapshot availability when expected, and mechanical recovery.
+- `config/runtime-env.json` and `tests/test_config_surface.sh` now enforce one
+  runtime-variable and shell-flag registry across code and README.
 
 ### Changed
-- Bare `ypi` now explicitly preserves Pi-native root model selection: root provider/model/thinking come from Pi settings (`defaultProvider`, `defaultModel`, `defaultThinkingLevel`), `/model`, or CLI flags, while children inherit the active root route by default. Recursive child routing can now be lowered by depth with `RLM_CHILD_MODELS`, `RLM_CHILD_PROVIDERS`, and `RLM_CHILD_THINKING_LEVELS` without narrowing the root default, toolset, timeout, or call-limit behavior.
-- Agent-facing guidance now describes ypi as an RLM-inspired recursive coding-agent runtime rather than an Algorithm 1 reproduction, distinguishes the root prompt from delegated prompt files, and states which configured guardrails actually enforce bounds.
-- The bounded-recursion default remains depth 3 and now adds a 128-call session/tree cap. A controlled depth-3/depth-4 audit rejected promoting depth 4 after depth 3 found all 12 planted defects while depth 4 timed out without an answer after 1.818× the depth-3 tokens in complete ledger events (a lower bound) and 1.914× in session-observed usage; depth 2 was not evaluated. The fixture, scorer, runner, and bounded result are tracked under `tests/eval/depth-ablation/`.
-- `ypi`, `rlm_query`, and `ypi-doctor` prefer the package-local exact Pi dependency over a stale PATH binary. The tested package-local Pi pin is now 0.80.9, carrying the latest Pi model-runtime, OpenAI Codex session-id, and Kimi K3 fixes while retaining deterministic runtime selection. The pure `pi-recursive` package follows Pi's package contract by declaring host-provided Pi and `typebox` as `"*"` peers.
-- After deterministic and isolated real-model parity gates, both incumbent engines are marked for deletion but remain shipped, selectable with `YPI_LEGACY_IMPL=1`, and tested for at least one release window. Removal requires a separate maintainer decision; the CLI ledger preserves the Node startup/RSS tradeoff.
+- The canonical TypeScript runtime is now the only recursion engine used by the
+  native tool and shell adapter.
+- Writable delegation is Git-only, root-only, sequential, and confined to one
+  existing clean checkout. Implementers cannot spawn shell commands or write
+  outside the auditable snapshot boundary.
+- The repository is source-distributed from
+  `github.com/ruslanvasylev/ypi`; `package.json` is private and all setup,
+  doctor, and troubleshooting guidance uses the source checkout.
+- README, AGENTS.md, the system prompt, runtime contract, skill, and bounded
+  development runbook now describe the same final entry paths and safety model.
 
-### Fixed
-- Workspace-lease VCS checks (implementer cleanliness, discovery, changed-path reports, jj cleanup) now run with an explicitly scrubbed `GIT_*` environment, so ypi behaves correctly inside git hooks where `GIT_DIR`/`GIT_WORK_TREE` would otherwise point the checks — and test fixtures — at the wrong repository. The native harness also passes explicit environments to fixture git commands because Bun does not propagate `process.env` deletions to implicitly inherited children.
-- Native child answers and stderr are retained through bounded streaming capture while raw stdout is counted but not retained; incremental JSON events are parsed as they arrive, preventing large Pi streams from reaching V8's maximum string length before final tool-output truncation.
-- CLI `rlm_query --async` closes the background worker's inherited stdio so documented `JOB=$(rlm_query --async ...)` capture returns immediately; sentinels now record the eventual child exit code and cleanup runs even when the child fails.
-- Native recursion depth parsing now rejects integer prefixes such as `0junk` and values outside the safe-integer range instead of silently accepting the numeric prefix.
-- Native and CLI children now default to silent read-only review without invoking jj. A single root-only native `mode=implement` child may use one repository-wide lease plus an isolated workspace in existing jj, or an exclusive clean-Git shared-checkout lease; it retains checkout-confined edit/write but not process-spawning bash, with absolute/traversal/symlink escapes and VCS-metadata writes blocked. Native calls are sequential batch barriers so root mutators cannot overlap the implementer; bounded parallel read-only review remains available through shell async jobs. Dirty, contended, nested, and non-VCS requests return implementation to the root, descendants cannot escalate writable authority, and no path installs or initializes VCS tooling.
-- Dollar-budget admission was removed from canonical and retained runtimes. Inherited `RLM_BUDGET` values are discarded; cost and incomplete-cost records remain telemetry and never block later product work.
-- Incremental JSON decoding preserves late answer and cost events after oversized diagnostic events while CLI stdout streams incrementally and successful child stderr remains on stderr. Skipped or absent cost boundaries are labeled incomplete without terminating later work.
-- SIGINT/SIGTERM cancellation reaches detached child process groups; active stdin and jj setup/cleanup obey the invocation deadline; stdout backpressure and downstream EPIPE are handled without an unbounded queue or Node crash; native tools receive bounded progress updates.
-- Async calls are admitted before metadata acknowledgement, snapshot inherited context/root-charter/fork state, bridge worker signals to recorded child process groups, include terminal status in peer notifications, and publish through private exclusive job directories. Broad automatic `/tmp/rlm_*` deletion was removed in favor of lease cleanup plus explicit `rlm_cleanup`.
-- Installed-package and publication checks now cover generated-runtime freshness, package-local Pi resolution, direct bundle root resolution, clean extension registration exits, and packaged doctor availability. An explicitly loaded extension now ignores mismatched ambient `YPI_EXTENSION_ROOT`/`YPI_EXTENSION_PATH` hints from a different long-lived ypi session.
-- Recursive system prompts now expose exact `$CONTEXT`, delegated-charter, and root-human-request paths and prioritize task-scoped context over unrelated retrieval. Pi receives delegated charters through non-interactive stdin while retaining byte-exact `$RLM_PROMPT_FILE` as authoritative because Pi normalizes outer stdin whitespace; this avoids option parsing, file-wrapper markup, and argv-size failures. Wrapper and child processes load only their exact ypi extension by default; `RLM_AMBIENT_EXTENSIONS=1` explicitly opts back into potentially conflicting ambient copies.
-- Full child isolation now uses a private Pi agent/config root plus offline mode while preserving Pi's own shipped package assets. It projects only the selected provider's private `auth.json` entry and provider-specific environment values into that temporary child, allowing authenticated OAuth/API-key children without loading ambient settings, packages, models, or other provider credentials. Missing JSON `turn_end` cost marks telemetry incomplete without becoming a stop condition, and installed-consumer gates execute canonical and retained CLI/native paths with strict exit statuses.
-- Release consistency now distinguishes ypi's tested pinned Pi dependency from `pi-recursive`'s intentionally unrestricted host-runtime peers, matching the packed extension contract instead of making release preflight fail on the valid manifest.
-- Runtime-parity lanes now remove every ambient `RLM_*`/`YPI_*` namespace before applying private lane state, and the lightweight recursive-development Prose workflow stops at handoff instead of pushing automatically.
+### Removed
+- The alternate native and shell recursion engines and their runtime selectors.
+- Registry publication, curl installation, companion-package staging, and
+  release automation surfaces.
+- Inherited private workflow state, experiment state, contributed extensions,
+  and encryption hooks that were not owned by this fork.
+
+### Preserved
+- Push-owner validation, release authorization denial, local hooks, provider
+  allowlist completeness, generated-runtime checks, and all canonical
+  deterministic and live recursion gates.
 
 ## [0.6.1] - 2026-06-22
 

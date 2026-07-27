@@ -29,16 +29,16 @@ resolve_pi_bin() {
 }
 
 SCRIPT_DIR="$(resolve_script_dir)"
-# The executable owns its package root. Do not inherit stale paths from a
-# different installation; explicit embedders use the YPI_CLI_* overrides.
+# The executable owns its repository root. Do not inherit stale paths from a
+# different checkout; explicit embedders use the YPI_CLI_* overrides.
 export YPI_EXTENSION_ROOT="${YPI_CLI_ROOT_OVERRIDE:-$SCRIPT_DIR}"
 export YPI_EXTENSION_PATH="${YPI_CLI_EXTENSION_OVERRIDE:-$YPI_EXTENSION_ROOT/extensions/recursive.ts}"
 export RLM_MAX_DEPTH="${RLM_MAX_DEPTH:-3}"
 export RLM_MAX_CALLS="${RLM_MAX_CALLS:-128}"
 export RLM_SYSTEM_PROMPT="${YPI_CLI_SYSTEM_PROMPT_OVERRIDE:-$YPI_EXTENSION_ROOT/SYSTEM_PROMPT.md}"
 if ! YPI_PI_BIN="$(resolve_pi_bin)"; then
-    echo "✗ Could not find package-local or PATH pi" >&2
-    echo "  Fix: install @earendil-works/pi-coding-agent or set YPI_PI_BIN" >&2
+    echo "✗ Could not find repository-local or PATH pi" >&2
+    echo "  Fix: run 'bun install --frozen-lockfile' in this checkout or set YPI_PI_BIN" >&2
     exit 127
 fi
 export YPI_PI_BIN

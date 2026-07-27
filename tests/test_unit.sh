@@ -394,7 +394,6 @@ assert_contains "T14c: explicit model passes through" "--model claude-opus-4-6" 
 
 # T14e: bare ypi root launcher defers provider/model defaults to Pi settings
 OUTPUT=$(
-    YPI_QUIET=1 \
     "$PROJECT_DIR/ypi" -p --no-session "Launcher default routing?"
 )
 assert_not_contains "T14e: launcher does not hardcode provider" "--provider" "$OUTPUT"
@@ -408,7 +407,6 @@ assert_not_contains "T14e: launcher does not build system prompt" "--system-prom
 OUTPUT=$(
     RLM_PROVIDER=openrouter \
     RLM_MODEL=openai/gpt-5.5:xhigh \
-    YPI_QUIET=1 \
     "$PROJECT_DIR/ypi" -p --no-session "Launcher model routing?"
 )
 assert_contains "T14f: launcher provider from env" "--provider openrouter" "$OUTPUT"
@@ -418,7 +416,6 @@ assert_contains "T14f: launcher model from env" "--model openai/gpt-5.5:xhigh" "
 OUTPUT=$(
     RLM_PROVIDER=openrouter \
     RLM_MODEL=openai/gpt-5.5:xhigh \
-    YPI_QUIET=1 \
     "$PROJECT_DIR/ypi" --provider anthropic --model claude-haiku -p --no-session "Launcher explicit routing?"
 )
 assert_contains "T14g: launcher explicit provider" "--provider anthropic" "$OUTPUT"

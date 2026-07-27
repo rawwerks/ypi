@@ -13,9 +13,8 @@ The root agent owns the goal, decomposition, parent-side adjudication, and final
 diff acceptance. Read-only children own reviews and focused probes. One bounded
 implementation unit may be delegated with `rlm_query` `mode=implement` after its
 scope and gates are explicit; never run parallel implementers or distribute
-overlapping runtime edits. Do not add a new result validator or make OpenProse
-the proof owner. `.prose/recursive-development.prose` remains a lightweight
-feature workflow and is not the proof-bound path described here.
+overlapping runtime edits. Do not add a second orchestration owner or result
+validator. This runbook and its persisted envelope are the proof-bound path.
 
 ## Create the envelope once
 
@@ -151,13 +150,14 @@ never consumes a child-call slot.
 2. **Choose one implementation head.** Explore and decide in the root. Once a
    bounded unit has explicit files, constraints, and tests, delegate it to one
    `mode=implement` child or implement it directly when writing the charter
-   would cost as much as the edit. The root reviews changed scope and the final
-   diff and runs focused gates; it does not absorb a worker's trial-and-error.
+   would cost as much as the edit. The root reviews the attempt reference,
+   changed scope, snapshot diff, and restoration verdict before applying it and
+   running focused gates.
 3. **Run three independent reviews in one turn.** Do not expose sibling reports:
    - runtime/lifecycle: deadlines, cancellation, process groups, output,
-     async, and jj cleanup;
-   - packaging/evidence: routing, prompt authority, installed resolution,
-     fallbacks, eval honesty, and release gates;
+     async, snapshot/reset, and recovery;
+   - entry/evidence: routing, prompt authority, source-checkout resolution,
+     generated artifacts, eval honesty, and delivery gates;
    - security/cleanup: path containment, permissions, temp ownership,
      symlinks, deletion scope, and hostile metadata.
 4. **Absorb skeptically.** The parent deduplicates by mechanism, reproduces each
@@ -192,44 +192,42 @@ explicit provider/model route; do not set global depth routing.
 
 Native calls are sequential so a shared-checkout implementer cannot overlap
 root mutations. Parallel evidence uses at most three shell `rlm_query --async`
-read-only jobs and only after a notification smoke proves that this Pi instance
-receives its sentinel and useful root work is queued. If the smoke fails or
-`YPI_INSTANCE_ID` is absent, stay sequential rather than debugging a replacement
-during the run.
+read-only jobs. Record each returned job, output, sentinel, and PID, then
+collect every required result explicitly. The repository has no automatic
+completion watcher. If the root cannot keep ownership of collection and
+cancellation, stay sequential.
 
 ## Freeze before provider-backed evaluation
 
 Before the first live-model lane:
 
 1. close all source-review blockers;
-2. run focused tests, package/install checks, and release consistency;
-3. run `scripts/encrypt-prose --check`;
-4. run `make test-eval-contracts` with mock Pi;
-5. commit every tracked change;
-6. require a clean worktree and record exact HEAD.
+2. run `make test-fast` and `make test-extensions`;
+3. run `make test-eval-contracts` with mock Pi;
+4. commit every tracked change;
+5. require a clean checkout and record exact HEAD.
 
 Runtime parity runs only through the existing facade:
 
 ```bash
 YPI_EVAL_OUTPUT_ROOT="$RUN_DIR/eval" make eval-runtime-parity LANE=canonical-cli
-YPI_EVAL_OUTPUT_ROOT="$RUN_DIR/eval" make eval-runtime-parity LANE=legacy-cli
 YPI_EVAL_OUTPUT_ROOT="$RUN_DIR/eval" make eval-runtime-parity LANE=canonical-native
-YPI_EVAL_OUTPUT_ROOT="$RUN_DIR/eval" make eval-runtime-parity LANE=legacy-native
 ```
 
 `tests/eval/runtime-parity/run-lane.sh` owns recursion-environment sanitization,
 private counters/ledgers, exact transition and call-count proof, and semantic
-scoring. Do not construct an ad-hoc `env -i` lane. Do not edit tracked files
-while lanes run. A tracked edit invalidates final runtime evidence. Permit one
-rerun only for a documented provider/transient failure.
+scoring. Run the two independent lanes concurrently with explicit collection.
+Do not construct an ad-hoc `env -i` lane. Do not edit tracked files while lanes
+run. A tracked edit invalidates final runtime evidence. Permit one rerun only
+for a documented provider or transport failure.
 
 ## Closeout and delivery
 
-Completion requires resolved telemetry, deterministic and installed-package
-checks, exact-final-commit runtime contracts, parent verification, truth-seeking
-review, telemetry validation, encryption validation, and honest branch state.
-Import a recursive trace into Agent Protocol only when child execution itself is
-being promoted as proof.
+Completion requires resolved telemetry, deterministic source-checkout checks,
+exact-final-commit runtime contracts, parent verification, independent review,
+live recursion proof when required, and honest branch state. Import a recursive
+trace into Agent Protocol only when child execution itself is being promoted as
+proof.
 
 Before any push, resolve the push URL and run `scripts/validate-push-owner`.
 Remotes whose exact owner namespace is not `ruslanvasylev` are read-only unless

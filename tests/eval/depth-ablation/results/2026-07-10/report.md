@@ -5,7 +5,7 @@
 - Runtime source commit: `036f5d3` on `feat-unify-recursion-runtime`; the fixture and hardened replay runner were promoted later, so this historical row is not a claim that the runner existed at that commit.
 - Same planted TypeScript audit fixture and goal/acceptance prompt.
 - Same `openai-codex/gpt-5.6-sol` route and `max` thinking.
-- Same `RLM_MAX_CALLS=16`, `RLM_TIMEOUT=900`, explicit read-only no-jj mode, and isolated counters/sessions.
+- Same `RLM_MAX_CALLS=16`, `RLM_TIMEOUT=900`, explicit read-only isolation mode, and isolated counters/sessions.
 - Only `RLM_MAX_DEPTH` changed.
 - Ground truth: 12 contract violations across six files.
 

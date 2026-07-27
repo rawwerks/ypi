@@ -1,59 +1,54 @@
 ---
 name: bounded-recursive-delegation
-description: Use when a coding task is large enough to benefit from ypi child agents and the root must choose efficient review versus implementation delegation without duplicate work, hidden VCS changes, dollar stops, or blind child absorption.
+description: Use for a coding task that benefits from bounded ypi review or one root-chartered implementation unit with explicit evidence and acceptance gates.
 ---
 
 # Bounded Recursive Delegation
 
 ## Goal
 
-Keep the root focused on the user's goal and final acceptance while fresh child
-contexts absorb bounded exploration, review, or implementation work.
+Keep the root responsible for the user's goal, commands, tests, final diff, and
+acceptance while child contexts absorb bounded review or implementation work.
 
 ## Workflow
 
-1. Size the task with deterministic tools before delegating.
-2. Delegate work that is expensive to produce but cheaper to verify:
-   - large-surface reading and research;
-   - independent audits or counterprobes;
-   - a bounded implementation unit with explicit files, constraints, and gates.
-3. Use native `rlm_query` `mode=review` for one bounded review. Native calls are
-   sequential to prevent overlap with root mutations. When parallel evidence is
-   justified, launch at most three shell `rlm_query --async` read-only reviews
-   with disjoint charters after notification delivery is proven. Do not expose
-   sibling reports.
-4. Parent adjudication is root work. Deduplicate findings by mechanism and
-   reproduce accepted blockers; do not spawn an adjudicator child.
-5. Only the root may use `mode=implement`, for at most one implementation head.
-   Never run parallel implementers. The implementer keeps checkout-confined
-   `edit`/`write` but not process-spawning `bash`; external/symlink escapes and
-   repository-metadata writes are blocked, and the parent runs gates. Existing jj repositories and
-   clean Git checkouts both use one repository-wide writer lease. If the checkout
-   is dirty or another writer owns it, continue implementation in the root
-   instead of changing VCS state or asking the user to understand workspace tooling.
-6. Never install or initialize Git, jj, or another VCS. Existing repository VCS
-   state is a user-owned boundary.
-7. Require each child result to state goal verdict, evidence, files read,
-   files changed, commands run, blockers, risks, and stop reason. Keep at most
-   eight findings and 12 KiB inline; put overflow in a cited artifact.
-8. Before accepting writable work, inspect the changed-path report and final
-   diff, run deterministic gates, and obtain an independent read-only review for
-   high-risk changes.
-9. If the child-call cap is reached, stop spawning children and continue the
-   task directly. Do not ask the user to choose another cap.
-10. Treat cost and elapsed time as visibility only. Never set or recommend a
-    dollar budget. Staleness warnings observe; they do not terminate work.
+1. Inspect and size the task with deterministic tools before delegating.
+2. Delegate work that is expensive to produce but straightforward to verify:
+   large-surface reading, an independent audit, a counterprobe, or one bounded
+   edit/write unit.
+3. Use native `rlm_query` `mode=review` by default. Give the child one
+   objective, an exact context boundary, and a pass or reopen criterion.
+4. Native calls are sequential. Use shell `rlm_query --async` only for
+   independent read-only reviews when the wrapper exposes it. Record the
+   returned job artifacts and collect them explicitly; no automatic watcher is
+   present.
+5. Do not expose sibling reports to independent reviewers. The root
+   deduplicates by mechanism, reproduces accepted findings, and resolves
+   disagreement.
+6. Only the root may request `mode=implement`, and only one implementer may run.
+   Its charter names files, constraints, and verification. The child receives
+   checkout-confined edit/write tools but no shell process tool.
+7. Never install or initialize version-control tooling. If the checkout is
+   dirty, sparse, non-Git, or already leased, implement directly in the root.
+8. Treat an implementer result as a candidate snapshot. Inspect the reported
+   `refs/ypi/attempt-*` reference, changed paths, diffstat, and restoration
+   verdict before applying it. Run parent-owned tests after application.
+9. Require each child result to state verdict, evidence, files inspected,
+   files changed, commands run, blockers, risks, and stop reason. Keep the
+   inline result bounded and cite an artifact for overflow.
+10. When depth or call admission closes, stop spawning children and continue
+    directly. Cost and elapsed time remain visibility only.
 
 ## Publication Boundaries
 
-- Resolve the actual push URL, not the remote name.
-- Remotes outside the exact `ruslanvasylev` owner namespace are read-only unless
-  the current user request explicitly authorizes that exact remote operation.
-- Never infer release, package publication, or tagging authority from delivery,
-  landing, or release-readiness work. Do not ask whether to release.
+- Resolve push authority from the actual URL, not the remote name.
+- A remote outside the exact `ruslanvasylev` owner namespace is read-only
+  unless the current request explicitly authorizes that exact operation.
+- Delivery does not imply release, publication, or tagging authority.
 
 ## Acceptance
 
-The root accepts a child only when direct evidence satisfies the delegated
-charter and remains aligned with the original user goal. Passing tests without
-changed-scope and final-diff review are insufficient for writable work.
+The root accepts a child result only when direct evidence satisfies the charter
+and remains aligned with the original user goal. Passing tests alone are not
+enough for writable work; changed scope, snapshot diff, restoration status,
+and parent verification must also pass.

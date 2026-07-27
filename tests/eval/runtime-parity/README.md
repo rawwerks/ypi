@@ -26,5 +26,4 @@ wall-clock termination; progress remains visible for manual cancellation.
 Environment overrides: `PI_E2E_PROVIDER`, `PI_E2E_MODEL`,
 `PI_E2E_THINKING`, and `YPI_EVAL_OUTPUT_ROOT`.
 
-The historical 2026-07-10 report is retained under `results/`; raw model output
-and session evidence remain ignored under `tmp/`.
+Raw model output and session evidence remain ignored under `tmp/`.
