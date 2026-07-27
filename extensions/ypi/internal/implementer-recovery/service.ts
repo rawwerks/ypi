@@ -1,5 +1,6 @@
 import { lstatSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { implementerRegistryPaths } from "../implementer-registry-layout.ts";
 import { processIsAlive } from "../process-liveness.ts";
 import { createRecoveryGit, type RecoveryGit } from "./git.ts";
 import {
@@ -8,7 +9,6 @@ import {
 	pathExistsWithoutFollowing,
 	pathModifiedAtEpochSeconds,
 	readMutexOwner,
-	recoveryRegistryPaths,
 	releaseRecoveryMutex,
 	removeValidatedArtifact,
 	scanRegistryArtifacts,
@@ -136,7 +136,7 @@ export function recoverImplementerWorkspaces(
 		stdout.push(`${label}: Git common directory unavailable`);
 		return { exitCode: 1, stdout, stderr };
 	}
-	const paths = recoveryRegistryPaths(commonGitDir);
+	const paths = implementerRegistryPaths(commonGitDir);
 	for (const registryPath of [paths.root, paths.leases, paths.staging, paths.retired]) {
 		try {
 			validateRegistryDirectory(registryPath);

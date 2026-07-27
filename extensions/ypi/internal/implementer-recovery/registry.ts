@@ -21,14 +21,6 @@ import {
 const STAGED_LEASE = /^\.lease-([0-9a-f]{32})-([1-9][0-9]*)-([0-9a-f]{8})\.tmp$/;
 const RETIRED_LEASE = /^\.lease-([0-9a-f]{32})-([1-9][0-9]*)-([0-9a-f]{8})\.done$/;
 
-export interface RecoveryRegistryPaths {
-	root: string;
-	leases: string;
-	staging: string;
-	retired: string;
-	lock: string;
-}
-
 export interface InvalidRegistryEntry {
 	path: string;
 	reason: string;
@@ -50,17 +42,6 @@ export interface MutexOwner {
 	token?: unknown;
 	pid?: unknown;
 	createdAtEpochSeconds?: unknown;
-}
-
-export function recoveryRegistryPaths(commonGitDir: string): RecoveryRegistryPaths {
-	const root = path.join(commonGitDir, "ypi-implementers");
-	return {
-		root,
-		leases: path.join(root, "leases"),
-		staging: path.join(root, "staging"),
-		retired: path.join(root, "retired"),
-		lock: path.join(commonGitDir, "ypi-implementers.lock"),
-	};
 }
 
 export function pathExistsWithoutFollowing(candidate: string): boolean {

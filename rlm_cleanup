@@ -108,6 +108,19 @@ clean_git() (
     command git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"
 )
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+IMPLEMENTER_CLEANUP="$SCRIPT_DIR/scripts/cleanup-implementer-workspaces.ts"
+IMPLEMENTER_INSPECTOR="$SCRIPT_DIR/scripts/inspect-implementer-registry.ts"
+NODE_BIN="${YPI_NODE_BIN:-node}"
+if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+    echo "rlm_cleanup: Node.js >= 22.19 is required for implementer recovery" >&2
+    exit 127
+fi
+
+implementer_state() {
+    "$NODE_BIN" "$IMPLEMENTER_INSPECTOR" "$1"
+}
+
 # Record recovery state before cleanup. A ref that becomes the sole authoritative
 # copy in this invocation must not also be expired later in the same invocation.
 IMPLEMENTER_STATE_SEEN=false
@@ -115,24 +128,15 @@ PRE_RECOVERY_ROOT=$(clean_git -C "$REPO_PATH" rev-parse --show-toplevel 2>/dev/n
 if [ -n "$PRE_RECOVERY_ROOT" ]; then
     PRE_RECOVERY_COMMON=$(clean_git -C "$PRE_RECOVERY_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
     if [ -n "$PRE_RECOVERY_COMMON" ]; then
-        PRE_RECOVERY_LOCK="$PRE_RECOVERY_COMMON/ypi-implementers.lock"
-        PRE_RECOVERY_LEASES="$PRE_RECOVERY_COMMON/ypi-implementers/leases"
-        if [ -e "$PRE_RECOVERY_LOCK" ] || [ -L "$PRE_RECOVERY_LOCK" ] \
-            || { [ -d "$PRE_RECOVERY_LEASES" ] && find "$PRE_RECOVERY_LEASES" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; }; then
+        if [ "$(implementer_state "$PRE_RECOVERY_COMMON")" = present ]; then
             IMPLEMENTER_STATE_SEEN=true
         fi
     fi
 fi
 
 # --- 4. Registered implementer worktrees ---
-IMPLEMENTER_CLEANUP="$(cd "$(dirname "$0")" && pwd)/scripts/cleanup-implementer-workspaces.ts"
 IMPLEMENTER_ARGS=(--repo "$REPO_PATH" --age "$AGE_MIN")
 [ "$FORCE" = true ] && IMPLEMENTER_ARGS+=(--force)
-NODE_BIN="${YPI_NODE_BIN:-node}"
-if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
-    echo "rlm_cleanup: Node.js >= 22.19 is required for implementer recovery" >&2
-    exit 127
-fi
 "$NODE_BIN" "$IMPLEMENTER_CLEANUP" "${IMPLEMENTER_ARGS[@]}"
 
 # --- 5. Legacy workspace directories ---
@@ -164,12 +168,9 @@ if [ -z "$REPO_ROOT" ]; then
     echo "Attempt refs older than ${ATTEMPT_AGE_MIN}m: no Git checkout"
 else
     COMMON_GIT_DIR=$(clean_git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
-    IMPLEMENT_LOCK="$COMMON_GIT_DIR/ypi-implementers.lock"
-    IMPLEMENT_LEASES="$COMMON_GIT_DIR/ypi-implementers/leases"
     if [ "$IMPLEMENTER_STATE_SEEN" = true ]; then
         echo "Attempt refs older than ${ATTEMPT_AGE_MIN}m: skipped (implementer recovery state existed at command start)"
-    elif [ -e "$IMPLEMENT_LOCK" ] || [ -L "$IMPLEMENT_LOCK" ] \
-        || { [ -d "$IMPLEMENT_LEASES" ] && find "$IMPLEMENT_LEASES" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; }; then
+    elif [ "$(implementer_state "$COMMON_GIT_DIR")" = present ]; then
         echo "Attempt refs older than ${ATTEMPT_AGE_MIN}m: skipped (implementer recovery state is still live)"
     else
         NOW=$(date +%s)

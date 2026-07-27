@@ -17,16 +17,12 @@ import {
 	parseImplementerLeaseRecord,
 	type ImplementerLeaseRecord,
 } from "./implementer-lease.ts";
+import {
+	implementerRegistryPaths,
+	type ImplementerRegistryPaths,
+} from "./implementer-registry-layout.ts";
 
 export const MAX_PARALLEL_IMPLEMENTERS = 3;
-
-export interface RegistryPaths {
-	root: string;
-	leases: string;
-	lock: string;
-	retired: string;
-	staging: string;
-}
 
 interface RegistryLock {
 	token: string;
@@ -51,17 +47,6 @@ function ensureRegistryDirectory(directory: string): void {
 		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 	}
 	assertRegistryDirectory(directory);
-}
-
-export function implementerRegistryPaths(commonGitDir: string): RegistryPaths {
-	const root = path.join(commonGitDir, "ypi-implementers");
-	return {
-		root,
-		leases: path.join(root, "leases"),
-		lock: path.join(commonGitDir, "ypi-implementers.lock"),
-		retired: path.join(root, "retired"),
-		staging: path.join(root, "staging"),
-	};
 }
 
 function wait(milliseconds: number): void {
@@ -117,7 +102,7 @@ function acquireRegistryLock(commonGitDir: string, deadlineMilliseconds?: number
 
 export function withImplementerRegistryLock<T>(
 	commonGitDir: string,
-	action: (paths: RegistryPaths) => T,
+	action: (paths: ImplementerRegistryPaths) => T,
 	deadlineMilliseconds?: number,
 ): T {
 	const lock = acquireRegistryLock(commonGitDir, deadlineMilliseconds);

@@ -15,6 +15,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { atomicWriteFile } from "../extensions/ypi/internal/atomic-file.ts";
 import {
+	implementerRegistryHasState,
+	implementerRegistryPaths,
+} from "../extensions/ypi/internal/implementer-registry-layout.ts";
+import {
 	parseImplementerLeaseRecord,
 	type ImplementerLeaseRecord,
 } from "../extensions/ypi/internal/implementer-lease.ts";
@@ -86,6 +90,60 @@ function expectThrow(label: string, expected: string, action: () => unknown): vo
 }
 
 console.log("\n=== Implementer recovery module and CLI harness ===");
+
+{
+	const layoutOwner = path.join(
+		projectRoot,
+		"extensions",
+		"ypi",
+		"internal",
+		"implementer-registry-layout.ts",
+	);
+	const consumers = [
+		path.join(projectRoot, "extensions", "ypi", "internal", "workspace-registry.ts"),
+		path.join(projectRoot, "extensions", "ypi", "internal", "implementer-recovery", "registry.ts"),
+		cleanupScript,
+	];
+	record(
+		existsSync(layoutOwner)
+			&& consumers.every((candidate) => !readFileSync(candidate, "utf8").includes("ypi-implementers")),
+		"one TypeScript module owns every implementer registry path",
+	);
+}
+
+{
+	const common = mkdtempSync(path.join(tmpdir(), "ypi_registry_layout."));
+	const paths = implementerRegistryPaths(common);
+	mkdirSync(paths.root);
+	mkdirSync(paths.leases);
+	mkdirSync(paths.staging);
+	mkdirSync(paths.retired);
+	record(
+		!implementerRegistryHasState(paths),
+		"empty canonical registry directories do not block attempt-ref expiry",
+	);
+	const staged = path.join(paths.staging, "interrupted");
+	mkdirSync(staged);
+	record(
+		implementerRegistryHasState(paths),
+		"staged state blocks attempt-ref expiry",
+	);
+	rmSync(staged, { recursive: true });
+	const retired = path.join(paths.retired, "interrupted");
+	mkdirSync(retired);
+	record(
+		implementerRegistryHasState(paths),
+		"retired state blocks attempt-ref expiry",
+	);
+	rmSync(retired, { recursive: true });
+	const unknown = path.join(paths.root, "unknown");
+	writeFileSync(unknown, "preserve\n");
+	record(
+		implementerRegistryHasState(paths),
+		"unknown registry state blocks attempt-ref expiry",
+	);
+	rmSync(common, { recursive: true, force: true });
+}
 
 {
 	const root = mkdtempSync(path.join(tmpdir(), "ypi_recovery_git_output."));
