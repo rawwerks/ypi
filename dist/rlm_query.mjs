@@ -533,6 +533,7 @@ import path9 from "node:path";
 // extensions/ypi/internal/child-config.ts
 import path6 from "node:path";
 var READ_ONLY_EXCLUDED_BUILTINS = ["bash", "edit", "write"];
+var IMPLEMENT_TOOL_ALLOWLIST = ["read", "grep", "find", "ls", "edit", "write", "rlm_query"];
 function commaEntry(value, oneBasedIndex) {
   if (!value || oneBasedIndex < 1)
     return "";
@@ -1072,10 +1073,26 @@ asks for it or the task context is absent or explicitly insufficient.
 // extensions/ypi/internal/workspace-policy.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync3, readFileSync as readFileSync3, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import {
+  existsSync as existsSync6,
+  mkdirSync as mkdirSync3,
+  readFileSync as readFileSync3,
+  rmSync as rmSync4,
+  writeFileSync as writeFileSync3
+} from "node:fs";
 import path7 from "node:path";
-var WORKSPACE_CLEANUP_TIMEOUT_MS = 2000;
+
+class WorkspaceFinalizationError extends Error {
+  report;
+  constructor(message, report) {
+    super(message);
+    this.name = "WorkspaceFinalizationError";
+    this.report = report;
+  }
+}
 var WORKSPACE_ADMISSION_TIMEOUT_MS = 5000;
+var WORKSPACE_FINALIZATION_TIMEOUT_MS = 120000;
+var ZERO_OID = "0000000000000000000000000000000000000000";
 function remainingSetupMilliseconds(input) {
   if (input.setupDeadlineMilliseconds === undefined)
     return WORKSPACE_ADMISSION_TIMEOUT_MS;
@@ -1087,23 +1104,22 @@ function remainingSetupMilliseconds(input) {
   }
   return Math.max(1, Math.min(WORKSPACE_ADMISSION_TIMEOUT_MS, remaining));
 }
-function vcsEnvironment() {
+function vcsEnvironment(overrides = {}) {
   const env = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith("GIT_"))
-      continue;
-    env[key] = value;
+    if (!key.startsWith("GIT_"))
+      env[key] = value;
   }
-  return env;
+  return { ...env, ...overrides };
 }
-function run(input, command, args, cwd = input.cwd) {
-  return spawnSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: remainingSetupMilliseconds(input),
-    env: vcsEnvironment()
-  });
+function output(result) {
+  return typeof result.stdout === "string" ? result.stdout.trim() : "";
+}
+function rawOutput(result) {
+  return typeof result.stdout === "string" ? result.stdout : "";
+}
+function stderr(result) {
+  return typeof result.stderr === "string" ? result.stderr.trim() : "";
 }
 function assertWithinDeadline(input, result, operation) {
   if (result.error?.code !== "ETIMEDOUT")
@@ -1113,8 +1129,41 @@ function assertWithinDeadline(input, result, operation) {
   error.exitCode = explicitlyTimed ? 124 : 1;
   throw error;
 }
-function output(result) {
-  return typeof result.stdout === "string" ? result.stdout.trim() : "";
+function setupGit(input, root, args, environment = {}, stdinText) {
+  const result = spawnSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    input: stdinText,
+    stdio: ["pipe", "pipe", "pipe"],
+    timeout: remainingSetupMilliseconds(input),
+    env: vcsEnvironment(environment)
+  });
+  assertWithinDeadline(input, result, `git ${args[0] || "operation"}`);
+  return result;
+}
+function checkedSetupGit(input, root, args, operation, environment = {}, preserveOutput = false) {
+  const result = setupGit(input, root, args, environment);
+  if (result.status !== 0) {
+    throw new Error(`${operation} failed${stderr(result) ? `: ${stderr(result)}` : ""}`);
+  }
+  return preserveOutput ? rawOutput(result) : output(result);
+}
+function finalizationGit(root, args, operation, environment = {}, stdinText, preserveOutput = false) {
+  const result = spawnSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    input: stdinText,
+    stdio: ["pipe", "pipe", "pipe"],
+    timeout: WORKSPACE_FINALIZATION_TIMEOUT_MS,
+    env: vcsEnvironment(environment)
+  });
+  if (result.error?.code === "ETIMEDOUT") {
+    throw new Error(`${operation} exceeded ${WORKSPACE_FINALIZATION_TIMEOUT_MS}ms`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`${operation} failed${stderr(result) ? `: ${stderr(result)}` : ""}`);
+  }
+  return preserveOutput ? rawOutput(result) : output(result);
 }
 function readOnlyLease(cwd) {
   return {
@@ -1122,12 +1171,14 @@ function readOnlyLease(cwd) {
     mode: "read-only",
     readOnly: true,
     quiesceProcessGroup: false,
+    childEnvironment: {},
     finalize: () => ({
       requestedMode: "review",
       effectiveMode: "review",
       workspaceMode: "read-only",
       workspaceRoot: cwd,
       changedPaths: [],
+      treeRestored: true,
       reportComplete: true
     }),
     cleanup() {}
@@ -1147,87 +1198,328 @@ function acquireWriterLock(lockPath) {
 `, { mode: 384 });
   } catch (error) {
     if (error.code === "EEXIST") {
-      throw new Error("Another ypi implementer already owns this repository. Continue other root work and retry only after that implementer finishes.");
+      throw new Error(`Another ypi implementer or interrupted snapshot lifecycle owns this repository at ${lockPath}. Recover its work and remove the lock only after inspection.`);
     }
     throw error;
   }
   return {
     token,
-    release: () => {
+    path: lockPath,
+    release() {
       try {
-        if (readFileSync3(path7.join(lockPath, "owner"), "utf8").trim() === token)
+        if (readFileSync3(path7.join(lockPath, "owner"), "utf8").trim() === token) {
           rmSync4(lockPath, { recursive: true, force: true });
+        }
       } catch {}
     }
   };
 }
 function gitPath(input, root, name) {
-  const result = run(input, "git", ["rev-parse", "--path-format=absolute", "--git-path", name], root);
-  assertWithinDeadline(input, result, `git path lookup for ${name}`);
+  const result = setupGit(input, root, ["rev-parse", "--path-format=absolute", "--git-path", name]);
   return result.status === 0 ? output(result) : undefined;
 }
-function gitChangedPaths(root, baselineHead) {
-  const command = (args) => spawnSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: WORKSPACE_CLEANUP_TIMEOUT_MS, env: vcsEnvironment() });
-  const head = command(["rev-parse", "HEAD"]);
-  const finalHead = head.status === 0 ? String(head.stdout || "").trim() : undefined;
-  const committed = finalHead ? command(["diff", "--name-only", "-z", baselineHead, finalHead]) : undefined;
-  const staged = command(["diff", "--cached", "--name-only", "-z"]);
-  const unstaged = command(["diff", "--name-only", "-z"]);
-  const untracked = command(["ls-files", "--others", "--exclude-standard", "-z"]);
-  const results = [committed, staged, unstaged, untracked].filter((item) => Boolean(item));
-  if (!finalHead || results.some((item) => item.status !== 0)) {
-    return { paths: [], finalHead, error: "Could not read final Git checkout state" };
+function assertAdmissibleCheckout(input, root) {
+  for (const marker of ["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"]) {
+    const markerPath = gitPath(input, root, marker);
+    if (markerPath && existsSync6(markerPath)) {
+      throw new Error(`Git operation in progress (${marker}); continue implementation in the root session.`);
+    }
   }
+  const sparse = setupGit(input, root, ["config", "--bool", "core.sparseCheckout"]);
+  if (sparse.status === 0 && output(sparse) === "true") {
+    throw new Error("Implement mode does not support sparse Git checkouts because a full-tree snapshot cannot be proven. Continue implementation in the root session.");
+  }
+  const status = setupGit(input, root, ["status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none"]);
+  if (status.status !== 0 || output(status)) {
+    throw new Error("Implement mode requires a clean Git checkout. Continue implementation in the root session so existing work is not mixed or lost.");
+  }
+}
+function parseGitlinks(indexEntries, root) {
+  const links = [];
+  for (const record of indexEntries.split("\x00")) {
+    if (!record)
+      continue;
+    const tab = record.indexOf("\t");
+    if (tab < 0)
+      continue;
+    const [mode, oid] = record.slice(0, tab).split(/\s+/, 3);
+    if (mode !== "160000" || !oid)
+      continue;
+    const gitPath2 = record.slice(tab + 1);
+    const submoduleRoot = path7.join(root, ...gitPath2.split("/"));
+    links.push({
+      path: gitPath2,
+      oid,
+      initialized: existsSync6(path7.join(submoduleRoot, ".git"))
+    });
+  }
+  return links;
+}
+function materializeBaselineIgnoreFiles(input, root, baselineHead, ignoreRoot) {
+  const listing = checkedSetupGit(input, root, ["ls-tree", "-r", "-z", baselineHead], "Baseline ignore-rule inventory", {}, true);
+  for (const record of listing.split("\x00")) {
+    if (!record)
+      continue;
+    const tab = record.indexOf("\t");
+    if (tab < 0)
+      continue;
+    const metadata = record.slice(0, tab).split(/\s+/);
+    const [mode, type, oid] = metadata;
+    const gitPath2 = record.slice(tab + 1);
+    if (mode !== "100644" && mode !== "100755" || type !== "blob" || !oid)
+      continue;
+    if (gitPath2.split("/").at(-1) !== ".gitignore")
+      continue;
+    const destination = path7.join(ignoreRoot, ...gitPath2.split("/"));
+    mkdirSync3(path7.dirname(destination), { recursive: true, mode: 448 });
+    const blob = setupGit(input, root, ["cat-file", "blob", oid]);
+    if (blob.status !== 0)
+      throw new Error(`Could not read baseline ignore rule ${gitPath2}`);
+    writeFileSync3(destination, typeof blob.stdout === "string" ? blob.stdout : Buffer.from(blob.stdout || ""));
+  }
+}
+function createConfinementState(input, root, baselineHead, writer) {
+  const auditFile = path7.join(writer.path, "writes");
+  const baselineIgnoreRoot = path7.join(writer.path, "baseline-ignore");
+  const baselineIndexFile = path7.join(writer.path, "baseline-index");
+  const submodulePathsFile = path7.join(writer.path, "submodules");
+  mkdirSync3(baselineIgnoreRoot, { mode: 448 });
+  writeFileSync3(auditFile, "", { mode: 384 });
+  checkedSetupGit(input, root, ["read-tree", baselineHead], "Baseline index creation", { GIT_INDEX_FILE: baselineIndexFile });
+  const gitDir = checkedSetupGit(input, root, ["rev-parse", "--absolute-git-dir"], "Git directory discovery");
+  const gitlinks = parseGitlinks(checkedSetupGit(input, root, ["ls-files", "--stage", "-z"], "Submodule inventory", {}, true), root);
+  writeFileSync3(submodulePathsFile, gitlinks.map((entry) => entry.path).join("\x00"), { mode: 384 });
+  materializeBaselineIgnoreFiles(input, root, baselineHead, baselineIgnoreRoot);
+  return { auditFile, baselineIgnoreRoot, baselineIndexFile, gitDir, submodulePathsFile, gitlinks };
+}
+function checkIgnored(root, relativePath, baseline) {
+  const args = baseline ? [
+    `--git-dir=${baseline.gitDir}`,
+    `--work-tree=${baseline.baselineIgnoreRoot}`,
+    "check-ignore",
+    "-q",
+    "-z",
+    "--stdin"
+  ] : ["check-ignore", "-q", "-z", "--stdin"];
+  const environment = baseline ? { GIT_INDEX_FILE: baseline.baselineIndexFile } : {};
+  const result = spawnSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    input: `${relativePath}\x00`,
+    stdio: ["pipe", "pipe", "pipe"],
+    timeout: WORKSPACE_FINALIZATION_TIMEOUT_MS,
+    env: vcsEnvironment(environment)
+  });
+  if (result.status === 0)
+    return true;
+  if (result.status === 1)
+    return false;
+  throw new Error(`Could not evaluate ${baseline ? "baseline" : "final"} ignore rules for ${relativePath}${stderr(result) ? `: ${stderr(result)}` : ""}`);
+}
+function isWithinSubmodule(relativePath, gitlinks) {
+  return gitlinks.some((entry) => relativePath === entry.path || relativePath.startsWith(`${entry.path}/`));
+}
+function auditedPaths(confinement, root) {
+  if (!existsSync6(confinement.auditFile))
+    throw new Error("Implementer write audit is missing");
+  const paths = parseNulPaths(readFileSync3(confinement.auditFile, "utf8"));
+  for (const relativePath of paths) {
+    const absolutePath = path7.resolve(root, ...relativePath.split("/"));
+    if (!existsSync6(absolutePath))
+      continue;
+    if (isWithinSubmodule(relativePath, confinement.gitlinks)) {
+      throw new Error(`Implementer write audit contains a submodule path that cannot be snapshotted: ${relativePath}`);
+    }
+    if (checkIgnored(root, relativePath, confinement)) {
+      throw new Error(`Implementer write is ignored by the baseline checkout and cannot be snapshotted: ${relativePath}`);
+    }
+    if (checkIgnored(root, relativePath, undefined)) {
+      throw new Error(`Implementer write is ignored by the final checkout and cannot be snapshotted: ${relativePath}`);
+    }
+  }
+  return uniquePaths(paths);
+}
+function assertSubmodulesUnchanged(root, gitlinks) {
+  for (const entry of gitlinks) {
+    const submoduleRoot = path7.join(root, ...entry.path.split("/"));
+    if (!entry.initialized) {
+      if (existsSync6(path7.join(submoduleRoot, ".git"))) {
+        throw new Error(`Previously uninitialized submodule was initialized during implementation: ${entry.path}`);
+      }
+      continue;
+    }
+    if (!existsSync6(submoduleRoot))
+      throw new Error(`Initialized submodule path disappeared during implementation: ${entry.path}`);
+    const head = finalizationGit(submoduleRoot, ["rev-parse", "HEAD"], `Submodule HEAD check for ${entry.path}`);
+    const status = finalizationGit(submoduleRoot, ["status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none"], `Submodule cleanliness check for ${entry.path}`);
+    if (head !== entry.oid || status) {
+      throw new Error(`Submodule changed during implementation and cannot be salvaged by the superproject: ${entry.path}`);
+    }
+  }
+}
+function assertCheckoutOwnership(root, baselineHead, baselineTree) {
+  const currentHead = finalizationGit(root, ["rev-parse", "HEAD"], "Git HEAD ownership check");
+  if (currentHead !== baselineHead) {
+    throw new Error(`Git HEAD changed during implementation (expected ${baselineHead}, found ${currentHead})`);
+  }
+  const currentIndexTree = finalizationGit(root, ["write-tree"], "Git index ownership check");
+  if (currentIndexTree !== baselineTree) {
+    throw new Error("The user's Git index changed during implementation; checkout reset was refused");
+  }
+}
+function bestEffortChangedPaths(root, baselineHead) {
+  const command = (args) => spawnSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 5000,
+    env: vcsEnvironment()
+  });
+  const head = command(["rev-parse", "HEAD"]);
+  const diff = command(["diff", "--name-only", "-z", baselineHead, "--"]);
+  const untracked = command(["ls-files", "--others", "--exclude-standard", "-z"]);
   return {
-    paths: uniquePaths(...results.map((item) => parseNulPaths(String(item.stdout || "")))),
-    finalHead
+    paths: uniquePaths(diff.status === 0 ? parseNulPaths(String(diff.stdout || "")) : [], untracked.status === 0 ? parseNulPaths(String(untracked.stdout || "")) : []),
+    finalHead: head.status === 0 ? output(head) : undefined
   };
 }
-function createGitSharedLease(input, root) {
-  const lockPath = gitPath(input, root, "ypi-shared-writer.lock");
-  if (!lockPath)
+function sanitizeLeaseId(value) {
+  const safe = value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 64);
+  return safe || randomBytes3(8).toString("hex");
+}
+function createGitSnapshotLease(input, root) {
+  const lockPath = gitPath(input, root, "ypi-implementer.lock");
+  if (!lockPath) {
     throw new Error("Implement mode could not resolve the existing Git checkout's writer lease path. Continue implementation in the root session.");
+  }
+  if (existsSync6(lockPath)) {
+    throw new Error(`Another ypi implementer or interrupted snapshot lifecycle owns this repository at ${lockPath}. Recover its work and remove the lock only after inspection.`);
+  }
+  assertAdmissibleCheckout(input, root);
   const writer = acquireWriterLock(lockPath);
   try {
-    for (const marker of ["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"]) {
-      const markerPath = gitPath(input, root, marker);
-      if (markerPath && existsSync6(markerPath))
-        throw new Error(`Git operation in progress (${marker}); continue implementation in the root session.`);
-    }
-    const status = run(input, "git", ["status", "--porcelain=v2", "--untracked-files=all"], root);
-    assertWithinDeadline(input, status, "Git cleanliness check");
-    if (status.status !== 0 || output(status))
-      throw new Error("Implement mode requires a clean Git checkout. Continue implementation in the root session so existing work is not mixed or lost.");
-    const head = run(input, "git", ["rev-parse", "HEAD"], root);
-    assertWithinDeadline(input, head, "Git HEAD check");
-    const baselineHead = head.status === 0 ? output(head) : "";
+    assertAdmissibleCheckout(input, root);
+    const baselineHead = checkedSetupGit(input, root, ["rev-parse", "HEAD"], "Git HEAD check");
     if (!baselineHead)
       throw new Error("Implement mode requires an existing Git HEAD. Continue implementation in the root session.");
+    const baselineTree = checkedSetupGit(input, root, ["rev-parse", `${baselineHead}^{tree}`], "Baseline tree lookup");
+    const confinement = createConfinementState(input, root, baselineHead, writer);
+    const attemptRef = `refs/ypi/attempt-${sanitizeLeaseId(writer.token)}`;
+    const snapshotIndexFile = path7.join(writer.path, "snapshot-index");
     let finalized;
+    let finalizationError;
+    let releaseAllowed = false;
     return {
       cwd: root,
-      mode: "git-shared",
+      mode: "git-snapshot",
       readOnly: false,
       quiesceProcessGroup: true,
+      childEnvironment: {
+        YPI_IMPLEMENT_ROOT: root,
+        YPI_IMPLEMENT_AUDIT_FILE: confinement.auditFile,
+        YPI_IMPLEMENT_BASELINE_IGNORE_ROOT: confinement.baselineIgnoreRoot,
+        YPI_IMPLEMENT_BASELINE_INDEX: confinement.baselineIndexFile,
+        YPI_IMPLEMENT_GIT_DIR: confinement.gitDir,
+        YPI_IMPLEMENT_SUBMODULES_FILE: confinement.submodulePathsFile
+      },
       finalize() {
         if (finalized)
           return finalized;
-        const final = gitChangedPaths(root, baselineHead);
-        finalized = {
-          requestedMode: "implement",
-          effectiveMode: "implement",
-          workspaceMode: "git-shared",
-          workspaceRoot: root,
-          baselineHead,
-          finalHead: final.finalHead,
-          changedPaths: final.paths,
-          reportComplete: !final.error,
-          reportError: final.error,
-          leaseId: writer.token.slice(0, 12)
-        };
-        return finalized;
+        if (finalizationError)
+          throw finalizationError;
+        let attemptCommit;
+        let refVerified = false;
+        let diffStat;
+        let changedPaths = bestEffortChangedPaths(root, baselineHead).paths;
+        try {
+          input.lifecycleHook?.("before-snapshot");
+          auditedPaths(confinement, root);
+          assertSubmodulesUnchanged(root, confinement.gitlinks);
+          assertCheckoutOwnership(root, baselineHead, baselineTree);
+          const snapshotEnvironment = { GIT_INDEX_FILE: snapshotIndexFile };
+          finalizationGit(root, ["read-tree", baselineHead], "Snapshot index initialization", snapshotEnvironment);
+          finalizationGit(root, ["add", "-A", "--", "."], "Snapshot staging", snapshotEnvironment);
+          const snapshotTree = finalizationGit(root, ["write-tree"], "Snapshot tree creation", snapshotEnvironment);
+          attemptCommit = finalizationGit(root, ["commit-tree", snapshotTree, "-p", baselineHead, "-m", `ypi implementer attempt ${writer.token.slice(0, 12)}`], "Snapshot commit creation", {
+            ...snapshotEnvironment,
+            GIT_AUTHOR_NAME: "ypi",
+            GIT_AUTHOR_EMAIL: "ypi@localhost",
+            GIT_COMMITTER_NAME: "ypi",
+            GIT_COMMITTER_EMAIL: "ypi@localhost"
+          });
+          input.lifecycleHook?.("before-ref-update");
+          finalizationGit(root, ["update-ref", attemptRef, attemptCommit, ZERO_OID], "Snapshot ref creation");
+          const verifiedCommit = finalizationGit(root, ["rev-parse", "--verify", `${attemptRef}^{commit}`], "Snapshot ref verification");
+          const verifiedTree = finalizationGit(root, ["rev-parse", `${verifiedCommit}^{tree}`], "Snapshot tree verification");
+          if (verifiedCommit !== attemptCommit || verifiedTree !== snapshotTree) {
+            throw new Error("Snapshot ref verification did not resolve to the captured tree");
+          }
+          refVerified = true;
+          changedPaths = parseNulPaths(finalizationGit(root, ["diff", "--name-only", "-z", "--no-renames", baselineHead, attemptCommit, "--"], "Snapshot changed-path report", {}, undefined, true));
+          diffStat = finalizationGit(root, ["diff", "--stat", "--no-ext-diff", "--no-renames", baselineHead, attemptCommit, "--"], "Snapshot diffstat report");
+          input.lifecycleHook?.("after-snapshot");
+          auditedPaths(confinement, root);
+          assertSubmodulesUnchanged(root, confinement.gitlinks);
+          assertCheckoutOwnership(root, baselineHead, baselineTree);
+          finalizationGit(root, ["add", "-A", "--", "."], "Pre-reset tree verification staging", snapshotEnvironment);
+          const preResetTree = finalizationGit(root, ["write-tree"], "Pre-reset tree verification", snapshotEnvironment);
+          if (preResetTree !== snapshotTree) {
+            throw new Error("Checkout changed after the salvage ref was captured; reset was refused");
+          }
+          finalizationGit(root, ["reset", "--hard", baselineHead], "Baseline reset");
+          finalizationGit(root, ["clean", "-fd"], "Non-ignored checkout cleanup");
+          assertSubmodulesUnchanged(root, confinement.gitlinks);
+          const finalHead = finalizationGit(root, ["rev-parse", "HEAD"], "Restored HEAD verification");
+          const finalTree = finalizationGit(root, ["write-tree"], "Restored index verification");
+          const finalStatus = finalizationGit(root, ["status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none"], "Restored checkout verification");
+          if (finalHead !== baselineHead || finalTree !== baselineTree || finalStatus) {
+            throw new Error("Checkout did not return to the clean baseline after snapshot");
+          }
+          finalized = {
+            requestedMode: "implement",
+            effectiveMode: "implement",
+            workspaceMode: "git-snapshot",
+            workspaceRoot: root,
+            baselineHead,
+            finalHead,
+            changedPaths,
+            diffStat,
+            attemptRef,
+            attemptCommit,
+            treeRestored: true,
+            reportComplete: true,
+            leaseId: writer.token.slice(0, 12)
+          };
+          releaseAllowed = true;
+          return finalized;
+        } catch (error) {
+          const cause = error instanceof Error ? error.message : String(error);
+          const state = bestEffortChangedPaths(root, baselineHead);
+          const report = {
+            requestedMode: "implement",
+            effectiveMode: "implement",
+            workspaceMode: "git-snapshot",
+            workspaceRoot: root,
+            baselineHead,
+            finalHead: state.finalHead,
+            changedPaths: uniquePaths(changedPaths, state.paths),
+            diffStat,
+            attemptRef: refVerified ? attemptRef : undefined,
+            attemptCommit: refVerified ? attemptCommit : undefined,
+            treeRestored: false,
+            reportComplete: false,
+            reportError: cause,
+            leaseId: writer.token.slice(0, 12)
+          };
+          const preservation = refVerified ? `The attempted work has a verified snapshot at ${attemptRef}; verify it before recovery.` : "No verified salvage ref was available, so no reset or clean was attempted and the worktree remains the primary copy.";
+          finalizationError = new WorkspaceFinalizationError(`Implementer snapshot/reset failed: ${cause}. ${preservation} The writer lock remains at ${writer.path}.`, report);
+          throw finalizationError;
+        }
       },
-      cleanup: writer.release
+      cleanup() {
+        if (releaseAllowed)
+          writer.release();
+      }
     };
   } catch (error) {
     writer.release();
@@ -1237,13 +1529,11 @@ function createGitSharedLease(input, root) {
 function acquireWorkspace(input) {
   if (input.mode === "review")
     return readOnlyLease(input.cwd);
-  const gitRootResult = run(input, "git", ["rev-parse", "--show-toplevel"]);
-  assertWithinDeadline(input, gitRootResult, "Git discovery");
+  const gitRootResult = setupGit(input, input.cwd, ["rev-parse", "--show-toplevel"]);
   if (gitRootResult.status !== 0) {
     throw new Error("Implement mode requires an existing clean Git checkout. No version-control system was installed or initialized; continue implementation in the root session.");
   }
-  const gitRoot = output(gitRootResult);
-  return createGitSharedLease(input, gitRoot);
+  return createGitSnapshotLease(input, output(gitRootResult));
 }
 
 // extensions/ypi/internal/child-resources.ts
@@ -1477,6 +1767,7 @@ async function runRecursiveChild(runtime, request) {
     selectedProvider: provider,
     mode: requestedMode
   });
+  let workspace;
   try {
     if (request.signal?.aborted)
       throw new RecursiveChildError("Child Pi cancelled during admission before work started", 130);
@@ -1499,7 +1790,13 @@ async function runRecursiveChild(runtime, request) {
       YPI_EXTENSION_ROOT: runtime.root,
       YPI_EXTENSION_PATH: extensionPath,
       YPI_RLM_QUERY_CALLER: request.caller,
-      YPI_IMPLEMENT_ROOT: requestedMode === "implement" ? resources.workspace.cwd : "",
+      YPI_IMPLEMENT_ROOT: "",
+      YPI_IMPLEMENT_AUDIT_FILE: "",
+      YPI_IMPLEMENT_BASELINE_IGNORE_ROOT: "",
+      YPI_IMPLEMENT_BASELINE_INDEX: "",
+      YPI_IMPLEMENT_GIT_DIR: "",
+      YPI_IMPLEMENT_SUBMODULES_FILE: "",
+      ...resources.workspace.childEnvironment,
       RLM_WRITE_MODE_CEILING: "review",
       ...requestedMode === "implement" ? { RLM_AMBIENT_EXTENSIONS: "0" } : {}
     }, runtime, childDepth);
@@ -1522,7 +1819,7 @@ async function runRecursiveChild(runtime, request) {
     if (resources.workspace.readOnly)
       args.push("--exclude-tools", READ_ONLY_EXCLUDED_BUILTINS.join(","));
     else if (requestedMode === "implement")
-      args.push("--exclude-tools", "bash");
+      args.push("--tools", IMPLEMENT_TOOL_ALLOWLIST.join(","));
     if (process.env.RLM_CHILD_DISCOVERY === "0")
       args.push("--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve");
     if (resources.childSession)
@@ -1563,7 +1860,7 @@ async function runRecursiveChild(runtime, request) {
     if (processResult.jsonCostIncomplete) {
       appendIncompleteCostMarker("child ended without a complete final cost boundary");
     }
-    const workspace = resources.workspace.finalize();
+    workspace = resources.workspace.finalize();
     trace(`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} COMPLETED exit=${processResult.code} elapsed=${elapsed}s caller=${request.caller} call=${callCount} cost=${processResult.jsonCostIncomplete ? "incomplete" : output2.cost?.cost ?? "untracked"} tokens=${processResult.jsonCostIncomplete ? "incomplete" : output2.cost?.tokens ?? "untracked"} cancelled=${processResult.cancelled} timeout=${processResult.timedOut} truncated=${processResult.textTruncated || processResult.jsonEventTruncated} changed_paths=${workspace.changedPaths.length}`);
     const details = {
       implementation: "canonical",
@@ -1594,6 +1891,38 @@ ${childOutput}` : ""}${workspaceOutput ? `
 ${workspaceOutput}` : ""}`, processResult.code, details);
     }
     return { text: output2.text, stderr: output2.stderr, warnings: output2.warnings, details };
+  } catch (error) {
+    if (!workspace) {
+      try {
+        workspace = resources.workspace.finalize();
+      } catch (finalizationError) {
+        if (finalizationError instanceof WorkspaceFinalizationError) {
+          const original = error === finalizationError ? "" : `Original child error: ${error instanceof Error ? error.message : String(error)}
+
+`;
+          const report = formatWorkspaceReport(finalizationError.report);
+          const exitCode = error instanceof RecursiveChildError ? error.exitCode : 1;
+          throw new RecursiveChildError(`${original}${finalizationError.message}
+
+${report}`, exitCode);
+        }
+        throw finalizationError;
+      }
+    }
+    if (requestedMode === "implement" && workspace) {
+      const report = formatWorkspaceReport(workspace);
+      if (error instanceof RecursiveChildError) {
+        if (error.details)
+          throw error;
+        throw new RecursiveChildError(`${error.message}
+
+${report}`, error.exitCode);
+      }
+      throw new RecursiveChildError(`${error instanceof Error ? error.message : String(error)}
+
+${report}`, error.exitCode || 1);
+    }
+    throw error;
   } finally {
     resources.cleanup();
   }
@@ -1608,6 +1937,11 @@ function formatWorkspaceReport(report) {
     paths.length > 0 ? `Changed paths (${report.changedPaths.length}): ${paths.join(", ")}${report.changedPaths.length > paths.length ? ", …" : ""}` : "Changed paths: none",
     ...report.baselineHead ? [`Baseline: ${displayPath(report.baselineHead)}`] : [],
     ...report.finalHead ? [`Final state: ${displayPath(report.finalHead)}`] : [],
+    ...report.attemptRef ? [`Attempt ref: ${displayPath(report.attemptRef)}`] : [],
+    ...report.attemptCommit ? [`Attempt commit: ${displayPath(report.attemptCommit)}`] : [],
+    ...report.diffStat ? [`Diffstat:
+${report.diffStat}`] : [],
+    ...report.treeRestored !== undefined ? [`Tree restored: ${report.treeRestored ? "yes" : "no"}`] : [],
     ...!report.reportComplete && report.reportError ? [`Workspace report warning: ${report.reportError}`] : []
   ].join(`
 `);

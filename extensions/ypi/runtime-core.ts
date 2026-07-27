@@ -11,6 +11,7 @@ import { currentDepth, maxDepth, nextDepth } from "./env.ts";
 import {
 	buildChildEnvironment,
 	childExtensionsEnabled,
+	IMPLEMENT_TOOL_ALLOWLIST,
 	READ_ONLY_EXCLUDED_BUILTINS,
 	resolveChildRoute,
 	retainSelectedProviderEnvironment,
@@ -18,7 +19,11 @@ import {
 import { formatCombinedChildOutput, normalizeChildOutput, type ChildToolActivity } from "./internal/child-output.ts";
 import { runChildProcess } from "./internal/child-process.ts";
 import { acquireChildResources } from "./internal/child-resources.ts";
-import type { ChildMode, WorkspaceReport } from "./internal/workspace-policy.ts";
+import {
+	WorkspaceFinalizationError,
+	type ChildMode,
+	type WorkspaceReport,
+} from "./internal/workspace-policy.ts";
 import type { YpiRuntime } from "./runtime.ts";
 export type { ChildToolActivity } from "./internal/child-output.ts";
 
@@ -161,6 +166,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		mode: requestedMode,
 	});
 
+	let workspace: WorkspaceReport | undefined;
 	try {
 		if (request.signal?.aborted) throw new RecursiveChildError("Child Pi cancelled during admission before work started", 130);
 		const extensionPath = request.extensionPath === null ? "" : request.extensionPath || runtime.extensionPath;
@@ -182,7 +188,13 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			YPI_EXTENSION_ROOT: runtime.root,
 			YPI_EXTENSION_PATH: extensionPath,
 			YPI_RLM_QUERY_CALLER: request.caller,
-			YPI_IMPLEMENT_ROOT: requestedMode === "implement" ? resources.workspace.cwd : "",
+			YPI_IMPLEMENT_ROOT: "",
+			YPI_IMPLEMENT_AUDIT_FILE: "",
+			YPI_IMPLEMENT_BASELINE_IGNORE_ROOT: "",
+			YPI_IMPLEMENT_BASELINE_INDEX: "",
+			YPI_IMPLEMENT_GIT_DIR: "",
+			YPI_IMPLEMENT_SUBMODULES_FILE: "",
+			...resources.workspace.childEnvironment,
 			RLM_WRITE_MODE_CEILING: "review",
 			...(requestedMode === "implement" ? { RLM_AMBIENT_EXTENSIONS: "0" } : {}),
 		}, runtime, childDepth);
@@ -202,7 +214,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		if (model) args.push("--model", model);
 		if (thinkingLevel) args.push("--thinking", thinkingLevel);
 		if (resources.workspace.readOnly) args.push("--exclude-tools", READ_ONLY_EXCLUDED_BUILTINS.join(","));
-		else if (requestedMode === "implement") args.push("--exclude-tools", "bash");
+		else if (requestedMode === "implement") args.push("--tools", IMPLEMENT_TOOL_ALLOWLIST.join(","));
 		if (process.env.RLM_CHILD_DISCOVERY === "0") args.push("--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve");
 		if (resources.childSession) args.push("--session", resources.childSession);
 		else args.push("--no-session");
@@ -240,7 +252,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		if (processResult.jsonCostIncomplete) {
 			appendIncompleteCostMarker("child ended without a complete final cost boundary");
 		}
-		const workspace = resources.workspace.finalize();
+		workspace = resources.workspace.finalize();
 		trace(`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} COMPLETED exit=${processResult.code} elapsed=${elapsed}s caller=${request.caller} call=${callCount} cost=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.cost ?? "untracked"} tokens=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.tokens ?? "untracked"} cancelled=${processResult.cancelled} timeout=${processResult.timedOut} truncated=${processResult.textTruncated || processResult.jsonEventTruncated} changed_paths=${workspace.changedPaths.length}`);
 		const details: RecursiveChildDetails = {
 			implementation: "canonical",
@@ -272,6 +284,34 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			throw new RecursiveChildError(`${reason}${childOutput ? `\n${childOutput}` : ""}${workspaceOutput ? `\n\n${workspaceOutput}` : ""}`, processResult.code, details);
 		}
 		return { text: output.text, stderr: output.stderr, warnings: output.warnings, details };
+	} catch (error) {
+		if (!workspace) {
+			try {
+				workspace = resources.workspace.finalize();
+			} catch (finalizationError) {
+				if (finalizationError instanceof WorkspaceFinalizationError) {
+					const original = error === finalizationError
+						? ""
+						: `Original child error: ${error instanceof Error ? error.message : String(error)}\n\n`;
+					const report = formatWorkspaceReport(finalizationError.report);
+					const exitCode = error instanceof RecursiveChildError ? error.exitCode : 1;
+					throw new RecursiveChildError(`${original}${finalizationError.message}\n\n${report}`, exitCode);
+				}
+				throw finalizationError;
+			}
+		}
+		if (requestedMode === "implement" && workspace) {
+			const report = formatWorkspaceReport(workspace);
+			if (error instanceof RecursiveChildError) {
+				if (error.details) throw error;
+				throw new RecursiveChildError(`${error.message}\n\n${report}`, error.exitCode);
+			}
+			throw new RecursiveChildError(
+				`${error instanceof Error ? error.message : String(error)}\n\n${report}`,
+				(error as Error & { exitCode?: number }).exitCode || 1,
+			);
+		}
+		throw error;
 	} finally {
 		resources.cleanup();
 	}
@@ -288,6 +328,10 @@ function formatWorkspaceReport(report: WorkspaceReport): string {
 		paths.length > 0 ? `Changed paths (${report.changedPaths.length}): ${paths.join(", ")}${report.changedPaths.length > paths.length ? ", …" : ""}` : "Changed paths: none",
 		...(report.baselineHead ? [`Baseline: ${displayPath(report.baselineHead)}`] : []),
 		...(report.finalHead ? [`Final state: ${displayPath(report.finalHead)}`] : []),
+		...(report.attemptRef ? [`Attempt ref: ${displayPath(report.attemptRef)}`] : []),
+		...(report.attemptCommit ? [`Attempt commit: ${displayPath(report.attemptCommit)}`] : []),
+		...(report.diffStat ? [`Diffstat:\n${report.diffStat}`] : []),
+		...(report.treeRestored !== undefined ? [`Tree restored: ${report.treeRestored ? "yes" : "no"}`] : []),
 		...(!report.reportComplete && report.reportError ? [`Workspace report warning: ${report.reportError}`] : []),
 	].join("\n");
 }

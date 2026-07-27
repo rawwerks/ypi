@@ -167,6 +167,10 @@ elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "write-file-fail" ]; then
   printf '%s\n' 'partial implementation' > partial-implemented.txt
   echo "IMPLEMENT_CHILD_FAILED" >&2
   exit 42
+elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "write-then-sleep" ]; then
+  printf '%s\n' 'interrupted implementation' > interrupted-implemented.txt
+  echo "IMPLEMENT_CHILD_WAITING"
+  sleep 30
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "write-background" ]; then
   (sleep 1; printf '%s\n' 'orphan write' > descendant-write.txt) >/dev/null 2>&1 &
   echo "BACKGROUND_CHILD_OK"
@@ -372,13 +376,25 @@ async function run(): Promise<void> {
 	const implementText = implementResult.content.find((item) => item.type === "text")?.text || "";
 	assertContains("N5a: one clean-Git implementer executes", implementText, "IMPLEMENT_CHILD_OK");
 	assertContains("N5a: implementer result reports changed path", implementText, "implemented.txt");
-	record(implementResult.details?.workspace?.workspaceMode === "git-shared" && implementResult.details?.workspace?.reportComplete === true, "N5a: implementer returns complete structured workspace report", JSON.stringify(implementResult.details));
-	assertContains("N5a: implementer excludes process-spawning bash", readLog(), "--exclude-tools bash");
+	record(
+		implementResult.details?.workspace?.workspaceMode === "git-snapshot"
+			&& implementResult.details?.workspace?.reportComplete === true
+			&& implementResult.details?.workspace?.treeRestored === true
+			&& Boolean(implementResult.details?.workspace?.attemptRef)
+			&& Boolean(implementResult.details?.workspace?.attemptCommit),
+		"N5a: implementer returns a complete snapshot/reset report",
+		JSON.stringify(implementResult.details),
+	);
+	assertContains("N5a: implementer receives the explicit confined tool allowlist", readLog(), "--tools read,grep,find,ls,edit,write,rlm_query");
+	assertNotContains("N5a: implementer excludes process-spawning bash", readLog(), "--tools read,grep,find,ls,bash");
 	assertContains("N5a: implementer forces canonical-only extension mode", readLog(), "--no-extensions");
 	assertContains("N5a: implementer forces exact confinement extension", readLog(), `-e ${runtime.extensionPath}`);
 	assertContains("N5a: implementer receives its exact write-scope root", readLog(), `YPI_IMPLEMENT_ROOT=${implementRoot}`);
-	assertNotContains("N5a: implementer retains edit/write built-ins", readLog(), "--exclude-tools bash,edit,write");
-	const implementLock = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "ypi-shared-writer.lock"], { cwd: implementRoot, encoding: "utf8", env: fixtureGitEnv() }).stdout.trim();
+	record(!existsSync(path.join(implementRoot, "implemented.txt")), "N5a: implementer edits leave the root checkout clean");
+	const implementAttemptRef = implementResult.details?.workspace?.attemptRef || "";
+	const implementedFromRef = spawnSync("git", ["show", `${implementAttemptRef}:implemented.txt`], { cwd: implementRoot, encoding: "utf8", env: fixtureGitEnv() });
+	record(implementedFromRef.status === 0 && implementedFromRef.stdout === "implemented by child\n", "N5a: salvage ref contains the exact child edit");
+	const implementLock = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "ypi-implementer.lock"], { cwd: implementRoot, encoding: "utf8", env: fixtureGitEnv() }).stdout.trim();
 	record(!existsSync(implementLock), "N5a: implementer releases writer lease after reporting");
 
 	// N5a2: git hooks export GIT_DIR (and friends) into the environment. The
@@ -430,7 +446,99 @@ async function run(): Promise<void> {
 		record(false, "N5a: failed implementer returns its changed-path report", "expected failure");
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		record(message.includes("partial-implemented.txt") && message.includes("report: complete"), "N5a: failed implementer returns its changed-path report", message);
+		record(
+			message.includes("partial-implemented.txt")
+				&& message.includes("report: complete")
+				&& message.includes("Attempt ref:")
+				&& message.includes("Tree restored: yes"),
+			"N5a: failed implementer returns its salvage ref and reset report",
+			message,
+		);
+		record(!existsSync(path.join(failingImplementRoot, "partial-implemented.txt")), "N5a: failed implementer also restores the clean checkout");
+	}
+
+	const cancelledImplementRoot = mkdtempSync(path.join(scratch, "implement-cancelled."));
+	spawnSync("git", ["init", "-q"], { cwd: cancelledImplementRoot, env: fixtureGitEnv() });
+	writeFileSync(path.join(cancelledImplementRoot, "base.txt"), "base\n");
+	spawnSync("git", ["add", "base.txt"], { cwd: cancelledImplementRoot, env: fixtureGitEnv() });
+	spawnSync("git", ["-c", "user.name=ypi-test", "-c", "user.email=ypi@example.invalid", "commit", "-qm", "base"], { cwd: cancelledImplementRoot, env: fixtureGitEnv() });
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
+	process.env.RLM_JSON = "0";
+	process.env.YPI_FAKE_PI_MODE = "write-then-sleep";
+	ensureEnvironment(runtime, context(cancelledImplementRoot));
+	const cancellation = new AbortController();
+	setTimeout(() => cancellation.abort(), 150);
+	try {
+		await tool.execute("implement-cancelled", { prompt: "bounded cancelled implementation", mode: "implement" }, cancellation.signal, undefined, context(cancelledImplementRoot));
+		record(false, "N5a: cancelled implementer uses snapshot/reset", "expected cancellation");
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		record(
+			message.includes("Child Pi cancelled")
+				&& message.includes("interrupted-implemented.txt")
+				&& message.includes("Tree restored: yes")
+				&& !existsSync(path.join(cancelledImplementRoot, "interrupted-implemented.txt")),
+			"N5a: cancelled implementer uses snapshot/reset",
+			message,
+		);
+	}
+
+	const timedImplementRoot = mkdtempSync(path.join(scratch, "implement-timeout."));
+	spawnSync("git", ["init", "-q"], { cwd: timedImplementRoot, env: fixtureGitEnv() });
+	writeFileSync(path.join(timedImplementRoot, "base.txt"), "base\n");
+	spawnSync("git", ["add", "base.txt"], { cwd: timedImplementRoot, env: fixtureGitEnv() });
+	spawnSync("git", ["-c", "user.name=ypi-test", "-c", "user.email=ypi@example.invalid", "commit", "-qm", "base"], { cwd: timedImplementRoot, env: fixtureGitEnv() });
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
+	process.env.RLM_TIMEOUT = "2";
+	process.env.RLM_JSON = "0";
+	process.env.YPI_FAKE_PI_MODE = "write-then-sleep";
+	ensureEnvironment(runtime, context(timedImplementRoot));
+	try {
+		await tool.execute("implement-timeout", { prompt: "bounded timed implementation", mode: "implement" }, undefined, undefined, context(timedImplementRoot));
+		record(false, "N5a: timed-out implementer uses snapshot/reset", "expected timeout");
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		record(
+			message.includes("timed out")
+				&& message.includes("interrupted-implemented.txt")
+				&& message.includes("Tree restored: yes")
+				&& !existsSync(path.join(timedImplementRoot, "interrupted-implemented.txt")),
+			"N5a: timed-out implementer uses snapshot/reset",
+			message,
+		);
+	}
+
+	const spawnFailureRoot = mkdtempSync(path.join(scratch, "implement-spawn-failure."));
+	spawnSync("git", ["init", "-q"], { cwd: spawnFailureRoot, env: fixtureGitEnv() });
+	writeFileSync(path.join(spawnFailureRoot, "base.txt"), "base\n");
+	spawnSync("git", ["add", "base.txt"], { cwd: spawnFailureRoot, env: fixtureGitEnv() });
+	spawnSync("git", ["-c", "user.name=ypi-test", "-c", "user.email=ypi@example.invalid", "commit", "-qm", "base"], { cwd: spawnFailureRoot, env: fixtureGitEnv() });
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
+	process.env.RLM_JSON = "0";
+	process.env.YPI_PI_BIN = path.join(scratch, "missing-pi");
+	ensureEnvironment(runtime, context(spawnFailureRoot));
+	try {
+		await tool.execute("implement-spawn-failure", { prompt: "bounded missing executable", mode: "implement" }, undefined, undefined, context(spawnFailureRoot));
+		record(false, "N5a: spawn failure still finalizes workspace", "expected spawn error");
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		record(
+			message.includes("ENOENT")
+				&& message.includes("Attempt ref:")
+				&& message.includes("Tree restored: yes")
+				&& spawnSync("git", ["status", "--porcelain=v2", "--untracked-files=all"], { cwd: spawnFailureRoot, encoding: "utf8", env: fixtureGitEnv() }).stdout.trim() === "",
+			"N5a: spawn failure still finalizes workspace",
+			message,
+		);
 	}
 
 	const descendantRoot = mkdtempSync(path.join(scratch, "implement-descendant."));

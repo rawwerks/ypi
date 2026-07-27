@@ -5,12 +5,15 @@
 #   rlm_cleanup              # dry-run: show what would be cleaned
 #   rlm_cleanup --force      # actually delete
 #   rlm_cleanup --age 60     # override age threshold (default: 120 min)
+#   rlm_cleanup --attempt-age 10080  # attempt-ref threshold (default: 7 days)
+#   rlm_cleanup --repo PATH  # repository whose refs should be inspected
 #
 # What it cleans:
 #   1. ${TMPDIR:-/tmp}/rlm_* temp files (context, prompts, cost, async output)
 #   2. ${TMPDIR:-/tmp}/rlm_calls_*.counter.lock stale call-counter locks
 #   3. ${TMPDIR:-/tmp}/rlm_async_* private job directories
 #   4. ${TMPDIR:-/tmp}/rlm_ws_* and ypi_ws_* workspace directories
+#   5. refs/ypi/attempt-* older than the attempt-ref threshold
 #
 # Safe by default: dry-run unless --force is passed.
 
@@ -18,11 +21,16 @@ set -euo pipefail
 
 FORCE=false
 AGE_MIN=120  # minutes
+ATTEMPT_AGE_MIN=10080
+REPO_PATH="$PWD"
+REPO_EXPLICIT=false
 
 while [[ "${1:-}" == --* ]]; do
     case "$1" in
         --force) FORCE=true; shift ;;
         --age) AGE_MIN="$2"; shift 2 ;;
+        --attempt-age) ATTEMPT_AGE_MIN="$2"; shift 2 ;;
+        --repo) REPO_PATH="$2"; REPO_EXPLICIT=true; shift 2 ;;
         --help|-h)
             sed -n '2,/^$/{ s/^# //; s/^#$//; p }' "$0"
             exit 0
@@ -30,6 +38,9 @@ while [[ "${1:-}" == --* ]]; do
         *) echo "Unknown flag: $1" >&2; exit 1 ;;
     esac
 done
+
+[[ "$AGE_MIN" =~ ^[0-9]+$ ]] || { echo "--age must be a non-negative integer" >&2; exit 2; }
+[[ "$ATTEMPT_AGE_MIN" =~ ^[0-9]+$ ]] || { echo "--attempt-age must be a non-negative integer" >&2; exit 2; }
 
 echo "rlm_cleanup — age threshold: ${AGE_MIN}m, mode: $( $FORCE && echo 'FORCE' || echo 'dry-run' )"
 TMP_ROOT="${TMPDIR:-/tmp}"
@@ -105,6 +116,55 @@ if [ "$WS_COUNT" -gt 0 ]; then
         echo "  ✓ deleted"
     else
         echo "  (use --force to delete)"
+    fi
+fi
+
+# --- 5. Aged implementer attempt refs ---
+clean_git() (
+    for key in $(compgen -A variable GIT_ 2>/dev/null || true); do unset "$key"; done
+    command git "$@"
+)
+
+REPO_ROOT=$(clean_git -C "$REPO_PATH" rev-parse --show-toplevel 2>/dev/null || true)
+if [ -z "$REPO_ROOT" ]; then
+    if [ "$REPO_EXPLICIT" = true ]; then
+        echo "rlm_cleanup: --repo is not an existing Git checkout: $REPO_PATH" >&2
+        exit 2
+    fi
+    echo "Attempt refs older than ${ATTEMPT_AGE_MIN}m: no Git checkout"
+else
+    IMPLEMENT_LOCK=$(clean_git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-path ypi-implementer.lock 2>/dev/null || true)
+    if [ -n "$IMPLEMENT_LOCK" ] && [ -e "$IMPLEMENT_LOCK" ]; then
+        echo "Attempt refs older than ${ATTEMPT_AGE_MIN}m: skipped (writer lock present: $IMPLEMENT_LOCK)"
+    else
+        NOW=$(date +%s)
+        CUTOFF=$((NOW - ATTEMPT_AGE_MIN * 60))
+        ATTEMPT_REFS=$(
+            clean_git -C "$REPO_ROOT" for-each-ref \
+                --format='%(refname) %(objectname) %(committerdate:unix)' \
+                refs/ypi/ 2>/dev/null \
+            | while read -r ref oid committed_at; do
+                if [[ "$ref" == refs/ypi/attempt-* ]] \
+                    && [[ "$committed_at" =~ ^[0-9]+$ ]] \
+                    && [ "$committed_at" -le "$CUTOFF" ]; then
+                    printf '%s %s\n' "$ref" "$oid"
+                fi
+            done
+        )
+        ATTEMPT_COUNT=0
+        [ -n "$ATTEMPT_REFS" ] && ATTEMPT_COUNT=$(printf '%s\n' "$ATTEMPT_REFS" | wc -l)
+        echo "Attempt refs older than ${ATTEMPT_AGE_MIN}m: $ATTEMPT_COUNT"
+        if [ "$ATTEMPT_COUNT" -gt 0 ]; then
+            if [ "$FORCE" = true ]; then
+                while read -r ref oid; do
+                    [ -n "$ref" ] && clean_git -C "$REPO_ROOT" update-ref -d "$ref" "$oid"
+                done <<< "$ATTEMPT_REFS"
+                echo "  ✓ deleted"
+            else
+                printf '%s\n' "$ATTEMPT_REFS" | sed 's/ [0-9a-f]*$//' | sed 's/^/  /'
+                echo "  (use --force to delete)"
+            fi
+        fi
     fi
 fi
 

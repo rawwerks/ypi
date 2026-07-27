@@ -3,6 +3,7 @@ import { maxDepth, sharedSessionsEnabled } from "../env.ts";
 import type { YpiRuntime } from "../runtime.ts";
 
 export const READ_ONLY_EXCLUDED_BUILTINS = ["bash", "edit", "write"] as const;
+export const IMPLEMENT_TOOL_ALLOWLIST = ["read", "grep", "find", "ls", "edit", "write", "rlm_query"] as const;
 
 export interface ParentRouteContext {
 	provider?: string;
