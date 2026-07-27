@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import {
+	chmodSync,
 	existsSync,
 	mkdtempSync,
 	readFileSync,
@@ -52,6 +53,30 @@ function waitForExit(child: ChildProcess): Promise<{ code: number | null; diagno
 	child.stdout?.on("data", (chunk) => { diagnostics += String(chunk); });
 	child.stderr?.on("data", (chunk) => { diagnostics += String(chunk); });
 	return new Promise((resolve) => child.once("close", (code) => resolve({ code, diagnostics })));
+}
+
+async function runReleasedCommand(
+	root: string,
+	label: string,
+	command: string[],
+): Promise<{ code: number | null; diagnostics: string }> {
+	const pidFile = path.join(root, `${label}.pid`);
+	const readyFile = path.join(root, `${label}.ready`);
+	const child = spawn(node, [
+		launcher,
+		"--pid-file",
+		pidFile,
+		"--ready-file",
+		readyFile,
+		"--owner-pid",
+		String(process.pid),
+		"--",
+		...command,
+	], { stdio: ["ignore", "pipe", "pipe"] });
+	const exit = waitForExit(child);
+	await waitForPidOrExit(pidFile, exit);
+	writeFileSync(readyFile, `${child.pid}\n`, { flag: "wx", mode: 0o600 });
+	return exit;
 }
 
 async function waitForPidOrExit(
@@ -186,6 +211,39 @@ const root = mkdtempSync(path.join(tmpdir(), "ypi_launch_gate."));
 		result.code === 125 && !existsSync(marker) && !existsSync(readyFile),
 		"an owner death before release exits without starting child work",
 		result.diagnostics,
+	);
+}
+
+{
+	const command = path.join(root, "not-executable");
+	writeFileSync(command, "#!/bin/sh\nexit 0\n", { mode: 0o600 });
+	const result = await runReleasedCommand(root, "not-executable", [command]);
+	record(
+		result.code === 126,
+		"launch gate classifies a present non-executable command as 126",
+		`code=${result.code} ${result.diagnostics}`,
+	);
+}
+
+{
+	const command = path.join(root, "missing-interpreter");
+	writeFileSync(command, "#!/definitely/missing/ypi-interpreter\n", { mode: 0o700 });
+	chmodSync(command, 0o700);
+	const result = await runReleasedCommand(root, "missing-interpreter", [command]);
+	record(
+		result.code === 127,
+		"launch gate classifies a missing shebang interpreter as 127",
+		`code=${result.code} ${result.diagnostics}`,
+	);
+}
+
+{
+	const command = path.join(root, "missing-executable");
+	const result = await runReleasedCommand(root, "missing-executable", [command]);
+	record(
+		result.code === 127,
+		"launch gate classifies a missing executable as 127",
+		`code=${result.code} ${result.diagnostics}`,
 	);
 }
 

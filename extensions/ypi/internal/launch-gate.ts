@@ -110,19 +110,30 @@ function resolveExecutable(command: string, environment: NodeJS.ProcessEnv): str
 		try {
 			accessSync(candidate, constants.X_OK);
 			return candidate;
-		} catch {
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "EACCES") {
+				throw new LaunchGateError(`EACCES: executable is not permitted: ${command}`, 126);
+			}
 			throw new LaunchGateError(`ENOENT: executable not found: ${command}`, 127);
 		}
 	}
+	let permissionDenied: string | undefined;
 	for (const directory of (environment.PATH || "").split(path.delimiter)) {
 		if (!directory) continue;
 		const candidate = path.join(directory, command);
 		try {
 			accessSync(candidate, constants.X_OK);
 			return candidate;
-		} catch {
-			// Continue searching PATH.
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "EACCES") permissionDenied = candidate;
+			else if (code !== "ENOENT" && code !== "ENOTDIR") {
+				throw new LaunchGateError(`cannot inspect executable ${candidate}: ${(error as Error).message}`, 126);
+			}
 		}
+	}
+	if (permissionDenied) {
+		throw new LaunchGateError(`EACCES: executable is not permitted: ${permissionDenied}`, 126);
 	}
 	throw new LaunchGateError(`ENOENT: executable not found on PATH: ${command}`, 127);
 }
@@ -141,8 +152,12 @@ export function runImplementerLaunchGate(request: LaunchGateRequest): never | nu
 		throw new LaunchGateError("Node.js >=22.15 with process.execve is required for implementer launch", 126);
 	}
 	const executable = resolveExecutable(request.command[0], process.env);
+	const envExecutable = resolveExecutable("env", process.env);
 	try {
-		execve(executable, request.command, process.env);
+		// Node treats a failed process.execve as fatal rather than catchable on
+		// supported releases. `env` performs the target exec in the already
+		// registered process and returns conventional 126/127 classifications.
+		execve(envExecutable, [envExecutable, executable, ...request.command.slice(1)], process.env);
 		throw new LaunchGateError("implementer launch returned without replacing the gate process", 126);
 	} catch (error) {
 		if (error instanceof LaunchGateError) throw error;
