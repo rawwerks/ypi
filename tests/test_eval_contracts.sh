@@ -187,6 +187,19 @@ PY
 RUNBOOK_ENVELOPE="$(find "$RUNBOOK_TMP/repo/tmp" -name envelope.sh -print)"
 RUNBOOK_RUN_DIR="${RUNBOOK_ENVELOPE%/envelope.sh}"
 if [ -f "$RUNBOOK_RUN_DIR/envelope.sh" ] && ! grep -Eq 'API_KEY|OAUTH_TOKEN|SECRET_ACCESS|RLM_BUDGET|RLM_TIMEOUT' "$RUNBOOK_RUN_DIR/envelope.sh"; then pass "bounded runbook persists only non-secret, non-terminating envelope controls"; else fail "bounded runbook persists only non-secret, non-terminating envelope controls" "missing or unsafe envelope"; fi
+if (
+  # shellcheck disable=SC1090
+  . "$RUNBOOK_RUN_DIR/envelope.sh"
+  [ "$RLM_MAX_DEPTH" = 3 ]
+  [ "$RLM_MAX_CALLS" = 65536 ]
+  [ "$RLM_MAX_CONCURRENT_CALLS" = 3 ]
+  [ "$RLM_REQUIRE_TRANSCRIPTS" = 1 ]
+  [ "$RLM_SHARED_SESSIONS" = 1 ]
+  [ -d "$RLM_SESSION_DIR" ]
+  [ ! -L "$RLM_SESSION_DIR" ]
+  [ "$(python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$RLM_SESSION_DIR")" = 700 ]
+); then pass "bounded runbook persists depth-three queued audit controls"; else fail "bounded runbook persists depth-three queued audit controls" "incorrect envelope"; fi
+if ! grep -Eq '18-call ceiling|at most 12 KiB|up to eight highest-severity' "$PROJECT_DIR/docs/bounded-recursive-development.md"; then pass "bounded runbook has no fixed review-quality allocation"; else fail "bounded runbook has no fixed review-quality allocation" "stale cap text remains"; fi
 printf '7\n' > "$RUNBOOK_RUN_DIR/calls"
 printf '%s\n' '{"cost":0.5,"tokens":10}' > "$RUNBOOK_RUN_DIR/cost.jsonl"
 python3 - "$RUNBOOK_TMP/resume.sh" "$RUNBOOK_RUN_DIR" <<'PY'

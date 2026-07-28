@@ -325,8 +325,6 @@ assert_contains "T10: trace has depth" "depth=0→1" "$TRACE_CONTENT"
 assert_not_contains "T10: trace excludes private prompt text" "Traced question" "$TRACE_CONTENT"
 
 # T11: an automatic private trace is created when no path is supplied.
-AUTO_TRACE="$TEST_TMP/rlm_trace_auto-trace.jsonl"
-rm -f "$AUTO_TRACE"
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
     RLM_DEPTH=0 \
@@ -336,7 +334,20 @@ OUTPUT=$(
     RLM_TRACE_ID=auto-trace \
     rlm_query "Automatically traced question?"
 )
+mapfile -t AUTO_TRACES < <(
+    find "$TEST_TMP" -mindepth 2 -maxdepth 2 \
+        -path "$TEST_TMP/ypi_runtime_auto-trace_*/trace.jsonl" \
+        -type f -print
+)
+if [ "${#AUTO_TRACES[@]}" -eq 1 ]; then
+    AUTO_TRACE="${AUTO_TRACES[0]}"
+    pass "T11: exactly one randomized runtime trace created"
+else
+    AUTO_TRACE="$TEST_TMP/missing-auto-trace"
+    fail "T11: exactly one randomized runtime trace created" "count=${#AUTO_TRACES[@]}"
+fi
 assert_file_exists "T11: automatic trace file created" "$AUTO_TRACE"
+if [ "$(stat -c '%a' "$(dirname "$AUTO_TRACE")" 2>/dev/null || true)" = "700" ]; then pass "T11: automatic runtime directory is private"; else fail "T11: automatic runtime directory is private" "mode=$(stat -c '%a' "$(dirname "$AUTO_TRACE")" 2>/dev/null || true)"; fi
 if [ "$(stat -c '%a' "$AUTO_TRACE")" = "600" ]; then pass "T11: automatic trace is private"; else fail "T11: automatic trace is private" "mode=$(stat -c '%a' "$AUTO_TRACE")"; fi
 assert_not_contains "T11: automatic trace excludes prompt text" "Automatically traced question" "$(cat "$AUTO_TRACE")"
 

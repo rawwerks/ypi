@@ -218,7 +218,7 @@ against the source and must contain exactly the public variables.
 | `RLM_MAX_DEPTH` | `3` | Maximum recursion depth. |
 | `RLM_MODEL` | active Pi model | Root route and inherited child model. |
 | `RLM_PROVIDER` | active Pi provider | Root route and inherited child provider. |
-| `RLM_REQUIRE_TRANSCRIPTS` | `0` | Set to `1` to require an explicit session directory and a new valid JSONL event from every spawned child. |
+| `RLM_REQUIRE_TRANSCRIPTS` | `0` | Set to `1` to require a private explicit session directory plus stable-inode JSONL append proof and a durable receipt for every admitted child. |
 | `RLM_SESSION_DIR` | active Pi session directory | Directory for shared child sessions. |
 | `RLM_SHARED_SESSIONS` | `1` | Set to `0` to prevent child session sharing. |
 | `RLM_STDIN` | unset | Marker forcing an explicit stdin read, even when stdin appears interactive. |

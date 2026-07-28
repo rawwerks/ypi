@@ -14,7 +14,8 @@ const scratch = mkdtempSync(path.join(tmpdir(), "ypi_native_tool_test."));
 const fakePi = path.join(scratch, "pi");
 const logFile = path.join(scratch, "fake-pi.log");
 const sessionDir = path.join(scratch, "sessions");
-mkdirSync(sessionDir, { recursive: true });
+mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+chmodSync(sessionDir, 0o700);
 
 let pass = 0;
 let fail = 0;
@@ -180,6 +181,7 @@ elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "concurrency" ]; then
   echo "CONCURRENCY_CHILD_OK"
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "transcript" ]; then
   printf '%s\n' '{"type":"session","version":3,"id":"child-session"}' >> "$RLM_SESSION_FILE"
+  printf '%s\n' '{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}' >> "$RLM_SESSION_FILE"
   echo "TRANSCRIPT_CHILD_OK"
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "invalid-transcript" ]; then
   printf '%s\n' 'not-json' >> "$RLM_SESSION_FILE"
@@ -280,6 +282,19 @@ async function run(): Promise<void> {
 	registerNativeRlmQueryTool(pi, runtime);
 	record(Boolean(tool), "native tool registered");
 	record(tool?.executionMode === "parallel", "native tool permits bounded parallel slice calls");
+	const generatedCounter = process.env.RLM_CALL_COUNTER_FILE || "";
+	const generatedConcurrency = process.env.RLM_CONCURRENCY_DIR || "";
+	const generatedStateRoot = path.dirname(generatedCounter);
+	record(
+		generatedStateRoot === path.dirname(generatedConcurrency)
+			&& generatedStateRoot === path.dirname(process.env.PI_TRACE_FILE || "")
+			&& generatedStateRoot === path.dirname(process.env.RLM_COST_FILE || ""),
+		"default control and telemetry paths share one private runtime directory",
+	);
+	record(
+		(statSync(generatedStateRoot).mode & 0o077) === 0,
+		"default runtime directory rejects group and world access",
+	);
 
 	clearYpiEnv();
 	process.env.RLM_DEPTH = "1";
@@ -818,10 +833,32 @@ async function run(): Promise<void> {
 	], { encoding: "utf8" });
 	record(
 		missingValidation.status === 1
-			&& String(missingValidation.stderr).includes("did not append"),
+			&& String(missingValidation.stderr).includes("TRANSCRIPT_VALIDATION=FAIL"),
 		"N6e: deterministic validator fails when an admitted transcript is missing",
 		String(missingValidation.stderr || missingValidation.stdout || ""),
 	);
+
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
+	process.env.RLM_REQUIRE_TRANSCRIPTS = "1";
+	process.env.RLM_JSON = "0";
+	process.env.YPI_FAKE_PI_MODE = "fail";
+	ensureEnvironment(runtime, context());
+	try {
+		await invoke();
+		record(false, "N6f: transcript failure preserves a nonzero child exit", "expected throw");
+	} catch (error) {
+		const failure = error as Error & { exitCode?: number };
+		record(
+			failure.exitCode === 42
+				&& failure.message.includes("Child Pi exited with 42")
+				&& failure.message.includes("Transcript proof failed"),
+			"N6f: transcript failure preserves a nonzero child exit",
+			failure.message,
+		);
+	}
 
 	clearYpiEnv();
 	resetLog();
@@ -1138,13 +1175,27 @@ async function run(): Promise<void> {
 	process.env.RLM_DEPTH = "0";
 	process.env.RLM_MAX_DEPTH = "2";
 	process.env.RLM_JSON = "0";
+	process.env.RLM_REQUIRE_TRANSCRIPTS = "1";
 	process.env.RLM_SESSION_DIR = sessionDir;
 	process.env.RLM_TRACE_ID = "../../etc/evil";
+	process.env.YPI_FAKE_PI_MODE = "transcript";
 	ensureEnvironment(runtime, context());
 	await invoke("hostile");
 	const traceLog = readLog();
 	assertContains("N13: hostile trace id is sanitized in the session filename", traceLog, ".._.._etc_evil_d1_c1.jsonl");
 	assertNotContains("N13: hostile trace id cannot traverse out of the session dir", traceLog, "etc/evil");
+	const hostileValidation = spawnSync(process.execPath, [
+		transcriptValidator,
+		"--trace",
+		process.env.PI_TRACE_FILE || "",
+		"--session-dir",
+		process.env.RLM_SESSION_DIR || "",
+	], { encoding: "utf8" });
+	record(
+		hostileValidation.status === 0,
+		"N13: sanitized trace identity also binds the receipt and completion",
+		String(hostileValidation.stderr || hostileValidation.stdout || ""),
+	);
 
 	// N13b: cancellation crosses the adapter boundary and terminates the detached
 	// child process group instead of leaving paid or writable work orphaned.

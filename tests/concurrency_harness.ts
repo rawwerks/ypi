@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import {
+	chmodSync,
 	existsSync,
+	linkSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	readdirSync,
@@ -239,9 +242,102 @@ try {
 	]);
 	delete process.env.RLM_ACTIVE_SLOT_TOKEN;
 
+	const cancelledInherited = await acquireConcurrencySlot();
+	process.env.RLM_ACTIVE_SLOT_TOKEN = cancelledInherited.token;
+	const resumeController = new AbortController();
+	const cancelledSuspension = await suspendInheritedConcurrencySlot({
+		signal: resumeController.signal,
+	});
+	resumeController.abort();
+	await expectReject(
+		"an aborted nested call cannot wait indefinitely while reacquiring its parent slot",
+		130,
+		() => cancelledSuspension.resume(),
+	);
+	record(
+		!concurrencySlotExists(cancelledInherited.token),
+		"an ending cancelled process leaves no synthetic parent slot",
+	);
+	await cancelledInherited.release();
+	delete process.env.RLM_ACTIVE_SLOT_TOKEN;
+
+	process.env.RLM_MAX_CONCURRENT_CALLS = "4";
+	await expectReject(
+		"a shared registry rejects per-process concurrency-cap drift",
+		1,
+		() => acquireConcurrencySlot(),
+	);
+	process.env.RLM_MAX_CONCURRENT_CALLS = "3";
+
 	process.env.RLM_MAX_CONCURRENT_CALLS = "0";
 	await expectReject(
 		"malformed concurrency limits fail closed",
+		1,
+		() => acquireConcurrencySlot(),
+	);
+
+	const permissiveRegistry = path.join(scratch, "permissive-registry");
+	mkdirSync(permissiveRegistry, { mode: 0o755 });
+	process.env.RLM_CONCURRENCY_DIR = permissiveRegistry;
+	process.env.RLM_MAX_CONCURRENT_CALLS = "3";
+	await expectReject(
+		"a shared registry rejects group- or world-accessible directories",
+		1,
+		() => acquireConcurrencySlot(),
+	);
+	chmodSync(permissiveRegistry, 0o700);
+
+	const ownerModeRegistry = path.join(scratch, "owner-mode-registry");
+	process.env.RLM_CONCURRENCY_DIR = ownerModeRegistry;
+	const ownerModeLease = await acquireConcurrencySlot();
+	await ownerModeLease.release();
+	chmodSync(ownerModeRegistry, 0o500);
+	await expectReject(
+		"a shared registry rejects owner-mode drift from 0700",
+		1,
+		() => acquireConcurrencySlot(),
+	);
+	chmodSync(ownerModeRegistry, 0o700);
+
+	const permissiveMetadataRegistry = path.join(scratch, "permissive-metadata");
+	process.env.RLM_CONCURRENCY_DIR = permissiveMetadataRegistry;
+	const privateLease = await acquireConcurrencySlot();
+	await privateLease.release();
+	chmodSync(path.join(permissiveMetadataRegistry, "config.json"), 0o644);
+	await expectReject(
+		"a shared registry rejects group- or world-accessible metadata",
+		1,
+		() => acquireConcurrencySlot(),
+	);
+
+	const ownerModeMetadataRegistry = path.join(scratch, "owner-mode-metadata");
+	process.env.RLM_CONCURRENCY_DIR = ownerModeMetadataRegistry;
+	const ownerModeMetadataLease = await acquireConcurrencySlot();
+	await ownerModeMetadataLease.release();
+	chmodSync(path.join(ownerModeMetadataRegistry, "config.json"), 0o400);
+	await expectReject(
+		"a shared registry rejects metadata mode drift from 0600",
+		1,
+		() => acquireConcurrencySlot(),
+	);
+
+	const hardlinkedMetadataRegistry = path.join(scratch, "hardlinked-metadata");
+	process.env.RLM_CONCURRENCY_DIR = hardlinkedMetadataRegistry;
+	const hardlinkedMetadataLease = await acquireConcurrencySlot();
+	await hardlinkedMetadataLease.release();
+	linkSync(
+		path.join(hardlinkedMetadataRegistry, "config.json"),
+		path.join(scratch, "config-hardlink.json"),
+	);
+	await expectReject(
+		"a shared registry rejects multiply linked metadata",
+		1,
+		() => acquireConcurrencySlot(),
+	);
+
+	process.env.RLM_CONCURRENCY_DIR = "relative-registry";
+	await expectReject(
+		"a shared registry rejects relative paths that drift across child workdirs",
 		1,
 		() => acquireConcurrencySlot(),
 	);

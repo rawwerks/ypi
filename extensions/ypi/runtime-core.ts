@@ -7,7 +7,7 @@ import {
 	assertTimeoutAvailable,
 	assertWithinMaxCalls,
 } from "./guardrails.ts";
-import { currentDepth, maxDepth, nextDepth } from "./env.ts";
+import { currentDepth, maxDepth, nextDepth, safeTraceId } from "./env.ts";
 import {
 	buildChildEnvironment,
 	childExtensionsEnabled,
@@ -24,7 +24,7 @@ import { formatCombinedChildOutput, normalizeChildOutput, type ChildToolActivity
 import { runChildProcess } from "./internal/child-process.ts";
 import { acquireChildResources } from "./internal/child-resources.ts";
 import { normalizeImplementScope } from "./internal/implement-scope.ts";
-import { validateTranscriptAppend } from "./internal/transcript.ts";
+import { finalizeTranscriptProof } from "./internal/transcript.ts";
 import {
 	WorkspaceFinalizationError,
 	type ChildMode,
@@ -134,6 +134,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 	const depth = currentDepth();
 	const childDepth = nextDepth();
 	const limit = maxDepth();
+	const traceId = safeTraceId(process.env.RLM_TRACE_ID || "ypi");
 	if (!Number.isInteger(depth) || depth < 0 || !Number.isInteger(limit) || limit < 0) {
 		throw new RecursiveChildError(`Invalid recursion depth config: RLM_DEPTH=${process.env.RLM_DEPTH ?? ""} RLM_MAX_DEPTH=${process.env.RLM_MAX_DEPTH ?? ""} (must be non-negative integers)`, 1);
 	}
@@ -175,8 +176,25 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			signal: request.signal,
 		});
 	} catch (error) {
-		if (parentSlotSuspension) await parentSlotSuspension.resume();
-		const message = error instanceof Error ? error.message : String(error);
+		let resumeFailure: Error | undefined;
+		if (parentSlotSuspension) {
+			try {
+				await parentSlotSuspension.resume();
+			} catch (cleanupError) {
+				resumeFailure = cleanupError instanceof Error
+					? cleanupError
+					: new Error(String(cleanupError));
+			}
+		}
+		const primaryMessage = error instanceof Error ? error.message : String(error);
+		const message = resumeFailure
+			? `${primaryMessage}\nInherited concurrency-slot resume also failed: ${resumeFailure.message}`
+			: primaryMessage;
+		if (resumeFailure) {
+			trace(
+				`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} ADMISSION_RESUME_FAILED detail=${resumeFailure.message}`,
+			);
+		}
 		const exitCode = (error as Error & { exitCode?: number }).exitCode || 1;
 		throw new RecursiveChildError(message, exitCode);
 	}
@@ -206,15 +224,35 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			scope: implementScope,
 		});
 	} catch (error) {
+		const admissionCleanupErrors: Error[] = [];
 		try {
 			await concurrencySlot.release();
-		} finally {
+		} catch (cleanupError) {
+			admissionCleanupErrors.push(
+				cleanupError instanceof Error
+					? cleanupError
+					: new Error(String(cleanupError)),
+			);
+		}
+		try {
 			await parentSlotSuspension.resume();
+		} catch (cleanupError) {
+			admissionCleanupErrors.push(
+				cleanupError instanceof Error
+					? cleanupError
+					: new Error(String(cleanupError)),
+			);
+		}
+		if (admissionCleanupErrors.length > 0) {
+			trace(
+				`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} ADMISSION_CLEANUP_FAILED call=${callCount} errors=${admissionCleanupErrors.length} detail=${admissionCleanupErrors.map((item) => item.message).join("; ")}`,
+			);
 		}
 		throw error;
 	}
 
 	let workspace: WorkspaceReport | undefined;
+	let terminalError: unknown;
 	try {
 		if (request.signal?.aborted) throw new RecursiveChildError("Child Pi cancelled during admission before work started", 130);
 		const extensionPath = request.extensionPath === null ? "" : request.extensionPath || runtime.extensionPath;
@@ -277,7 +315,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 
 		const timeoutSeconds = timeoutOrThrow();
 		request.onAdmitted?.(callCount);
-		trace(`[${nowTraceTime()}] depth=${depth}→${childDepth} PID=${process.pid} call=${callCount} trace=${process.env.RLM_TRACE_ID || ""} caller=${request.caller} fork=${request.fork === true} mode=${requestedMode} workspace=${resources.workspace.mode}`);
+		trace(`[${nowTraceTime()}] depth=${depth}→${childDepth} PID=${process.pid} call=${callCount} trace=${traceId} caller=${request.caller} fork=${request.fork === true} mode=${requestedMode} workspace=${resources.workspace.mode}`);
 		const started = Date.now();
 		resources.workspace.prepareChildLaunch();
 		const processResult = await runChildProcess({
@@ -321,15 +359,23 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			processResult.jsonCostIncomplete = true;
 		}
 		if (output.cost) appendCostSummary(output.cost);
-			if (processResult.jsonCostIncomplete) {
-				appendIncompleteCostMarker("child ended without a complete final cost boundary");
-			}
-			validateTranscriptAppend(
-				resources.childSession,
-				resources.transcriptBaselineBytes,
-			);
-			workspace = resources.workspace.finalize();
-		trace(`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} COMPLETED exit=${processResult.code} elapsed=${elapsed}s caller=${request.caller} call=${callCount} cost=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.cost ?? "untracked"} tokens=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.tokens ?? "untracked"} cancelled=${processResult.cancelled} timeout=${processResult.timedOut} truncated=${processResult.textTruncated || processResult.jsonEventTruncated} changed_paths=${workspace.changedPaths.length}`);
+		if (processResult.jsonCostIncomplete) {
+			appendIncompleteCostMarker("child ended without a complete final cost boundary");
+		}
+		let transcriptFailure: Error | undefined;
+		try {
+			finalizeTranscriptProof(resources.transcriptProof, {
+				traceId,
+				parentDepth: depth,
+				childDepth,
+				callCount,
+				childExitCode: processResult.code,
+			});
+		} catch (error) {
+			transcriptFailure = error instanceof Error ? error : new Error(String(error));
+		}
+		workspace = resources.workspace.finalize();
+		trace(`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} COMPLETED exit=${processResult.code} elapsed=${elapsed}s caller=${request.caller} call=${callCount} trace=${traceId} cost=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.cost ?? "untracked"} tokens=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.tokens ?? "untracked"} cancelled=${processResult.cancelled} timeout=${processResult.timedOut} truncated=${processResult.textTruncated || processResult.jsonEventTruncated} transcript=${resources.transcriptProof ? transcriptFailure ? "failed" : "verified" : "not-required"} changed_paths=${workspace.changedPaths.length}`);
 		const details: RecursiveChildDetails = {
 			implementation: "canonical",
 			depth,
@@ -357,10 +403,21 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 					: `Child Pi exited with ${processResult.code}`;
 			const childOutput = formatCombinedChildOutput(output);
 			const workspaceOutput = requestedMode === "implement" ? formatWorkspaceReport(workspace) : "";
-			throw new RecursiveChildError(`${reason}${childOutput ? `\n${childOutput}` : ""}${workspaceOutput ? `\n\n${workspaceOutput}` : ""}`, processResult.code, details);
+			const transcriptOutput = transcriptFailure
+				? `\n\nTranscript proof failed: ${transcriptFailure.message}`
+				: "";
+			throw new RecursiveChildError(`${reason}${childOutput ? `\n${childOutput}` : ""}${transcriptOutput}${workspaceOutput ? `\n\n${workspaceOutput}` : ""}`, processResult.code, details);
+		}
+		if (transcriptFailure) {
+			throw new RecursiveChildError(
+				`Required child transcript proof failed: ${transcriptFailure.message}`,
+				1,
+				details,
+			);
 		}
 		return { text: output.text, stderr: output.stderr, warnings: output.warnings, details };
 	} catch (error) {
+		terminalError = error;
 		if (!workspace) {
 			try {
 				workspace = resources.workspace.finalize();
@@ -389,13 +446,31 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		}
 		throw error;
 	} finally {
+		const cleanupErrors = resources.cleanup();
 		try {
-			resources.cleanup();
-		} finally {
-			try {
-				await concurrencySlot.release();
-			} finally {
-				await parentSlotSuspension.resume();
+			await concurrencySlot.release();
+		} catch (error) {
+			cleanupErrors.push(
+				error instanceof Error ? error : new Error(String(error)),
+			);
+		}
+		try {
+			await parentSlotSuspension.resume();
+		} catch (error) {
+			cleanupErrors.push(
+				error instanceof Error ? error : new Error(String(error)),
+			);
+		}
+		if (cleanupErrors.length > 0) {
+			const detail = cleanupErrors.map((error) => error.message).join("; ");
+			trace(
+				`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} CLEANUP_FAILED call=${callCount} errors=${cleanupErrors.length} detail=${detail}`,
+			);
+			if (terminalError === undefined) {
+				throw new RecursiveChildError(
+					`Recursive child cleanup failed: ${detail}`,
+					1,
+				);
 			}
 		}
 	}

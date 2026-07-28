@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -68,25 +68,27 @@ export function safeTraceId(traceId: string): string {
 	return traceId.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
-function ensureCallCounterFile(): void {
-	if (process.env.RLM_CALL_COUNTER_FILE) {
-		return;
-	}
-	process.env.RLM_CALL_COUNTER_FILE = path.join(tmpdir(), `rlm_calls_${process.env.RLM_TRACE_ID}.counter`);
-}
+function ensureRuntimeStatePaths(): void {
+	const missing = [
+		"RLM_CALL_COUNTER_FILE",
+		"RLM_CONCURRENCY_DIR",
+		"PI_TRACE_FILE",
+		"RLM_COST_FILE",
+	].some((variable) => !process.env[variable]);
+	if (!missing) return;
 
-function ensureConcurrencyDirectory(): void {
-	if (process.env.RLM_CONCURRENCY_DIR) return;
-	process.env.RLM_CONCURRENCY_DIR = path.join(
+	const stateRoot = mkdtempSync(path.join(
 		tmpdir(),
-		`rlm_concurrency_${process.env.RLM_TRACE_ID}`,
-	);
+		`ypi_runtime_${process.env.RLM_TRACE_ID}_`,
+	));
+	chmodSync(stateRoot, 0o700);
+	process.env.RLM_CALL_COUNTER_FILE ||= path.join(stateRoot, "calls.counter");
+	process.env.RLM_CONCURRENCY_DIR ||= path.join(stateRoot, "concurrency");
+	process.env.PI_TRACE_FILE ||= path.join(stateRoot, "trace.jsonl");
+	process.env.RLM_COST_FILE ||= path.join(stateRoot, "cost.jsonl");
 }
 
-function ensurePrivateTelemetryFile(variable: "PI_TRACE_FILE" | "RLM_COST_FILE", prefix: string): void {
-	if (!process.env[variable]) {
-		process.env[variable] = path.join(tmpdir(), `${prefix}_${process.env.RLM_TRACE_ID}.jsonl`);
-	}
+function ensurePrivateTelemetryFile(variable: "PI_TRACE_FILE" | "RLM_COST_FILE"): void {
 	const filePath = process.env[variable];
 	if (!filePath) return;
 	try {
@@ -121,10 +123,9 @@ export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext, p
 	// budget at session start; the native tool and shell rlm_query set it at the depth-0 call.
 	process.env.YPI_EXTENSION_ROOT = runtime.root;
 	process.env.YPI_EXTENSION_PATH = runtime.extensionPath;
-	ensureCallCounterFile();
-	ensureConcurrencyDirectory();
-	ensurePrivateTelemetryFile("PI_TRACE_FILE", "rlm_trace");
-	ensurePrivateTelemetryFile("RLM_COST_FILE", "rlm_cost");
+	ensureRuntimeStatePaths();
+	ensurePrivateTelemetryFile("PI_TRACE_FILE");
+	ensurePrivateTelemetryFile("RLM_COST_FILE");
 
 	if (shouldExposeRecursion() && shellHelperEnabled(runtime)) {
 		prependPath(runtime.root);

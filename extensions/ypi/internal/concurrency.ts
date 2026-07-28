@@ -11,16 +11,19 @@ import {
 	statSync,
 } from "node:fs";
 import path from "node:path";
-import { atomicWriteJson } from "./atomic-file.ts";
+import { atomicCreateFile, atomicWriteJson } from "./atomic-file.ts";
 import { processIsAlive } from "./process-liveness.ts";
 
 export const DEFAULT_MAX_CONCURRENT_CALLS = 3;
 
 const LOCK_RETRY_MILLISECONDS = 10;
 const OWNERLESS_LOCK_GRACE_MILLISECONDS = 5_000;
+const PRIVATE_DIRECTORY_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
 const SLOT_TOKEN = /^[0-9a-f]{32}$/;
 const SLOT_DIRECTORY = /^slot-([0-9a-f]{32})$/;
 const STAGED_SLOT = /^\.slot-([0-9a-f]{32})-([1-9][0-9]*)-([0-9a-f]{8})\.tmp$/;
+const REGISTRY_CONFIGURATION = "config.json";
 
 interface ConcurrencySlotRecord {
 	schemaVersion: 1;
@@ -80,6 +83,9 @@ function registryRoot(): string {
 	if (!configured) {
 		throw controlError("RLM_CONCURRENCY_DIR is unavailable; initialize the canonical ypi environment before recursive admission.");
 	}
+	if (!path.isAbsolute(configured)) {
+		throw controlError("RLM_CONCURRENCY_DIR must be absolute so every recursion depth shares one registry.");
+	}
 	return configured;
 }
 
@@ -97,6 +103,16 @@ function assertOwnedDirectory(candidate: string): void {
 	const metadata = lstatSync(candidate);
 	if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
 		throw controlError(`Recursive concurrency path is not an owned directory: ${candidate}`);
+	}
+	const uid = process.getuid?.();
+	if (uid !== undefined && metadata.uid !== uid) {
+		throw controlError(`Recursive concurrency directory is owned by another user: ${candidate}`);
+	}
+	if (
+		process.platform !== "win32"
+		&& (metadata.mode & 0o777) !== PRIVATE_DIRECTORY_MODE
+	) {
+		throw controlError(`Recursive concurrency directory must use mode 0700: ${candidate}`);
 	}
 }
 
@@ -116,6 +132,19 @@ function readRegularJson(candidate: string): unknown {
 	const metadata = lstatSync(candidate);
 	if (!metadata.isFile() || metadata.isSymbolicLink()) {
 		throw controlError(`Recursive concurrency metadata is not a regular file: ${candidate}`);
+	}
+	if (metadata.nlink !== 1) {
+		throw controlError(`Recursive concurrency metadata must have exactly one hard link: ${candidate}`);
+	}
+	const uid = process.getuid?.();
+	if (uid !== undefined && metadata.uid !== uid) {
+		throw controlError(`Recursive concurrency metadata is owned by another user: ${candidate}`);
+	}
+	if (
+		process.platform !== "win32"
+		&& (metadata.mode & 0o777) !== PRIVATE_FILE_MODE
+	) {
+		throw controlError(`Recursive concurrency metadata must use mode 0600: ${candidate}`);
 	}
 	return JSON.parse(readFileSync(candidate, "utf8"));
 }
@@ -157,6 +186,37 @@ function readSlotRecord(root: string, token: string): ConcurrencySlotRecord {
 		readRegularJson(path.join(directory, "lease.json")),
 		token,
 	);
+}
+
+function assertRegistryConfiguration(root: string, maximum: number): void {
+	const candidate = path.join(root, REGISTRY_CONFIGURATION);
+	if (!pathExistsWithoutFollowing(candidate)) {
+		atomicCreateFile(
+			candidate,
+			`${JSON.stringify({
+				schemaVersion: 1,
+				maxConcurrentCalls: maximum,
+			})}\n`,
+			{ mode: 0o600 },
+		);
+		return;
+	}
+	const value = readRegularJson(candidate) as {
+		schemaVersion?: unknown;
+		maxConcurrentCalls?: unknown;
+	};
+	if (
+		value.schemaVersion !== 1
+		|| !Number.isSafeInteger(value.maxConcurrentCalls)
+		|| Number(value.maxConcurrentCalls) < 1
+	) {
+		throw controlError("Recursive concurrency registry configuration is invalid.");
+	}
+	if (value.maxConcurrentCalls !== maximum) {
+		throw controlError(
+			`RLM_MAX_CONCURRENT_CALLS changed within one recursion tree: registry=${value.maxConcurrentCalls} caller=${maximum}.`,
+		);
+	}
 }
 
 function removeSlotDirectory(root: string, token: string): void {
@@ -285,6 +345,7 @@ function scanLiveSlots(root: string): ConcurrencySlotRecord[] {
 	ensureOwnedDirectory(root);
 	const live: ConcurrencySlotRecord[] = [];
 	for (const entry of readdirSync(root, { withFileTypes: true })) {
+		if (entry.name === REGISTRY_CONFIGURATION) continue;
 		const staged = STAGED_SLOT.exec(entry.name);
 		if (staged) {
 			const candidate = path.join(root, entry.name);
@@ -379,6 +440,8 @@ async function acquireSlotWithToken(
 	while (true) {
 		assertWaitAllowed(options, "a concurrency slot");
 		const lease = await withRegistryLock(root, options, () => {
+			ensureOwnedDirectory(root);
+			assertRegistryConfiguration(root, maximum);
 			const live = scanLiveSlots(root);
 			if (live.length >= maximum) return undefined;
 			return createSlot(root, token, childPid);
@@ -454,7 +517,11 @@ export async function suspendInheritedConcurrencySlot(
 					throw controlError("Recursive concurrency suspension accounting underflowed.");
 				}
 				if (nestedDelegations === 0) {
-					await acquireSlotWithToken(inheritedToken, {}, process.pid);
+					await acquireSlotWithToken(
+						inheritedToken,
+						options,
+						process.pid,
+					);
 				}
 			});
 		},

@@ -762,14 +762,24 @@ else
 fi
 
 # G19: Automatic trace captures lifecycle when no explicit path is supplied.
-TRACE_FILE2="$TEST_TMP/rlm_trace_auto-summary.jsonl"
-rm -f "$TRACE_FILE2"
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
     RLM_DEPTH=0 RLM_MAX_DEPTH=3 RLM_TRACE_ID=auto-summary \
     RLM_PROVIDER=test RLM_MODEL=test \
     rlm_query "Private auto trace text"
 )
+mapfile -t AUTO_SUMMARY_TRACES < <(
+    find "$TEST_TMP" -mindepth 2 -maxdepth 2 \
+        -path "$TEST_TMP/ypi_runtime_auto-summary_*/trace.jsonl" \
+        -type f -print
+)
+if [ "${#AUTO_SUMMARY_TRACES[@]}" -eq 1 ]; then
+    TRACE_FILE2="${AUTO_SUMMARY_TRACES[0]}"
+    pass "G19: exactly one randomized lifecycle trace exists"
+else
+    TRACE_FILE2="$TEST_TMP/missing-auto-summary"
+    fail "G19: exactly one randomized lifecycle trace exists" "count=${#AUTO_SUMMARY_TRACES[@]}"
+fi
 assert_file_exists "G19: automatic lifecycle trace exists" "$TRACE_FILE2"
 assert_contains "G19: automatic trace records completion" "COMPLETED" "$(cat "$TRACE_FILE2")"
 assert_not_contains "G19: automatic trace excludes prompt text" "Private auto trace text" "$(cat "$TRACE_FILE2")"
@@ -1355,11 +1365,13 @@ echo "=== rlm_sessions ==="
 # Set up a fake session directory with a session file
 SESSION_DIR="$TEST_TMP/sessions_test"
 mkdir -p "$SESSION_DIR"
+chmod 700 "$SESSION_DIR"
 cat > "$SESSION_DIR/abc123_d0_c1.jsonl" << 'SESSION_DATA'
 {"type":"session","version":3,"id":"test-uuid","timestamp":"2026-01-15T10:00:00Z","cwd":"/tmp"}
 {"type":"message","id":"msg1","parentId":null,"timestamp":"2026-01-15T10:00:01Z","message":{"role":"user","content":"hello world"}}
 {"type":"message","id":"msg2","parentId":"msg1","timestamp":"2026-01-15T10:00:02Z","message":{"role":"assistant","content":"hi there"}}
 SESSION_DATA
+chmod 600 "$SESSION_DIR/abc123_d0_c1.jsonl"
 
 # G48: rlm_sessions lists sessions when RLM_SHARED_SESSIONS is default (1)
 OUTPUT=$(
@@ -1393,6 +1405,7 @@ cat > "$SESSION_DIR/other99_d0_c1.jsonl" << 'SESSION_DATA'
 {"type":"session","version":3,"id":"other-uuid","timestamp":"2026-01-15T11:00:00Z","cwd":"/tmp"}
 {"type":"message","id":"msg1","parentId":null,"timestamp":"2026-01-15T11:00:01Z","message":{"role":"user","content":"different trace"}}
 SESSION_DATA
+chmod 600 "$SESSION_DIR/other99_d0_c1.jsonl"
 
 OUTPUT=$(
     RLM_SESSION_DIR="$SESSION_DIR" \

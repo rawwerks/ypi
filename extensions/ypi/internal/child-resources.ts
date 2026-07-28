@@ -1,10 +1,24 @@
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { safeTraceId, sharedSessionsEnabled } from "../env.ts";
 import { atomicCopyFile } from "./atomic-file.ts";
 import { renderActiveTaskFilesSection } from "./task-files.ts";
-import { requiredTranscriptBaseline, transcriptsRequired } from "./transcript.ts";
+import {
+	closeTranscriptProof,
+	prepareTranscriptProof,
+	type TranscriptProofLease,
+	transcriptsRequired,
+} from "./transcript.ts";
 import { acquireWorkspace, type ChildMode, type WorkspaceLease } from "./workspace-policy.ts";
 
 export interface ChildResourceInput {
@@ -30,11 +44,11 @@ export interface ChildResourceLease {
 	promptFile: string;
 	contextFile?: string;
 	childSession?: string;
-	transcriptBaselineBytes?: number;
+	transcriptProof?: TranscriptProofLease;
 	standaloneSystemPromptFile?: string;
 	isolatedPiRoot?: string;
 	workspace: WorkspaceLease;
-	cleanup(): void;
+	cleanup(): Error[];
 }
 
 function createContextFile(input: ChildResourceInput): string | undefined {
@@ -89,15 +103,18 @@ function childSessionFile(input: ChildResourceInput): string | undefined {
 		}
 		return undefined;
 	}
-	mkdirSync(sessionDir, { recursive: true });
 	if (transcriptsRequired()) {
-		const metadata = lstatSync(sessionDir);
-		if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+		if (!path.isAbsolute(sessionDir)) {
 			throw new Error(
-				`RLM_REQUIRE_TRANSCRIPTS=1 requires a regular non-symlink session directory: ${sessionDir}`,
+				`RLM_REQUIRE_TRANSCRIPTS=1 requires an absolute session directory: ${sessionDir}`,
 			);
 		}
+		// Required mode validates and holds the existing private directory in
+		// prepareTranscriptProof. Creating it recursively here would permit
+		// symlinked ancestors and umask-dependent permissions.
+		return path.join(sessionDir, `${safeTraceId(process.env.RLM_TRACE_ID || "ypi")}_d${input.childDepth}_c${input.callCount}.jsonl`);
 	}
+	mkdirSync(sessionDir, { recursive: true });
 	return path.join(sessionDir, `${safeTraceId(process.env.RLM_TRACE_ID || "ypi")}_d${input.childDepth}_c${input.callCount}.jsonl`);
 }
 
@@ -110,6 +127,56 @@ function copyForkSession(input: ChildResourceInput, childSession: string | undef
 
 function removeArtifact(filePath: string | undefined): void {
 	if (filePath) rmSync(path.dirname(filePath), { recursive: true, force: true });
+}
+
+function cleanupErrors(actions: Array<() => void>): Error[] {
+	const errors: Error[] = [];
+	for (const action of actions) {
+		try {
+			action();
+		} catch (error) {
+			errors.push(error instanceof Error ? error : new Error(String(error)));
+		}
+	}
+	return errors;
+}
+
+function cleanupChildResources(input: {
+	workspace?: WorkspaceLease;
+	transcriptProof?: TranscriptProofLease;
+	promptFile?: string;
+	contextFile?: string;
+	standaloneSystemPromptFile?: string;
+	isolatedPiRoot?: string;
+}): Error[] {
+	return cleanupErrors([
+		() => input.workspace?.cleanup(),
+		() => closeTranscriptProof(input.transcriptProof),
+		() => removeArtifact(input.promptFile),
+		() => removeArtifact(input.contextFile),
+		() => removeArtifact(input.standaloneSystemPromptFile),
+		() => {
+			if (input.isolatedPiRoot) {
+				rmSync(input.isolatedPiRoot, { recursive: true, force: true });
+			}
+		},
+	]);
+}
+
+function errorWithCleanupFailures(
+	primary: unknown,
+	cleanupFailures: Error[],
+): Error & { exitCode?: number } {
+	const primaryError = primary instanceof Error
+		? primary as Error & { exitCode?: number }
+		: new Error(String(primary)) as Error & { exitCode?: number };
+	if (cleanupFailures.length === 0) return primaryError;
+	const combined = new Error(
+		`${primaryError.message}\nResource cleanup also failed: ${cleanupFailures.map((item) => item.message).join("; ")}`,
+		{ cause: primaryError },
+	) as Error & { exitCode?: number };
+	combined.exitCode = primaryError.exitCode;
+	return combined;
 }
 
 function configuredParentAgentDir(): string {
@@ -162,6 +229,7 @@ export function acquireChildResources(input: ChildResourceInput): ChildResourceL
 	let standaloneSystemPromptFile: string | undefined;
 	let isolatedPiRoot: string | undefined;
 	let workspace: WorkspaceLease | undefined;
+	let transcriptProof: TranscriptProofLease | undefined;
 	try {
 		promptFile = createPromptFile(input.prompt);
 		contextFile = createContextFile(input);
@@ -174,9 +242,18 @@ export function acquireChildResources(input: ChildResourceInput): ChildResourceL
 			chmodSync(isolatedAgentDir, 0o700);
 			projectSelectedProviderAuth(isolatedAgentDir, input.selectedProvider);
 		}
-			const childSession = childSessionFile(input);
+		const childSession = childSessionFile(input);
+		if (transcriptsRequired()) {
+			const forkSource = input.fork
+				? input.parentSessionFile || process.env.RLM_SESSION_FILE
+				: undefined;
+			if (input.fork && !forkSource) {
+				throw new Error("Required fork transcript has no parent session source.");
+			}
+			transcriptProof = prepareTranscriptProof({ childSession, forkSource });
+		} else {
 			copyForkSession(input, childSession);
-			const transcriptBaselineBytes = requiredTranscriptBaseline(childSession);
+		}
 		if (input.setupDeadlineMilliseconds !== undefined && Date.now() >= input.setupDeadlineMilliseconds) {
 			const error = new Error("RLM_TIMEOUT expired during recursive resource setup") as Error & { exitCode: number };
 			error.exitCode = 124;
@@ -192,25 +269,31 @@ export function acquireChildResources(input: ChildResourceInput): ChildResourceL
 		return {
 			promptFile,
 			contextFile,
-				childSession,
-				transcriptBaselineBytes,
+			childSession,
+			transcriptProof,
 			standaloneSystemPromptFile,
 			isolatedPiRoot,
 			workspace,
 			cleanup() {
-				workspace?.cleanup();
-				removeArtifact(promptFile);
-				removeArtifact(contextFile);
-				removeArtifact(standaloneSystemPromptFile);
-				if (isolatedPiRoot) rmSync(isolatedPiRoot, { recursive: true, force: true });
+				return cleanupChildResources({
+					workspace,
+					transcriptProof,
+					promptFile,
+					contextFile,
+					standaloneSystemPromptFile,
+					isolatedPiRoot,
+				});
 			},
 		};
 	} catch (error) {
-		workspace?.cleanup();
-		removeArtifact(promptFile);
-		removeArtifact(contextFile);
-		removeArtifact(standaloneSystemPromptFile);
-		if (isolatedPiRoot) rmSync(isolatedPiRoot, { recursive: true, force: true });
-		throw error;
+		const failures = cleanupChildResources({
+			workspace,
+			transcriptProof,
+			promptFile,
+			contextFile,
+			standaloneSystemPromptFile,
+			isolatedPiRoot,
+		});
+		throw errorWithCleanupFailures(error, failures);
 	}
 }

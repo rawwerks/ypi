@@ -61,10 +61,12 @@ only after a verified ref or a proven pre-admission state.
 Native requests may execute in parallel. The shared runtime admits three active
 child generations and queues additional calls. Waiting parents cooperatively
 yield their inherited slot, so a full depth-1 batch cannot deadlock depth-2 or
-depth-3 work. Implement requests carry explicit path scopes; the writer
-registry refuses component-overlap. The extension blocks root mutators and
-unknown tools from a mixed implementer batch. The root waits for the full batch
-before mutating or integrating.
+depth-3 work. The shared registry persists the configured cap and rejects
+per-process drift within one tree; cancellation and the tree deadline remain
+binding while a yielded parent reacquires its slot. Implement requests carry
+explicit path scopes; the writer registry refuses component-overlap. The
+extension blocks root mutators and unknown tools from a mixed implementer
+batch. The root waits for the full batch before mutating or integrating.
 
 ### Shell Adapter
 
@@ -117,12 +119,24 @@ child session with the parent snapshot. A non-fork child may still have its own
 session file but does not inherit parent events.
 
 `RLM_REQUIRE_TRANSCRIPTS=1` turns auditability into a proof gate. Admission
-fails before spawn when session sharing or an explicit session directory is
-unavailable. After the child exits, the runtime requires the child session to
-be a regular non-symlink file that grew beyond its pre-launch size with a
-complete valid JSONL object. `scripts/validate-recursion-transcripts.ts` maps
-every admitted trace transition to its deterministic child-session filename
-for offline verification.
+fails before spawn unless session sharing uses an existing absolute
+current-user-owned `0700` directory with no symlinked ancestry. The runtime
+atomically creates each deterministic child file as `0600`, holds its
+descriptor across the child lifetime, and rejects stale targets. Fork mode
+copies a strict JSONL parent prefix before publication.
+
+After the child becomes terminal, the runtime proves that the pathname still
+names the leased, singly-linked inode; the directory identity and permissions
+are unchanged; the secured prefix digest is unchanged; and the appended bytes
+are strict UTF-8, newline-terminated JSONL containing at least one Pi message
+event. It then atomically creates a per-call receipt beside the transcript.
+Transcript failure is secondary to an existing nonzero child outcome, so it
+does not replace exit `42`, timeout `124`, or cancellation `130`.
+`scripts/validate-recursion-transcripts.ts` requires one matching start,
+completion, transcript, and receipt for every call and recomputes the current
+digests. `rlm_sessions` is a direct-child, no-symlink presentation tool; it is
+limited to current-user-owned `0600` singly-linked files in a `0700` directory.
+It is not an evidence validator.
 
 ## Implement Mode
 

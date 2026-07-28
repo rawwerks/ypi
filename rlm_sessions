@@ -1,219 +1,326 @@
-#!/usr/bin/env bash
-# rlm_sessions — List and read Pi session logs for the current recursive tree.
-#
-# Sub-agents can use this to see what other agents have done — shared memory
-# through session transcripts.
-#
-# Environment:
-#   RLM_SESSION_DIR    — path to Pi session directory (set by ypi/rlm_query)
-#   RLM_TRACE_ID       — current trace ID (filters to this recursive tree)
-#   RLM_SHARED_SESSIONS — set to "0" to disable (exit silently). Default: 1.
-#
-# Usage:
-#   rlm_sessions                     # List all sessions for this project
-#   rlm_sessions --trace             # List only sessions from current trace
-#   rlm_sessions read <file>         # Read a session as clean transcript
-#   rlm_sessions read --last         # Read the most recent session
-#   rlm_sessions grep <pattern>      # Search across all sessions
-#   rlm_sessions grep -t <pattern>   # Search only current trace's sessions
+#!/usr/bin/env python3
+"""List and render direct-child Pi JSONL sessions without following links."""
 
-set -euo pipefail
+from __future__ import annotations
 
-# Gate: disabled when RLM_SHARED_SESSIONS=0
-if [ "${RLM_SHARED_SESSIONS:-1}" = "0" ]; then
-    echo "Session sharing disabled (RLM_SHARED_SESSIONS=0)." >&2
-    exit 0
-fi
+import json
+import os
+import re
+import stat
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterator, NoReturn
 
-SESSION_DIR="${RLM_SESSION_DIR:-}"
-TRACE_ID="${RLM_TRACE_ID:-}"
 
-if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
-    echo "No session directory found." >&2
-    echo "  RLM_SESSION_DIR=${SESSION_DIR:-<not set>}" >&2
-    exit 1
-fi
+def fail(message: str, code: int = 1) -> NoReturn:
+    print(message, file=sys.stderr)
+    raise SystemExit(code)
 
-# ─── Helper: render a session JSONL to readable transcript ────────────────
 
-render_session() {
-    local file="$1"
-    python3 -c "
-import json, sys
+if os.environ.get("RLM_SHARED_SESSIONS", "1") == "0":
+    print("Session sharing disabled (RLM_SHARED_SESSIONS=0).", file=sys.stderr)
+    raise SystemExit(0)
 
-with open('$file') as f:
-    for line in f:
-        r = json.loads(line)
+raw_session_dir = os.environ.get("RLM_SESSION_DIR", "")
+if not raw_session_dir:
+    fail("No session directory found.\n  RLM_SESSION_DIR=<not set>")
 
-        # Session metadata
-        if r.get('type') == 'session':
-            ts = r.get('timestamp', '?')
-            cwd = r.get('cwd', '?')
-            print(f'=== Session: {ts} ===')
-            print(f'    cwd: {cwd}')
+session_dir = Path(raw_session_dir).absolute()
+try:
+    directory_lstat = session_dir.lstat()
+    resolved = session_dir.resolve(strict=True)
+except OSError as error:
+    fail(f"No session directory found: {error}")
+if not stat.S_ISDIR(directory_lstat.st_mode) or resolved != session_dir:
+    fail(f"Session directory must be a regular non-symlink path: {session_dir}")
+if hasattr(os, "getuid") and directory_lstat.st_uid != os.getuid():
+    fail(f"Session directory must be owned by the current uid: {session_dir}")
+if os.name != "nt" and stat.S_IMODE(directory_lstat.st_mode) != 0o700:
+    fail(f"Session directory must have mode 0700: {session_dir}")
+
+directory_flags = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
+try:
+    directory_fd = os.open(session_dir, directory_flags)
+except OSError as error:
+    fail(f"Cannot open session directory: {error}")
+directory_stat = os.fstat(directory_fd)
+if (
+    not stat.S_ISDIR(directory_stat.st_mode)
+    or directory_stat.st_dev != directory_lstat.st_dev
+    or directory_stat.st_ino != directory_lstat.st_ino
+):
+    os.close(directory_fd)
+    fail(f"Session directory identity changed during validation: {session_dir}")
+
+trace_id = re.sub(
+    r"[^a-zA-Z0-9._-]",
+    "_",
+    os.environ.get("RLM_TRACE_ID", ""),
+)
+
+
+@dataclass(frozen=True)
+class SessionEntry:
+    name: str
+    size: int
+    mtime_ns: int
+
+
+def session_entries(trace_only: bool = False) -> list[SessionEntry]:
+    entries: list[SessionEntry] = []
+    with os.scandir(directory_fd) as iterator:
+        for entry in iterator:
+            if not entry.name.endswith(".jsonl"):
+                continue
+            if trace_only and trace_id and not entry.name.startswith(trace_id):
+                continue
+            metadata = entry.stat(follow_symlinks=False)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or (
+                    hasattr(os, "getuid")
+                    and metadata.st_uid != os.getuid()
+                )
+                or (
+                    os.name != "nt"
+                    and stat.S_IMODE(metadata.st_mode) != 0o600
+                )
+            ):
+                fail(
+                    "Session entries must be private, singly-linked regular "
+                    f"files: {json.dumps(entry.name)}"
+                )
+            entries.append(
+                SessionEntry(
+                    name=entry.name,
+                    size=metadata.st_size,
+                    mtime_ns=metadata.st_mtime_ns,
+                )
+            )
+    return sorted(entries, key=lambda item: item.name)
+
+
+def checked_name(value: str) -> str:
+    if (
+        not value
+        or value != os.path.basename(value)
+        or os.sep in value
+        or (os.altsep is not None and os.altsep in value)
+        or not value.endswith(".jsonl")
+    ):
+        fail("Session reads accept only a direct-child .jsonl filename.")
+    return value
+
+
+def open_session(name: str):
+    checked_name(name)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(name, flags, dir_fd=directory_fd)
+    except OSError as error:
+        fail(f"Cannot open session {json.dumps(name)}: {error}")
+    try:
+        descriptor_stat = os.fstat(descriptor)
+        path_stat = os.stat(
+            name,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISREG(descriptor_stat.st_mode)
+            or not stat.S_ISREG(path_stat.st_mode)
+            or descriptor_stat.st_nlink != 1
+            or descriptor_stat.st_dev != path_stat.st_dev
+            or descriptor_stat.st_ino != path_stat.st_ino
+            or (
+                hasattr(os, "getuid")
+                and descriptor_stat.st_uid != os.getuid()
+            )
+            or (
+                os.name != "nt"
+                and stat.S_IMODE(descriptor_stat.st_mode) != 0o600
+            )
+        ):
+            fail(
+                "Session is not a private, singly-linked direct-child "
+                f"regular file: {json.dumps(name)}"
+            )
+        return os.fdopen(descriptor, "r", encoding="utf-8", errors="strict")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def records(name: str) -> Iterator[dict[str, Any]]:
+    with open_session(name) as handle:
+        line_number = 0
+        while True:
+            try:
+                line = handle.readline()
+            except UnicodeDecodeError as error:
+                fail(
+                    f"Invalid session UTF-8 in {json.dumps(name)} "
+                    f"near line {line_number + 1}: {error}"
+                )
+            if not line:
+                break
+            line_number += 1
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as error:
+                fail(
+                    f"Invalid session JSONL in {json.dumps(name)} "
+                    f"at line {line_number}: {error}"
+                )
+            if not isinstance(value, dict):
+                fail(
+                    f"Invalid non-object session event in {json.dumps(name)} "
+                    f"at line {line_number}"
+                )
+            yield value
+
+
+def text_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content)
+    return "".join(
+        str(part.get("text", ""))
+        for part in content
+        if isinstance(part, dict)
+    )
+
+
+def render(name: str) -> None:
+    for record in records(name):
+        if record.get("type") == "session":
+            print(f"=== Session: {record.get('timestamp', '?')} ===")
+            print(f"    cwd: {record.get('cwd', '?')}")
             print()
             continue
-
-        if r.get('type') != 'message':
+        if record.get("type") != "message":
             continue
-
-        msg = r['message']
-        role = msg.get('role', '?')
-        content = msg.get('content', '')
-
-        if role == 'toolResult':
-            tool = msg.get('toolName', '?')
-            if isinstance(content, list):
-                text = ''.join(p.get('text', '') for p in content if isinstance(p, dict))
-            else:
-                text = str(content)
-            # Truncate long tool results
+        message = record.get("message")
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role", "?"))
+        content = message.get("content", "")
+        if role == "toolResult":
+            tool = message.get("toolName", "?")
+            text = text_content(content)
             if len(text) > 500:
-                text = text[:500] + '... [truncated]'
-            print(f'[{tool} result]: {text}')
-            print()
+                text = f"{text[:500]}... [truncated]"
+            print(f"[{tool} result]: {text}\n")
             continue
-
         if isinstance(content, str):
-            print(f'{role}: {content}')
-            print()
+            print(f"{role}: {content}\n")
             continue
-
-        # content is a list of parts
+        if not isinstance(content, list):
+            continue
         for part in content:
             if not isinstance(part, dict):
                 continue
-            ptype = part.get('type', '')
-            if ptype == 'text':
-                text = part.get('text', '')
-                if len(text) > 1000:
-                    text = text[:1000] + '... [truncated]'
-                print(f'{role}: {text}')
-                print()
-            elif ptype == 'toolCall':
-                name = part.get('name', '?')
-                args = part.get('arguments', {})
-                if name == 'bash':
-                    cmd = args.get('command', '')
-                    if len(cmd) > 200:
-                        cmd = cmd[:200] + '...'
-                    print(f'{role}: [bash] {cmd}')
-                else:
-                    argstr = json.dumps(args)
-                    if len(argstr) > 200:
-                        argstr = argstr[:200] + '...'
-                    print(f'{role}: [{name}] {argstr}')
-                print()
-            elif ptype == 'thinking':
-                # Skip thinking blocks — they're internal
-                pass
-" 2>/dev/null
-}
-
-# ─── Commands ─────────────────────────────────────────────────────────────
-
-case "${1:-list}" in
-    list|--trace)
-        FILTER=""
-        if [ "${1:-}" = "--trace" ] && [ -n "$TRACE_ID" ]; then
-            FILTER="$TRACE_ID"
-            echo "Sessions for trace $TRACE_ID:"
-        else
-            echo "All sessions in $SESSION_DIR:"
-        fi
-        echo ""
-
-        for f in "$SESSION_DIR"/*.jsonl; do
-            [ -f "$f" ] || continue
-            base=$(basename "$f")
-
-            # Filter by trace if requested
-            if [ -n "$FILTER" ] && [[ "$base" != "${FILTER}"* ]]; then
+            part_type = part.get("type", "")
+            if part_type == "thinking":
                 continue
-            fi
+            if part_type == "text":
+                text = str(part.get("text", ""))
+                if len(text) > 1000:
+                    text = f"{text[:1000]}... [truncated]"
+                print(f"{role}: {text}\n")
+            elif part_type == "toolCall":
+                name_value = part.get("name", "?")
+                arguments = part.get("arguments", {})
+                rendered = json.dumps(arguments, ensure_ascii=True)
+                if len(rendered) > 200:
+                    rendered = f"{rendered[:200]}..."
+                print(f"{role}: [{name_value}] {rendered}\n")
 
-            # Get basic info
-            size=$(wc -c < "$f")
-            msgs=$(grep -c '"type":"message"' "$f" 2>/dev/null || echo 0)
-            ts=$(python3 -c "
-import json
-with open('$f') as fh:
-    r = json.loads(fh.readline())
-    print(r.get('timestamp', '?')[:19])
-" 2>/dev/null || echo "?")
 
-            printf "  %-50s %6s bytes  %3s msgs  %s\n" "$base" "$size" "$msgs" "$ts"
-        done
-        ;;
+def list_sessions(trace_only: bool) -> None:
+    if trace_only and trace_id:
+        print(f"Sessions for trace {trace_id}:")
+    else:
+        print(f"All sessions in {session_dir}:")
+    print()
+    for entry in session_entries(trace_only):
+        messages = 0
+        timestamp = "?"
+        for index, record in enumerate(records(entry.name)):
+            if index == 0:
+                timestamp = str(record.get("timestamp", "?"))[:19]
+            if record.get("type") == "message":
+                messages += 1
+        display_name = json.dumps(entry.name, ensure_ascii=True)
+        print(
+            f"  {display_name:<52} {entry.size:6d} bytes  "
+            f"{messages:3d} msgs  {timestamp}"
+        )
 
-    read)
-        shift
-        if [ "${1:-}" = "--last" ]; then
-            FILE=$(ls -t "$SESSION_DIR"/*.jsonl 2>/dev/null | head -1)
-            if [ -z "$FILE" ]; then
-                echo "No sessions found." >&2
-                exit 1
-            fi
-        else
-            FILE="${1:?Usage: rlm_sessions read <file|--last>}"
-            # Allow bare filename (without path)
-            if [ ! -f "$FILE" ] && [ -f "$SESSION_DIR/$FILE" ]; then
-                FILE="$SESSION_DIR/$FILE"
-            fi
-        fi
-        render_session "$FILE"
-        ;;
 
-    grep)
-        shift
-        TRACE_ONLY=false
-        if [ "${1:-}" = "-t" ]; then
-            TRACE_ONLY=true
-            shift
-        fi
-        PATTERN="${1:?Usage: rlm_sessions grep [-t] <pattern>}"
-
-        for f in "$SESSION_DIR"/*.jsonl; do
-            [ -f "$f" ] || continue
-            base=$(basename "$f")
-
-            if [ "$TRACE_ONLY" = true ] && [ -n "$TRACE_ID" ]; then
-                [[ "$base" == "${TRACE_ID}"* ]] || continue
-            fi
-
-            # Search in message text content
-            matches=$(python3 -c "
-import json, re
-pattern = re.compile(r'$PATTERN', re.IGNORECASE)
-with open('$f') as fh:
-    for line in fh:
-        r = json.loads(line)
-        if r.get('type') != 'message': continue
-        msg = r['message']
-        content = msg.get('content', '')
-        if isinstance(content, str):
-            if pattern.search(content):
-                role = msg.get('role', '?')
-                match = content[:150]
-                print(f'{role}: {match}')
-        elif isinstance(content, list):
+def grep_sessions(pattern_text: str, trace_only: bool) -> None:
+    try:
+        pattern = re.compile(pattern_text, re.IGNORECASE)
+    except re.error as error:
+        fail(f"Invalid regular expression: {error}", 2)
+    for entry in session_entries(trace_only):
+        matches: list[str] = []
+        for record in records(entry.name):
+            if record.get("type") != "message":
+                continue
+            message = record.get("message")
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role", "?"))
+            content = message.get("content", "")
+            if isinstance(content, str):
+                if pattern.search(content):
+                    matches.append(f"{role}: {content[:150]}")
+                continue
+            if not isinstance(content, list):
+                continue
             for part in content:
-                text = part.get('text', '') if isinstance(part, dict) else ''
-                if text and pattern.search(text):
-                    role = msg.get('role', '?')
-                    print(f'{role}: {text[:150]}')
-" 2>/dev/null)
+                text = part.get("text", "") if isinstance(part, dict) else ""
+                if isinstance(text, str) and text and pattern.search(text):
+                    matches.append(f"{role}: {text[:150]}")
+        if matches:
+            print(f"--- {json.dumps(entry.name, ensure_ascii=True)} ---")
+            print("\n".join(matches))
+            print()
 
-            if [ -n "$matches" ]; then
-                echo "--- $base ---"
-                echo "$matches"
-                echo ""
-            fi
-        done
-        ;;
 
-    *)
-        echo "Usage: rlm_sessions [list|--trace|read <file>|grep <pattern>]" >&2
-        exit 1
-        ;;
-esac
+arguments = sys.argv[1:]
+command = arguments.pop(0) if arguments else "list"
+if command in ("list", "--trace"):
+    if arguments:
+        fail("Usage: rlm_sessions [list|--trace|read <file>|grep [-t] <pattern>]", 2)
+    list_sessions(command == "--trace")
+elif command == "read":
+    if len(arguments) != 1:
+        fail("Usage: rlm_sessions read <file|--last>", 2)
+    if arguments[0] == "--last":
+        entries = session_entries()
+        if not entries:
+            fail("No sessions found.")
+        selected = max(entries, key=lambda item: item.mtime_ns)
+        render(selected.name)
+    else:
+        render(checked_name(arguments[0]))
+elif command == "grep":
+    trace_only = bool(arguments and arguments[0] == "-t")
+    if trace_only:
+        arguments.pop(0)
+    if len(arguments) != 1:
+        fail("Usage: rlm_sessions grep [-t] <pattern>", 2)
+    grep_sessions(arguments[0], trace_only)
+else:
+    fail("Usage: rlm_sessions [list|--trace|read <file>|grep [-t] <pattern>]", 2)
+
+os.close(directory_fd)
