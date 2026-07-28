@@ -16,10 +16,15 @@ import {
 	resolveChildRoute,
 	retainSelectedProviderEnvironment,
 } from "./internal/child-config.ts";
+import {
+	acquireConcurrencySlot,
+	suspendInheritedConcurrencySlot,
+} from "./internal/concurrency.ts";
 import { formatCombinedChildOutput, normalizeChildOutput, type ChildToolActivity } from "./internal/child-output.ts";
 import { runChildProcess } from "./internal/child-process.ts";
 import { acquireChildResources } from "./internal/child-resources.ts";
 import { normalizeImplementScope } from "./internal/implement-scope.ts";
+import { validateTranscriptAppend } from "./internal/transcript.ts";
 import {
 	WorkspaceFinalizationError,
 	type ChildMode,
@@ -155,29 +160,59 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 	const callCount = await allocateCallCount(counterDeadlineMilliseconds);
 	assertWithinMaxCalls(callCount);
 	const setupRemainingSeconds = timeoutOrThrow();
+	const setupDeadlineMilliseconds = setupRemainingSeconds === undefined
+		? undefined
+		: Date.now() + setupRemainingSeconds * 1000;
+	let parentSlotSuspension;
+	let concurrencySlot;
+	try {
+		parentSlotSuspension = await suspendInheritedConcurrencySlot({
+			deadlineMilliseconds: setupDeadlineMilliseconds,
+			signal: request.signal,
+		});
+		concurrencySlot = await acquireConcurrencySlot({
+			deadlineMilliseconds: setupDeadlineMilliseconds,
+			signal: request.signal,
+		});
+	} catch (error) {
+		if (parentSlotSuspension) await parentSlotSuspension.resume();
+		const message = error instanceof Error ? error.message : String(error);
+		const exitCode = (error as Error & { exitCode?: number }).exitCode || 1;
+		throw new RecursiveChildError(message, exitCode);
+	}
 	// Implementer confinement is enforced by the exact canonical extension and
 	// cannot be disabled by a review-oriented child-extension override.
 	const extensionsEnabled = requestedMode === "implement" ? true : childExtensionsEnabled(childDepth);
 	const fullResourceIsolation = !extensionsEnabled && process.env.RLM_CHILD_DISCOVERY === "0";
 	const { provider, model, thinkingLevel } = resolveChildRoute(request.parent, childDepth);
-	const resources = acquireChildResources({
-		prompt: request.prompt,
-		context: request.context,
-		contextPath: request.contextPath,
-		fork: request.fork,
-		cwd: request.parent.cwd,
-		parentSessionFile: request.parent.sessionFile,
-		parentSessionDir: request.parent.sessionDir,
-		childDepth,
-		callCount,
-		systemPromptPath: runtime.systemPromptPath,
-		rootPromptPath: process.env.RLM_ROOT_PROMPT_FILE,
-		setupDeadlineMilliseconds: setupRemainingSeconds === undefined ? undefined : Date.now() + setupRemainingSeconds * 1000,
-		fullResourceIsolation,
-		selectedProvider: provider,
-		mode: requestedMode,
-		scope: implementScope,
-	});
+	let resources;
+	try {
+		resources = acquireChildResources({
+			prompt: request.prompt,
+			context: request.context,
+			contextPath: request.contextPath,
+			fork: request.fork,
+			cwd: request.parent.cwd,
+			parentSessionFile: request.parent.sessionFile,
+			parentSessionDir: request.parent.sessionDir,
+			childDepth,
+			callCount,
+			systemPromptPath: runtime.systemPromptPath,
+			rootPromptPath: process.env.RLM_ROOT_PROMPT_FILE,
+			setupDeadlineMilliseconds,
+			fullResourceIsolation,
+			selectedProvider: provider,
+			mode: requestedMode,
+			scope: implementScope,
+		});
+	} catch (error) {
+		try {
+			await concurrencySlot.release();
+		} finally {
+			await parentSlotSuspension.resume();
+		}
+		throw error;
+	}
 
 	let workspace: WorkspaceReport | undefined;
 	try {
@@ -190,6 +225,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			RLM_DEPTH: String(childDepth),
 			RLM_MAX_DEPTH: String(limit),
 			RLM_CALL_COUNT: String(callCount),
+			RLM_ACTIVE_SLOT_TOKEN: concurrencySlot.token,
 			RLM_PROVIDER: provider,
 			RLM_MODEL: model,
 			RLM_THINKING_LEVEL: thinkingLevel,
@@ -258,6 +294,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			onSpawn(pid) {
 				try {
 					resources.workspace.noteChildPid(pid);
+					concurrencySlot.noteChildPid(pid);
 				} catch (error) {
 					try {
 						if (process.platform === "win32") process.kill(pid, "SIGKILL");
@@ -270,14 +307,13 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 				request.onChildSpawn?.(pid);
 			},
 			quiesceProcessGroup: resources.workspace.quiesceProcessGroup,
-			...(resources.workspace.childLaunchGate
-				? {
-					launchGate: {
-						launcherPath: path.join(runtime.root, "scripts", "launch-implementer-child.ts"),
-						...resources.workspace.childLaunchGate,
-					},
-				}
-				: {}),
+			launchGate: {
+				launcherPath: path.join(runtime.root, "scripts", "launch-recursive-child.ts"),
+				...(resources.workspace.childLaunchGate || {
+					pidFile: concurrencySlot.pidFile,
+					readyFile: concurrencySlot.readyFile,
+				}),
+			},
 		});
 		const elapsed = Math.max(0, Math.round((Date.now() - started) / 1000));
 		const output = normalizeChildOutput(processResult);
@@ -285,10 +321,14 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			processResult.jsonCostIncomplete = true;
 		}
 		if (output.cost) appendCostSummary(output.cost);
-		if (processResult.jsonCostIncomplete) {
-			appendIncompleteCostMarker("child ended without a complete final cost boundary");
-		}
-		workspace = resources.workspace.finalize();
+			if (processResult.jsonCostIncomplete) {
+				appendIncompleteCostMarker("child ended without a complete final cost boundary");
+			}
+			validateTranscriptAppend(
+				resources.childSession,
+				resources.transcriptBaselineBytes,
+			);
+			workspace = resources.workspace.finalize();
 		trace(`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} COMPLETED exit=${processResult.code} elapsed=${elapsed}s caller=${request.caller} call=${callCount} cost=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.cost ?? "untracked"} tokens=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.tokens ?? "untracked"} cancelled=${processResult.cancelled} timeout=${processResult.timedOut} truncated=${processResult.textTruncated || processResult.jsonEventTruncated} changed_paths=${workspace.changedPaths.length}`);
 		const details: RecursiveChildDetails = {
 			implementation: "canonical",
@@ -349,7 +389,15 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		}
 		throw error;
 	} finally {
-		resources.cleanup();
+		try {
+			resources.cleanup();
+		} finally {
+			try {
+				await concurrencySlot.release();
+			} finally {
+				await parentSlotSuspension.resume();
+			}
+		}
 	}
 }
 

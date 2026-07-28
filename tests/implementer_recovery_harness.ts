@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { atomicWriteFile } from "../extensions/ypi/internal/atomic-file.ts";
+import { atomicCopyFile, atomicWriteFile } from "../extensions/ypi/internal/atomic-file.ts";
 import {
 	implementerRegistryHasState,
 	implementerRegistryPaths,
@@ -201,6 +201,24 @@ console.log("\n=== Implementer recovery module and CLI harness ===");
 		(statSync(restrictiveTarget).mode & 0o777) === 0o600,
 		"atomic writer enforces the requested mode under a restrictive umask",
 		`mode=${(statSync(restrictiveTarget).mode & 0o777).toString(8)}`,
+	);
+	const copySource = path.join(root, "copy-source");
+	const copyTarget = path.join(root, "copy-target");
+	const symlinkDestination = path.join(root, "symlink-destination");
+	writeFileSync(copySource, "session snapshot\n");
+	writeFileSync(symlinkDestination, "preserve\n");
+	symlinkSync(symlinkDestination, copyTarget);
+	const copyUmask = process.umask(0o777);
+	try {
+		atomicCopyFile(copySource, copyTarget, { mode: 0o600 });
+	} finally {
+		process.umask(copyUmask);
+	}
+	record(
+		readFileSync(copyTarget, "utf8") === "session snapshot\n"
+			&& readFileSync(symlinkDestination, "utf8") === "preserve\n"
+			&& (statSync(copyTarget).mode & 0o777) === 0o600,
+		"atomic copy replaces a target symlink without following it and enforces mode",
 	);
 	rmSync(root, { recursive: true, force: true });
 }

@@ -75,7 +75,8 @@ export RLM_SYSTEM_PROMPT="$SCRIPT_DIR/SYSTEM_PROMPT.md"
 
 # Guardrails — preserve explicit values and seed bounded depth/call defaults.
 [ -n "${RLM_TIMEOUT:-}" ]        && export RLM_TIMEOUT
-export RLM_MAX_CALLS="${RLM_MAX_CALLS:-128}"
+export RLM_MAX_CALLS="${RLM_MAX_CALLS:-65536}"
+export RLM_MAX_CONCURRENT_CALLS="${RLM_MAX_CONCURRENT_CALLS:-3}"
 [ -n "${RLM_CHILD_MODEL:-}" ]    && export RLM_CHILD_MODEL
 [ -n "${RLM_CHILD_PROVIDER:-}" ] && export RLM_CHILD_PROVIDER
 [ -n "${RLM_CHILD_THINKING_LEVEL:-}" ] && export RLM_CHILD_THINKING_LEVEL
@@ -88,6 +89,7 @@ export RLM_EXTENSIONS="${RLM_EXTENSIONS:-1}"
 [ -n "${RLM_CHILD_DISCOVERY:-}" ]  && export RLM_CHILD_DISCOVERY
 unset RLM_BUDGET
 export RLM_JSON="${RLM_JSON:-1}"
+export RLM_REQUIRE_TRANSCRIPTS="${RLM_REQUIRE_TRANSCRIPTS:-0}"
 export RLM_SHARED_SESSIONS="${RLM_SHARED_SESSIONS:-1}"
 
 # Session tree tracing — generate a trace ID that links all recursive sessions

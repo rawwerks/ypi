@@ -122,8 +122,8 @@ admits it only when all of these are true:
 - the current directory belongs to an existing, ordinary, clean Git checkout;
 - no Git operation is in progress and sparse checkout is disabled;
 - a non-empty repository-relative path scope is declared;
-- the scope does not overlap any live implementer lease and the three-lease
-  concurrency cap has room;
+- the scope does not overlap any live implementer lease; the tree-wide
+  three-generation queue has admitted the child;
 - the canonical extension and write-confinement hooks are active.
 
 Each implementer edits a detached ephemeral Git worktree at the shared baseline
@@ -213,10 +213,12 @@ against the source and must contain exactly the public variables.
 | `RLM_COST_FILE` | private temporary file | Append-only cost and token telemetry destination. |
 | `RLM_EXTENSIONS` | `1` | Base extension policy propagated to children; it does not unload the wrapper's root extension. |
 | `RLM_JSON` | `1` | Set to `0` for plain child output without structured cost parsing. |
-| `RLM_MAX_CALLS` | `128` | Maximum admitted child calls in one tree. |
+| `RLM_MAX_CALLS` | `65536` | Emergency upper bound on admitted child calls in one tree; explicit smaller proof envelopes remain supported. |
+| `RLM_MAX_CONCURRENT_CALLS` | `3` | Maximum active recursive child generations; excess calls wait without consuming the total-call allowance again. |
 | `RLM_MAX_DEPTH` | `3` | Maximum recursion depth. |
 | `RLM_MODEL` | active Pi model | Root route and inherited child model. |
 | `RLM_PROVIDER` | active Pi provider | Root route and inherited child provider. |
+| `RLM_REQUIRE_TRANSCRIPTS` | `0` | Set to `1` to require an explicit session directory and a new valid JSONL event from every spawned child. |
 | `RLM_SESSION_DIR` | active Pi session directory | Directory for shared child sessions. |
 | `RLM_SHARED_SESSIONS` | `1` | Set to `0` to prevent child session sharing. |
 | `RLM_STDIN` | unset | Marker forcing an explicit stdin read, even when stdin appears interactive. |

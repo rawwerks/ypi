@@ -239,7 +239,8 @@ async function run(): Promise<void> {
 	clearRuntimeEnv();
 	ensureEnvironment(runtime, extensionContext(), pi);
 	equal("default max depth remains empirically bounded", process.env.RLM_MAX_DEPTH, "3");
-	equal("default total call cap is bounded", process.env.RLM_MAX_CALLS, "128");
+	equal("default total call backstop leaves long-tree headroom", process.env.RLM_MAX_CALLS, "65536");
+	equal("default active child concurrency is bounded", process.env.RLM_MAX_CONCURRENT_CALLS, "3");
 	registerNativeRlmQueryTool(pi, runtime);
 	record(Boolean(nativeTool), "native adapter registered");
 	const nativeAdapterSource = readFileSync(path.join(projectRoot, "extensions/ypi/native-tool.ts"), "utf8");
@@ -265,6 +266,31 @@ async function run(): Promise<void> {
 	contains("dynamic prompt prioritizes task context over persistent memory", taskFilePrompt, "Inspect it before using persistent memory");
 	delete process.env.CONTEXT;
 	delete process.env.RLM_PROMPT_FILE;
+
+	const transcriptRequiredEnv = {
+		...baseEnv("required-transcripts"),
+		RLM_REQUIRE_TRANSCRIPTS: "1",
+		RLM_SHARED_SESSIONS: "0",
+	};
+	const nativeTranscriptRequired = await invokeNative(
+		transcriptRequiredEnv,
+		"REQUIRED_TRANSCRIPT_PROMPT",
+	);
+	const cliTranscriptRequired = await invokeCli(
+		transcriptRequiredEnv,
+		"REQUIRED_TRANSCRIPT_PROMPT",
+	);
+	contains(
+		"native transcript gate rejects missing session transport",
+		nativeTranscriptRequired.error || "",
+		"RLM_SHARED_SESSIONS=1",
+	);
+	contains(
+		"CLI transcript gate rejects missing session transport",
+		cliTranscriptRequired.error || "",
+		"RLM_SHARED_SESSIONS=1",
+	);
+	equal("CLI transcript gate exits nonzero", cliTranscriptRequired.code, 1);
 
 	const prompt = "CONTRACT_PROMPT";
 	const nativeDefault = await invokeNative(baseEnv("native-default"), prompt, "CONTRACT_CONTEXT");

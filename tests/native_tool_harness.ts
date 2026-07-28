@@ -162,6 +162,28 @@ elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "json-huge-turn-end" ]; then
   printf '%s\\n' '"]}'
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "sleep" ]; then
   sleep 30
+elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "concurrency" ]; then
+  while ! mkdir "$YPI_FAKE_CONCURRENCY_LOCK" 2>/dev/null; do sleep 0.005; done
+  active=$(cat "$YPI_FAKE_CONCURRENCY_ACTIVE" 2>/dev/null || printf 0)
+  active=$((active + 1))
+  printf '%s\n' "$active" > "$YPI_FAKE_CONCURRENCY_ACTIVE"
+  maximum=$(cat "$YPI_FAKE_CONCURRENCY_MAX" 2>/dev/null || printf 0)
+  if [ "$active" -gt "$maximum" ]; then
+    printf '%s\n' "$active" > "$YPI_FAKE_CONCURRENCY_MAX"
+  fi
+  rmdir "$YPI_FAKE_CONCURRENCY_LOCK"
+  sleep 0.25
+  while ! mkdir "$YPI_FAKE_CONCURRENCY_LOCK" 2>/dev/null; do sleep 0.005; done
+  active=$(cat "$YPI_FAKE_CONCURRENCY_ACTIVE")
+  printf '%s\n' "$((active - 1))" > "$YPI_FAKE_CONCURRENCY_ACTIVE"
+  rmdir "$YPI_FAKE_CONCURRENCY_LOCK"
+  echo "CONCURRENCY_CHILD_OK"
+elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "transcript" ]; then
+  printf '%s\n' '{"type":"session","version":3,"id":"child-session"}' >> "$RLM_SESSION_FILE"
+  echo "TRANSCRIPT_CHILD_OK"
+elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "invalid-transcript" ]; then
+  printf '%s\n' 'not-json' >> "$RLM_SESSION_FILE"
+  echo "INVALID_TRANSCRIPT_CHILD"
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "write-file" ]; then
   printf '%s\n' 'implemented by child' > implemented.txt
   echo "IMPLEMENT_CHILD_OK"
@@ -715,6 +737,96 @@ async function run(): Promise<void> {
 	resetLog();
 	process.env.RLM_DEPTH = "0";
 	process.env.RLM_MAX_DEPTH = "2";
+	process.env.RLM_SHARED_SESSIONS = "0";
+	process.env.RLM_REQUIRE_TRANSCRIPTS = "1";
+	process.env.RLM_JSON = "0";
+	ensureEnvironment(runtime, context());
+	await expectThrow(
+		"N6a: transcript-required mode rejects disabled session sharing before spawn",
+		"RLM_SHARED_SESSIONS=1",
+		() => invoke(),
+	);
+	assertNotContains("N6a: missing transcript transport spawns no child", readLog(), "ARGS:");
+
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
+	process.env.RLM_REQUIRE_TRANSCRIPTS = "1";
+	process.env.RLM_JSON = "0";
+	ensureEnvironment(runtime, context());
+	await expectThrow(
+		"N6b: transcript-required mode rejects a child with no appended event",
+		"did not append",
+		() => invoke(),
+	);
+
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
+	process.env.RLM_REQUIRE_TRANSCRIPTS = "1";
+	process.env.RLM_JSON = "0";
+	process.env.YPI_FAKE_PI_MODE = "invalid-transcript";
+	ensureEnvironment(runtime, context());
+	await expectThrow(
+		"N6c: transcript-required mode rejects malformed appended JSONL",
+		"invalid JSONL",
+		() => invoke(),
+	);
+
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
+	process.env.RLM_REQUIRE_TRANSCRIPTS = "1";
+	process.env.RLM_JSON = "0";
+	process.env.YPI_FAKE_PI_MODE = "transcript";
+	ensureEnvironment(runtime, context());
+	const transcriptResult = await invoke();
+	assertContains(
+		"N6d: transcript-required mode accepts an appended child session event",
+		transcriptResult,
+		"TRANSCRIPT_CHILD_OK",
+	);
+	const transcriptPath = /RLM_SESSION_FILE=([^\n]+)/.exec(readLog())?.[1] || "";
+	const transcriptValidator = path.join(
+		projectRoot,
+		"scripts",
+		"validate-recursion-transcripts.ts",
+	);
+	const validation = spawnSync(process.execPath, [
+		transcriptValidator,
+		"--trace",
+		process.env.PI_TRACE_FILE || "",
+		"--session-dir",
+		process.env.RLM_SESSION_DIR || "",
+	], { encoding: "utf8" });
+	record(
+		validation.status === 0
+			&& String(validation.stdout).includes("TRANSCRIPT_VALIDATION=PASS calls=1"),
+		"N6e: deterministic validator maps the admitted trace call to its session",
+		String(validation.stderr || validation.stdout || ""),
+	);
+	rmSync(transcriptPath, { force: true });
+	const missingValidation = spawnSync(process.execPath, [
+		transcriptValidator,
+		"--trace",
+		process.env.PI_TRACE_FILE || "",
+		"--session-dir",
+		process.env.RLM_SESSION_DIR || "",
+	], { encoding: "utf8" });
+	record(
+		missingValidation.status === 1
+			&& String(missingValidation.stderr).includes("did not append"),
+		"N6e: deterministic validator fails when an admitted transcript is missing",
+		String(missingValidation.stderr || missingValidation.stdout || ""),
+	);
+
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
 	process.env.RLM_CHILD_MODEL = "child-model";
 	process.env.RLM_CHILD_PROVIDER = "child-provider";
 	process.env.RLM_JSON = "0";
@@ -990,6 +1102,35 @@ async function run(): Promise<void> {
 	assertContains("N11: second parallel call count appears", log, "RLM_CALL_COUNT=2");
 	assertContains("N11: first session file unique", log, "parallel_d1_c1.jsonl");
 	assertContains("N11: second session file unique", log, "parallel_d1_c2.jsonl");
+
+	clearYpiEnv();
+	resetLog();
+	const concurrencyActive = path.join(scratch, "concurrency.active");
+	const concurrencyMaximum = path.join(scratch, "concurrency.max");
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "3";
+	process.env.RLM_JSON = "0";
+	process.env.RLM_MAX_CONCURRENT_CALLS = "3";
+	process.env.YPI_FAKE_PI_MODE = "concurrency";
+	process.env.YPI_FAKE_CONCURRENCY_ACTIVE = concurrencyActive;
+	process.env.YPI_FAKE_CONCURRENCY_MAX = concurrencyMaximum;
+	process.env.YPI_FAKE_CONCURRENCY_LOCK = path.join(scratch, "concurrency.lock");
+	ensureEnvironment(runtime, context());
+	const concurrencyResults = await Promise.all([
+		invoke("concurrency one"),
+		invoke("concurrency two"),
+		invoke("concurrency three"),
+		invoke("concurrency four"),
+	]);
+	record(
+		concurrencyResults.every((result) => result.includes("CONCURRENCY_CHILD_OK")),
+		"N11a: queued parallel review calls all complete",
+	);
+	record(
+		readFileSync(concurrencyMaximum, "utf8").trim() === "3",
+		"N11a: tree-wide child concurrency peaks at three",
+		`observed=${readFileSync(concurrencyMaximum, "utf8").trim()}`,
+	);
 
 	// N13: a hostile RLM_TRACE_ID cannot escape the session directory via the child session filename.
 	clearYpiEnv();

@@ -1,8 +1,10 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { safeTraceId, sharedSessionsEnabled } from "../env.ts";
+import { atomicCopyFile } from "./atomic-file.ts";
 import { renderActiveTaskFilesSection } from "./task-files.ts";
+import { requiredTranscriptBaseline, transcriptsRequired } from "./transcript.ts";
 import { acquireWorkspace, type ChildMode, type WorkspaceLease } from "./workspace-policy.ts";
 
 export interface ChildResourceInput {
@@ -28,6 +30,7 @@ export interface ChildResourceLease {
 	promptFile: string;
 	contextFile?: string;
 	childSession?: string;
+	transcriptBaselineBytes?: number;
 	standaloneSystemPromptFile?: string;
 	isolatedPiRoot?: string;
 	workspace: WorkspaceLease;
@@ -69,17 +72,39 @@ function createStandaloneSystemPrompt(input: ChildResourceInput, promptFile: str
 }
 
 function childSessionFile(input: ChildResourceInput): string | undefined {
-	if (!sharedSessionsEnabled()) return undefined;
+	if (!sharedSessionsEnabled()) {
+		if (transcriptsRequired()) {
+			throw new Error(
+				"RLM_REQUIRE_TRANSCRIPTS=1 requires RLM_SHARED_SESSIONS=1 and an explicit child session directory; do not run the root with --no-session.",
+			);
+		}
+		return undefined;
+	}
 	const sessionDir = process.env.RLM_SESSION_DIR || (input.parentSessionFile ? input.parentSessionDir : "");
-	if (!sessionDir) return undefined;
+	if (!sessionDir) {
+		if (transcriptsRequired()) {
+			throw new Error(
+				"RLM_REQUIRE_TRANSCRIPTS=1 requires an explicit child session directory; do not run the root with --no-session.",
+			);
+		}
+		return undefined;
+	}
 	mkdirSync(sessionDir, { recursive: true });
+	if (transcriptsRequired()) {
+		const metadata = lstatSync(sessionDir);
+		if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+			throw new Error(
+				`RLM_REQUIRE_TRANSCRIPTS=1 requires a regular non-symlink session directory: ${sessionDir}`,
+			);
+		}
+	}
 	return path.join(sessionDir, `${safeTraceId(process.env.RLM_TRACE_ID || "ypi")}_d${input.childDepth}_c${input.callCount}.jsonl`);
 }
 
 function copyForkSession(input: ChildResourceInput, childSession: string | undefined): void {
 	const parentSession = input.parentSessionFile || process.env.RLM_SESSION_FILE;
 	if (input.fork && childSession && parentSession && existsSync(parentSession)) {
-		copyFileSync(parentSession, childSession);
+		atomicCopyFile(parentSession, childSession);
 	}
 }
 
@@ -149,8 +174,9 @@ export function acquireChildResources(input: ChildResourceInput): ChildResourceL
 			chmodSync(isolatedAgentDir, 0o700);
 			projectSelectedProviderAuth(isolatedAgentDir, input.selectedProvider);
 		}
-		const childSession = childSessionFile(input);
-		copyForkSession(input, childSession);
+			const childSession = childSessionFile(input);
+			copyForkSession(input, childSession);
+			const transcriptBaselineBytes = requiredTranscriptBaseline(childSession);
 		if (input.setupDeadlineMilliseconds !== undefined && Date.now() >= input.setupDeadlineMilliseconds) {
 			const error = new Error("RLM_TIMEOUT expired during recursive resource setup") as Error & { exitCode: number };
 			error.exitCode = 124;
@@ -166,7 +192,8 @@ export function acquireChildResources(input: ChildResourceInput): ChildResourceL
 		return {
 			promptFile,
 			contextFile,
-			childSession,
+				childSession,
+				transcriptBaselineBytes,
 			standaloneSystemPromptFile,
 			isolatedPiRoot,
 			workspace,

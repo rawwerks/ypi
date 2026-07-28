@@ -89,16 +89,16 @@ function readReadyPid(readyFile: string): number {
 		descriptor = openSync(readyFile, constants.O_RDONLY | constants.O_NOFOLLOW);
 		const metadata = fstatSync(descriptor);
 		if (!metadata.isFile()) {
-			throw new LaunchGateError("implementer launch gate is not a regular file", 126);
+			throw new LaunchGateError("recursive child launch gate is not a regular file", 126);
 		}
 		const value = readFileSync(descriptor, "utf8");
 		if (!/^[1-9][0-9]*\n?$/.test(value)) {
-			throw new LaunchGateError("implementer launch gate contains an invalid PID", 126);
+			throw new LaunchGateError("recursive child launch gate contains an invalid PID", 126);
 		}
 		return Number(value.trim());
 	} catch (error) {
 		if (error instanceof LaunchGateError) throw error;
-		throw new LaunchGateError(`implementer launch gate cannot be read: ${(error as Error).message}`, 126);
+		throw new LaunchGateError(`recursive child launch gate cannot be read: ${(error as Error).message}`, 126);
 	} finally {
 		if (descriptor !== undefined) closeSync(descriptor);
 	}
@@ -138,18 +138,18 @@ function resolveExecutable(command: string, environment: NodeJS.ProcessEnv): str
 	throw new LaunchGateError(`ENOENT: executable not found on PATH: ${command}`, 127);
 }
 
-export function runImplementerLaunchGate(request: LaunchGateRequest): never | number {
+export function runRecursiveChildLaunchGate(request: LaunchGateRequest): never | number {
 	atomicWriteFile(request.pidFile, `${process.pid}\n`);
 	while (!existsSync(request.readyFile)) {
 		if (!processIsAlive(request.ownerPid)) return 125;
 		wait(10);
 	}
 	if (readReadyPid(request.readyFile) !== process.pid) {
-		throw new LaunchGateError("implementer launch gate PID does not match this process", 126);
+		throw new LaunchGateError("recursive child launch gate PID does not match this process", 126);
 	}
 	const execve = process.execve;
 	if (!execve) {
-		throw new LaunchGateError("Node.js >=22.15 with process.execve is required for implementer launch", 126);
+		throw new LaunchGateError("Node.js >=22.15 with process.execve is required for recursive child launch", 126);
 	}
 	const executable = resolveExecutable(request.command[0], process.env);
 	const envExecutable = resolveExecutable("env", process.env);
@@ -158,16 +158,16 @@ export function runImplementerLaunchGate(request: LaunchGateRequest): never | nu
 		// supported releases. `env` performs the target exec in the already
 		// registered process and returns conventional 126/127 classifications.
 		execve(envExecutable, [envExecutable, executable, ...request.command.slice(1)], process.env);
-		throw new LaunchGateError("implementer launch returned without replacing the gate process", 126);
+		throw new LaunchGateError("recursive child launch returned without replacing the gate process", 126);
 	} catch (error) {
 		if (error instanceof LaunchGateError) throw error;
-		throw new LaunchGateError(`implementer launch failed: ${(error as Error).message}`, 126);
+		throw new LaunchGateError(`recursive child launch failed: ${(error as Error).message}`, 126);
 	}
 }
 
-export function runImplementerLaunchGateCli(args: string[]): number {
+export function runRecursiveChildLaunchGateCli(args: string[]): number {
 	try {
-		return runImplementerLaunchGate(parseLaunchGateArguments(args));
+		return runRecursiveChildLaunchGate(parseLaunchGateArguments(args));
 	} catch (error) {
 		const failure = error instanceof LaunchGateError
 			? error

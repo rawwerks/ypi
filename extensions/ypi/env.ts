@@ -3,11 +3,12 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_CONCURRENT_CALLS } from "./internal/concurrency.ts";
 import type { YpiRuntime } from "./runtime.ts";
 import { debug } from "./runtime.ts";
 
 export const DEFAULT_MAX_DEPTH = 3;
-export const DEFAULT_MAX_CALLS = 128;
+export const DEFAULT_MAX_CALLS = 65_536;
 
 function exactNonNegativeInteger(value: string | undefined, fallback: string): number {
 	const raw = value ?? fallback;
@@ -74,6 +75,14 @@ function ensureCallCounterFile(): void {
 	process.env.RLM_CALL_COUNTER_FILE = path.join(tmpdir(), `rlm_calls_${process.env.RLM_TRACE_ID}.counter`);
 }
 
+function ensureConcurrencyDirectory(): void {
+	if (process.env.RLM_CONCURRENCY_DIR) return;
+	process.env.RLM_CONCURRENCY_DIR = path.join(
+		tmpdir(),
+		`rlm_concurrency_${process.env.RLM_TRACE_ID}`,
+	);
+}
+
 function ensurePrivateTelemetryFile(variable: "PI_TRACE_FILE" | "RLM_COST_FILE", prefix: string): void {
 	if (!process.env[variable]) {
 		process.env[variable] = path.join(tmpdir(), `${prefix}_${process.env.RLM_TRACE_ID}.jsonl`);
@@ -96,9 +105,12 @@ export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext, p
 	process.env.RLM_DEPTH = process.env.RLM_DEPTH || "0";
 	process.env.RLM_MAX_DEPTH = process.env.RLM_MAX_DEPTH || String(DEFAULT_MAX_DEPTH);
 	process.env.RLM_MAX_CALLS = process.env.RLM_MAX_CALLS || String(DEFAULT_MAX_CALLS);
+	process.env.RLM_MAX_CONCURRENT_CALLS = process.env.RLM_MAX_CONCURRENT_CALLS
+		|| String(DEFAULT_MAX_CONCURRENT_CALLS);
 	process.env.RLM_SYSTEM_PROMPT = process.env.RLM_SYSTEM_PROMPT || runtime.systemPromptPath;
 	process.env.RLM_EXTENSIONS = process.env.RLM_EXTENSIONS || "1";
 	process.env.RLM_JSON = process.env.RLM_JSON || "1";
+	process.env.RLM_REQUIRE_TRANSCRIPTS = process.env.RLM_REQUIRE_TRANSCRIPTS || "0";
 	process.env.RLM_SHARED_SESSIONS = process.env.RLM_SHARED_SESSIONS || "1";
 	process.env.RLM_TRACE_ID = safeTraceId(process.env.RLM_TRACE_ID || randomBytes(4).toString("hex"));
 	// Dollar caps are deliberately unsupported. Cost remains observable telemetry,
@@ -110,6 +122,7 @@ export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext, p
 	process.env.YPI_EXTENSION_ROOT = runtime.root;
 	process.env.YPI_EXTENSION_PATH = runtime.extensionPath;
 	ensureCallCounterFile();
+	ensureConcurrencyDirectory();
 	ensurePrivateTelemetryFile("PI_TRACE_FILE", "rlm_trace");
 	ensurePrivateTelemetryFile("RLM_COST_FILE", "rlm_cost");
 

@@ -374,7 +374,7 @@ OUTPUT=$(
 )
 assert_contains "T14: default depth=0→1" "RLM_DEPTH=1" "$OUTPUT"
 assert_contains "T14: default maximum depth is three" "RLM_MAX_DEPTH=3" "$OUTPUT"
-assert_contains "T14: default total call cap is bounded" "RLM_MAX_CALLS=128" "$OUTPUT"
+assert_contains "T14: default total call backstop leaves long-tree headroom" "RLM_MAX_CALLS=65536" "$OUTPUT"
 # T14b: provider/model must NOT be hardcoded — Pi's defaults should be used
 assert_contains "T14: no hardcoded provider" "RLM_PROVIDER=" "$OUTPUT"
 assert_not_contains "T14: no cerebras default" "cerebras" "$OUTPUT"

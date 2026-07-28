@@ -17,7 +17,7 @@ import path from "node:path";
 import { atomicCreateFile } from "../extensions/ypi/internal/atomic-file.ts";
 import { parseLaunchGateArguments } from "../extensions/ypi/internal/launch-gate.ts";
 
-const launcher = path.resolve(import.meta.dir, "..", "scripts", "launch-implementer-child.ts");
+const launcher = path.resolve(import.meta.dir, "..", "scripts", "launch-recursive-child.ts");
 const node = process.env.YPI_NODE_BIN || "node";
 let pass = 0;
 let fail = 0;

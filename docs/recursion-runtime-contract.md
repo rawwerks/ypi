@@ -11,6 +11,7 @@ to adapters. It owns:
 
 - depth and terminal-depth admission;
 - atomic tree-wide call allocation;
+- crash-recoverable tree-wide child-concurrency admission;
 - optional tree-wide timeout accounting;
 - provider, model, and thinking-level routing by child depth;
 - exact prompt, root charter, context, and session transport;
@@ -31,10 +32,14 @@ The writable lifecycle has one persisted contract:
 - `internal/implementer-lease.ts` owns lease states, object-ID rules, attempt
   ref naming, and schema validation;
 - `internal/atomic-file.ts` owns durable file replacement;
+- `internal/concurrency.ts` owns the three-generation queue, live-PID leases,
+  and cooperative slot yielding during nested calls;
+- `internal/implementer-registry-layout.ts` owns implementer registry paths and
+  conservative recovery-state detection;
 - `internal/workspace-registry.ts` owns live admission and registry mutation;
 - `internal/implementer-recovery/` owns stale-state classification, Git
   salvage, workspace ownership proof, and destructive recovery;
-- `scripts/launch-implementer-child.ts` and
+- `scripts/launch-recursive-child.ts` and
   `scripts/cleanup-implementer-workspaces.ts` are thin Node entry points.
 
 Live execution and recovery import the same lease contract. Recovery does not
@@ -53,10 +58,13 @@ only after a verified ref or a proven pre-admission state.
 - live progress and cancellation bridging;
 - tool-result presentation.
 
-Native requests may execute in parallel. Implement requests carry explicit path
-scopes; the shared registry admits at most three and refuses component-overlap.
-The extension blocks root mutators and unknown tools from a mixed implementer
-batch. The root waits for the full batch before mutating or integrating.
+Native requests may execute in parallel. The shared runtime admits three active
+child generations and queues additional calls. Waiting parents cooperatively
+yield their inherited slot, so a full depth-1 batch cannot deadlock depth-2 or
+depth-3 work. Implement requests carry explicit path scopes; the writer
+registry refuses component-overlap. The extension blocks root mutators and
+unknown tools from a mixed implementer batch. The root waits for the full batch
+before mutating or integrating.
 
 ### Shell Adapter
 
@@ -87,7 +95,7 @@ Equivalent native and shell requests must agree on:
 4. session and fork behavior;
 5. extension and non-extension discovery policy;
 6. credential and recursive environment projection;
-7. timeout and maximum-call admission;
+7. timeout, maximum-call, and child-concurrency admission;
 8. process exit, cancellation, output, and cleanup classification.
 
 Adapter-specific Pi arguments are permitted only when the surface requires
@@ -108,6 +116,14 @@ Shared sessions use the active Pi session directory. Forking pre-populates the
 child session with the parent snapshot. A non-fork child may still have its own
 session file but does not inherit parent events.
 
+`RLM_REQUIRE_TRANSCRIPTS=1` turns auditability into a proof gate. Admission
+fails before spawn when session sharing or an explicit session directory is
+unavailable. After the child exits, the runtime requires the child session to
+be a regular non-symlink file that grew beyond its pre-launch size with a
+complete valid JSONL object. `scripts/validate-recursion-transcripts.ts` maps
+every admitted trace transition to its deterministic child-session filename
+for offline verification.
+
 ## Implement Mode
 
 Implement mode is available only to depth 0 and only in an existing clean Git
@@ -115,7 +131,7 @@ checkout. It refuses:
 
 - dirty, sparse, non-Git, or operation-in-progress checkouts;
 - a missing, invalid, or overlapping scope;
-- admission beyond the three-implementer cap, or a descendant writer;
+- a descendant writer;
 - a missing canonical extension;
 - submodule mutation;
 - writes outside the declared scope or worktree, through symlink escapes,
@@ -151,7 +167,13 @@ registry recovery, and a continuously clean real checkout.
 - `RLM_MAX_DEPTH` defaults to 3. The tracked depth ablation found all planted
   defects at depth 3, while depth 4 consumed more resources and timed out on
   that task. This does not claim a universal optimum.
-- `RLM_MAX_CALLS` defaults to 128 and is shared by the whole tree.
+- `RLM_MAX_CALLS` is a shared tree-wide emergency backstop and defaults to
+  65,536. It is deliberately far above observed paper-scale useful call counts;
+  explicit proof envelopes may set a smaller task-specific bound.
+- `RLM_MAX_CONCURRENT_CALLS` defaults to 3. Calls beyond the active-generation
+  limit wait; they are not rejected or silently dropped.
+- `RLM_REQUIRE_TRANSCRIPTS` defaults to 0. Proof-bearing or benchmark runs set
+  it to 1 and provide a private explicit session directory.
 - No timeout is set by default. A caller may explicitly set one.
 - Cost and tokens are telemetry only. Dollar caps are unsupported.
 - Staleness warnings observe live work and never terminate it.

@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
 import {
+	chmodSync,
 	closeSync,
 	constants,
+	copyFileSync,
 	fchmodSync,
 	fsyncSync,
 	linkSync,
@@ -92,6 +94,39 @@ export function atomicCreateFile(
 		rmSync(temporary);
 		syncDirectory(directory);
 	} catch (error) {
+		rmSync(temporary, { force: true });
+		throw error;
+	}
+}
+
+export function atomicCopyFile(
+	source: string,
+	target: string,
+	options: AtomicWriteOptions = {},
+): void {
+	const directory = path.dirname(target);
+	const temporary = path.join(
+		directory,
+		`.${path.basename(target)}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`,
+	);
+	let descriptor: number | undefined;
+	try {
+		copyFileSync(source, temporary, constants.COPYFILE_EXCL);
+		chmodSync(temporary, options.mode ?? 0o600);
+		descriptor = openSync(temporary, constants.O_RDONLY);
+		fsyncSync(descriptor);
+		closeSync(descriptor);
+		descriptor = undefined;
+		renameSync(temporary, target);
+		syncDirectory(directory);
+	} catch (error) {
+		if (descriptor !== undefined) {
+			try {
+				closeSync(descriptor);
+			} catch {
+				// Preserve the original copy failure.
+			}
+		}
 		rmSync(temporary, { force: true });
 		throw error;
 	}
