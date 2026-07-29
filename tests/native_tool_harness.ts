@@ -1305,10 +1305,14 @@ async function run(): Promise<void> {
 	process.env.RLM_SESSION_DIR = sessionDir;
 	process.env.RLM_TRACE_ID = "../../etc/evil";
 	process.env.YPI_FAKE_PI_MODE = "transcript";
-	ensureEnvironment(runtime, context());
-	await invoke("hostile");
-	const traceLog = readLog();
-	assertContains("N13: hostile trace id is sanitized in the session filename", traceLog, ".._.._etc_evil_d1_c1.jsonl");
+		ensureEnvironment(runtime, context());
+		await invoke("hostile");
+		const traceLog = readLog();
+		assertContains(
+			"N13: hostile trace id is sanitized in the session filename",
+			traceLog,
+			`${process.env.RLM_TRACE_ID}_d1_c1.jsonl`,
+		);
 	assertNotContains("N13: hostile trace id cannot traverse out of the session dir", traceLog, "etc/evil");
 	const hostileValidation = spawnSync(process.execPath, [
 		transcriptValidator,

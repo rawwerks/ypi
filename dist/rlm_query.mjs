@@ -1361,7 +1361,19 @@ function ensureEnvironment(runtime, ctx, pi) {
 }
 
 // extensions/ypi/guardrails.ts
-import { constants as constants4, existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync4, rmSync as rmSync2 } from "node:fs";
+import {
+  accessSync as accessSync2,
+  closeSync as closeSync3,
+  constants as constants4,
+  existsSync as existsSync4,
+  fstatSync as fstatSync3,
+  lstatSync as lstatSync4,
+  mkdirSync as mkdirSync4,
+  openSync as openSync3,
+  readFileSync as readFileSync4,
+  readSync as readSync2,
+  rmSync as rmSync2
+} from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import path6 from "node:path";
 var LOCK_RETRY_MS = 10;
@@ -1445,6 +1457,7 @@ function assertTimeoutAvailable() {
   }
   return remaining;
 }
+var MAX_COST_LEDGER_BYTES = 16 * 1024 * 1024;
 function appendTelemetryLine(line) {
   if (!process.env.RLM_COST_FILE || !process.env.YPI_COST_FILE_IDENTITY)
     return;
@@ -1630,7 +1643,7 @@ function finishAsyncJob(job, code, output) {
 }
 
 // extensions/ypi/internal/cli-input.ts
-import { closeSync as closeSync3, existsSync as existsSync6, fchmodSync as fchmodSync3, openSync as openSync3, writeSync as writeSync2 } from "node:fs";
+import { closeSync as closeSync4, existsSync as existsSync6, fchmodSync as fchmodSync3, openSync as openSync4, writeSync as writeSync2 } from "node:fs";
 import { tmpdir as tmpdir4 } from "node:os";
 import path8 from "node:path";
 class CliInputError extends Error {
@@ -1655,7 +1668,7 @@ async function spoolStdin(options) {
   }, Math.max(0, options.timeoutMilliseconds));
   options.signal?.addEventListener("abort", abortInput, { once: true });
   try {
-    descriptor = openSync3(contextPath, "wx", PRIVATE_FILE_MODE2);
+    descriptor = openSync4(contextPath, "wx", PRIVATE_FILE_MODE2);
     contextCreated = true;
     fchmodSync3(descriptor, PRIVATE_FILE_MODE2);
     if (options.signal?.aborted)
@@ -1675,7 +1688,7 @@ async function spoolStdin(options) {
       throw new CliInputError("Timeout exceeded while reading recursive input under RLM_TIMEOUT", 124);
   } catch (error) {
     if (descriptor !== undefined) {
-      closeSync3(descriptor);
+      closeSync4(descriptor);
       descriptor = undefined;
     }
     let cleanupFailure;
@@ -1701,7 +1714,7 @@ CLI input cleanup also failed: ${cleanupFailure instanceof Error ? cleanupFailur
     options.signal?.removeEventListener("abort", abortInput);
   }
   if (descriptor !== undefined)
-    closeSync3(descriptor);
+    closeSync4(descriptor);
   const tree = sealOwnedPrivateDirectory(owner, ["context.bin"]);
   return {
     path: contextPath,
@@ -2352,16 +2365,16 @@ asks for it or the task context is absent or explicitly insufficient.
 // extensions/ypi/internal/transcript.ts
 import { randomBytes as randomBytes5 } from "node:crypto";
 import {
-  closeSync as closeSync5,
+  closeSync as closeSync6,
   constants as constants6,
   fchmodSync as fchmodSync4,
-  fstatSync as fstatSync4,
+  fstatSync as fstatSync5,
   fsyncSync as fsyncSync3,
   linkSync as linkSync2,
-  lstatSync as lstatSync5,
-  openSync as openSync5,
+  lstatSync as lstatSync6,
+  openSync as openSync6,
   readFileSync as readFileSync6,
-  readSync as readSync3,
+  readSync as readSync4,
   unlinkSync as unlinkSync3,
   writeSync as writeSync3
 } from "node:fs";
@@ -2370,12 +2383,12 @@ import path11 from "node:path";
 // extensions/ypi/internal/transcript-proof-io.ts
 import { createHash as createHash2 } from "node:crypto";
 import {
-  closeSync as closeSync4,
+  closeSync as closeSync5,
   constants as constants5,
-  fstatSync as fstatSync3,
-  lstatSync as lstatSync4,
-  openSync as openSync4,
-  readSync as readSync2,
+  fstatSync as fstatSync4,
+  lstatSync as lstatSync5,
+  openSync as openSync5,
+  readSync as readSync3,
   realpathSync as realpathSync2
 } from "node:fs";
 import path10 from "node:path";
@@ -2432,9 +2445,9 @@ function openSecureDirectory(directoryPath) {
   if (resolved !== normalized) {
     throw proofError(`RLM_REQUIRE_TRANSCRIPTS=1 rejects symlinked session-directory ancestry: ${normalized}`);
   }
-  const descriptor = openSync4(normalized, constants5.O_RDONLY | (constants5.O_DIRECTORY || 0) | (constants5.O_NOFOLLOW || 0));
+  const descriptor = openSync5(normalized, constants5.O_RDONLY | (constants5.O_DIRECTORY || 0) | (constants5.O_NOFOLLOW || 0));
   try {
-    const metadata = fstatSync3(descriptor, { bigint: true });
+    const metadata = fstatSync4(descriptor, { bigint: true });
     if (!metadata.isDirectory()) {
       throw proofError(`Required transcript session path is not a directory: ${normalized}`);
     }
@@ -2448,13 +2461,13 @@ function openSecureDirectory(directoryPath) {
       path: normalized
     };
   } catch (error) {
-    closeSync4(descriptor);
+    closeSync5(descriptor);
     throw error;
   }
 }
 function assertDirectoryIdentity(directory) {
-  const descriptorMetadata = fstatSync3(directory.descriptor, { bigint: true });
-  const pathMetadata = lstatSync4(directory.path, { bigint: true });
+  const descriptorMetadata = fstatSync4(directory.descriptor, { bigint: true });
+  const pathMetadata = lstatSync5(directory.path, { bigint: true });
   if (!descriptorMetadata.isDirectory() || !pathMetadata.isDirectory()) {
     throw proofError("Required transcript session directory stopped being a directory.");
   }
@@ -2478,7 +2491,7 @@ function digestRegion(descriptor, start, length) {
   let offset = 0;
   while (offset < length) {
     const requested = Math.min(buffer.length, length - offset);
-    const bytesRead = readSync2(descriptor, buffer, 0, requested, start + offset);
+    const bytesRead = readSync3(descriptor, buffer, 0, requested, start + offset);
     if (bytesRead <= 0) {
       throw proofError("Required transcript became shorter during verification.");
     }
@@ -2524,7 +2537,7 @@ function validateJsonlRegion(descriptor, start, length, label, requireMessage, m
   try {
     while (offset < length) {
       const requested = Math.min(buffer.length, length - offset);
-      const bytesRead = readSync2(descriptor, buffer, 0, requested, start + offset);
+      const bytesRead = readSync3(descriptor, buffer, 0, requested, start + offset);
       if (bytesRead <= 0) {
         throw proofError(`${label} became shorter during JSONL verification.`);
       }
@@ -2579,8 +2592,8 @@ function sameFileIdentity(left, right) {
   return left.dev === right.dev && left.ino === right.ino;
 }
 function retireHeldTemporary(temporary, descriptor, expectedLinks) {
-  const held = fstatSync4(descriptor, { bigint: true });
-  const current = lstatSync5(temporary, { bigint: true });
+  const held = fstatSync5(descriptor, { bigint: true });
+  const current = lstatSync6(temporary, { bigint: true });
   const uid = process.getuid?.();
   if (!held.isFile() || held.isSymbolicLink() || !current.isFile() || current.isSymbolicLink() || !sameFileIdentity(held, current) || held.nlink !== expectedLinks || current.nlink !== expectedLinks || uid !== undefined && (Number(held.uid) !== uid || Number(current.uid) !== uid) || process.platform !== "win32" && (Number(held.mode & 0o777n) !== PRIVATE_FILE_MODE3 || Number(current.mode & 0o777n) !== PRIVATE_FILE_MODE3)) {
     throw proofError("Required transcript temporary identity changed; preserving uncertain evidence.");
@@ -2601,10 +2614,10 @@ function openSecureForkSource(sourcePath) {
   if (!path11.isAbsolute(sourcePath)) {
     throw proofError(`RLM_REQUIRE_TRANSCRIPTS=1 requires an absolute fork source path: ${sourcePath}`);
   }
-  const descriptor = openSync5(sourcePath, constants6.O_RDONLY | (constants6.O_NOFOLLOW || 0));
+  const descriptor = openSync6(sourcePath, constants6.O_RDONLY | (constants6.O_NOFOLLOW || 0));
   try {
-    const metadata = fstatSync4(descriptor, { bigint: true });
-    const pathMetadata = lstatSync5(sourcePath, { bigint: true });
+    const metadata = fstatSync5(descriptor, { bigint: true });
+    const pathMetadata = lstatSync6(sourcePath, { bigint: true });
     assertPrivateRegularFile(metadata, "Required fork source");
     if (pathMetadata.isSymbolicLink() || !pathMetadata.isFile() || pathMetadata.dev !== metadata.dev || pathMetadata.ino !== metadata.ino) {
       throw proofError("Required fork source identity changed during admission.");
@@ -2619,7 +2632,7 @@ function openSecureForkSource(sourcePath) {
       sha256: digestRegion(descriptor, 0, size)
     };
   } catch (error) {
-    closeSync5(descriptor);
+    closeSync6(descriptor);
     throw error;
   }
 }
@@ -2634,7 +2647,7 @@ function copyForkBaseline(source, targetDescriptor) {
   let offset = 0;
   while (offset < source.bytes) {
     const requested = Math.min(buffer.length, source.bytes - offset);
-    const bytesRead = readSync3(source.descriptor, buffer, 0, requested, offset);
+    const bytesRead = readSync4(source.descriptor, buffer, 0, requested, offset);
     if (bytesRead <= 0) {
       throw proofError("Required fork source changed while it was being copied.");
     }
@@ -2665,7 +2678,7 @@ function createHeldTranscript(childSession, directory, baselineSource) {
   let descriptor;
   let temporaryRetired = false;
   try {
-    descriptor = openSync5(temporary, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW || 0), PRIVATE_FILE_MODE3);
+    descriptor = openSync6(temporary, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW || 0), PRIVATE_FILE_MODE3);
     fchmodSync4(descriptor, PRIVATE_FILE_MODE3);
     const baseline = copyForkBaseline(baselineSource, descriptor);
     fsyncSync3(descriptor);
@@ -2676,8 +2689,8 @@ function createHeldTranscript(childSession, directory, baselineSource) {
     temporaryRetired = true;
     transcriptLifecycleHookForTests?.("after-temporary-retire", temporary, childSession);
     fsyncSync3(directory.descriptor);
-    const metadata = fstatSync4(descriptor, { bigint: true });
-    const pathMetadata = lstatSync5(childSession, { bigint: true });
+    const metadata = fstatSync5(descriptor, { bigint: true });
+    const pathMetadata = lstatSync6(childSession, { bigint: true });
     assertPrivateRegularFile(metadata, "Required child transcript");
     if (pathMetadata.isSymbolicLink() || pathMetadata.dev !== metadata.dev || pathMetadata.ino !== metadata.ino) {
       throw proofError("Required child transcript identity changed during creation.");
@@ -2700,11 +2713,11 @@ function createHeldTranscript(childSession, directory, baselineSource) {
       }
     } catch (cleanupError) {
       if (descriptor !== undefined)
-        closeSync5(descriptor);
+        closeSync6(descriptor);
       throw combinePublicationAndCleanupError(error, cleanupError);
     }
     if (descriptor !== undefined)
-      closeSync5(descriptor);
+      closeSync6(descriptor);
     throw error;
   }
 }
@@ -2727,21 +2740,21 @@ function prepareTranscriptProof(input) {
     } finally {
       if (baselineSource) {
         try {
-          closeSync5(baselineSource.descriptor);
+          closeSync6(baselineSource.descriptor);
         } catch {}
       }
     }
   } catch (error) {
     try {
-      closeSync5(directory.descriptor);
+      closeSync6(directory.descriptor);
     } catch {}
     throw error;
   }
 }
 function assertTranscriptIdentity(lease) {
   assertDirectoryIdentity(lease.directory);
-  const descriptorMetadata = fstatSync4(lease.descriptor, { bigint: true });
-  const pathMetadata = lstatSync5(lease.childSession, { bigint: true });
+  const descriptorMetadata = fstatSync5(lease.descriptor, { bigint: true });
+  const pathMetadata = lstatSync6(lease.childSession, { bigint: true });
   assertPrivateRegularFile(descriptorMetadata, "Required child transcript");
   if (pathMetadata.isSymbolicLink() || !pathMetadata.isFile() || pathMetadata.dev !== descriptorMetadata.dev || pathMetadata.ino !== descriptorMetadata.ino || lease.device !== descriptorMetadata.dev.toString() || lease.inode !== descriptorMetadata.ino.toString()) {
     throw proofError("Required child transcript pathname no longer names the leased inode.");
@@ -2788,7 +2801,7 @@ function closeTranscriptProof(lease) {
   let firstError;
   for (const descriptor of [lease.descriptor, lease.directory.descriptor]) {
     try {
-      closeSync5(descriptor);
+      closeSync6(descriptor);
     } catch (error) {
       firstError ??= error;
     }
@@ -2801,7 +2814,7 @@ function closeTranscriptProof(lease) {
 import { spawnSync } from "node:child_process";
 import {
   existsSync as existsSync8,
-  lstatSync as lstatSync8,
+  lstatSync as lstatSync9,
   readFileSync as readFileSync8,
   readdirSync as readdirSync6,
   rmSync as rmSync4
@@ -2879,7 +2892,7 @@ function scopesOverlap(left, right) {
 import { randomBytes as randomBytes6 } from "node:crypto";
 import {
   existsSync as existsSync7,
-  lstatSync as lstatSync6,
+  lstatSync as lstatSync7,
   readdirSync as readdirSync4,
   renameSync as renameSync2
 } from "node:fs";
@@ -3260,7 +3273,7 @@ var MAX_PARALLEL_IMPLEMENTERS = 3;
 var DEFAULT_LOCK_TIMEOUT_MS = 5000;
 var WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(4));
 function assertRegistryDirectory(directory) {
-  const metadata = lstatSync6(directory);
+  const metadata = lstatSync7(directory);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error(`Implementer registry path ${directory} is not an owned directory. Inspect it before admitting writers.`);
   }
@@ -3432,10 +3445,10 @@ function reserveImplementerLease(commonGitDir, root, baselineHead, scope, deadli
 import { randomBytes as randomBytes7 } from "node:crypto";
 import {
   constants as constants7,
-  lstatSync as lstatSync7,
-  openSync as openSync6,
-  closeSync as closeSync6,
-  fstatSync as fstatSync5,
+  lstatSync as lstatSync8,
+  openSync as openSync7,
+  closeSync as closeSync7,
+  fstatSync as fstatSync6,
   readFileSync as readFileSync7,
   readdirSync as readdirSync5,
   renameSync as renameSync3,
@@ -3453,13 +3466,13 @@ function sameIdentity5(metadata, device, inode) {
   return metadata.dev.toString() === device && metadata.ino.toString() === inode;
 }
 function lstatBigInt(candidate) {
-  return lstatSync7(candidate, { bigint: true });
+  return lstatSync8(candidate, { bigint: true });
 }
 function readOwnerMarker(candidate) {
   let descriptor;
   try {
-    descriptor = openSync6(candidate, constants7.O_RDONLY | constants7.O_NOFOLLOW);
-    const metadata = fstatSync5(descriptor, { bigint: true });
+    descriptor = openSync7(candidate, constants7.O_RDONLY | constants7.O_NOFOLLOW);
+    const metadata = fstatSync6(descriptor, { bigint: true });
     if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1n) {
       throw new Error("workspace ownership marker is not a singly linked regular file");
     }
@@ -3469,7 +3482,7 @@ function readOwnerMarker(candidate) {
     };
   } finally {
     if (descriptor !== undefined)
-      closeSync6(descriptor);
+      closeSync7(descriptor);
   }
 }
 function workspaceLocation(record) {
@@ -4168,9 +4181,9 @@ function bestEffortDiscardSetupWorktree(root, record) {
       }
     }
     try {
-      const container = lstatSync8(record.worktreeContainer);
+      const container = lstatSync9(record.worktreeContainer);
       const markerPath = path22.join(record.worktreeContainer, "owner");
-      const marker = lstatSync8(markerPath);
+      const marker = lstatSync9(markerPath);
       if (!container.isDirectory() || container.isSymbolicLink() || path22.basename(record.worktreeContainer) !== `ypi_ws_${record.token}` || record.worktreeRoot !== path22.join(record.worktreeContainer, "checkout") || !marker.isFile() || marker.isSymbolicLink() || readFileSync8(markerPath, "utf8").trim() !== record.token) {
         throw new Error("workspace ownership marker does not prove setup-cleanup authority");
       }
@@ -4191,7 +4204,7 @@ function bestEffortDiscardSetupWorktree(root, record) {
         if (entries.length !== 1 || entries[0] !== "owner") {
           return "unmarked workspace container has unexpected content";
         }
-        const marker = lstatSync8(markerPath);
+        const marker = lstatSync9(markerPath);
         const actual = readFileSync8(markerPath);
         const expected = Buffer.from(`${record.token}
 `);
