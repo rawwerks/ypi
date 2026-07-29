@@ -1,9 +1,16 @@
-import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { IMPLEMENT_TOOL_ALLOWLIST } from "./child-config.ts";
+import { verifyImplementerConfinement } from "./implementer-confinement.ts";
 import { normalizeImplementScope, pathIsWithinImplementScope } from "./implement-scope.ts";
+import {
+	appendOwnedPrivateFile,
+	parsePrivateFileIdentity,
+	readOwnedPrivateFile,
+	type PrivatePathIdentity,
+} from "./private-path.ts";
 
 export interface WriteScopeDecision {
 	allowed: boolean;
@@ -14,8 +21,8 @@ export interface WriteScopeDecision {
 
 interface ImplementWritePolicy {
 	auditFile: string;
+	auditIdentity: PrivatePathIdentity;
 	baselineIgnoreRoot: string;
-	baselineIndexFile: string;
 	externalReadFiles: string[];
 	gitDir: string;
 	scope: string[];
@@ -51,7 +58,7 @@ function gitEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 function checkIgnored(
 	root: string,
 	relativePath: string,
-	baseline: Pick<ImplementWritePolicy, "baselineIgnoreRoot" | "baselineIndexFile" | "gitDir"> | undefined,
+	baseline: Pick<ImplementWritePolicy, "baselineIgnoreRoot" | "gitDir"> | undefined,
 ): { ignored?: boolean; error?: string } {
 	const args = baseline
 		? [
@@ -69,7 +76,7 @@ function checkIgnored(
 		input: `${relativePath}\0`,
 		stdio: ["pipe", "pipe", "pipe"],
 		timeout: WRITE_POLICY_TIMEOUT_MS,
-		env: gitEnvironment(baseline ? { GIT_INDEX_FILE: baseline.baselineIndexFile } : {}),
+		env: gitEnvironment(),
 	});
 	if (result.status === 0) return { ignored: true };
 	if (result.status === 1) return { ignored: false };
@@ -78,22 +85,38 @@ function checkIgnored(
 }
 
 function readPolicyFromEnvironment(): ImplementWritePolicy | undefined {
-	const auditFile = process.env.YPI_IMPLEMENT_AUDIT_FILE;
-	const baselineIgnoreRoot = process.env.YPI_IMPLEMENT_BASELINE_IGNORE_ROOT;
-	const baselineIndexFile = process.env.YPI_IMPLEMENT_BASELINE_INDEX;
-	const gitDir = process.env.YPI_IMPLEMENT_GIT_DIR;
-	const scopeFile = process.env.YPI_IMPLEMENT_SCOPE_FILE;
-	const submodulePathsFile = process.env.YPI_IMPLEMENT_SUBMODULES_FILE;
-	if (!auditFile || !baselineIgnoreRoot || !baselineIndexFile || !gitDir || !scopeFile || !submodulePathsFile) return undefined;
+	const confinementFile = process.env.YPI_IMPLEMENT_CONFINEMENT_FILE;
+	const confinementIdentity = process.env.YPI_IMPLEMENT_CONFINEMENT_IDENTITY;
+	if (!confinementFile || !confinementIdentity) return undefined;
 	try {
-		const scope = normalizeImplementScope(readFileSync(scopeFile, "utf8").split("\0").filter(Boolean));
-		const submodulePaths = readFileSync(submodulePathsFile, "utf8").split("\0").filter(Boolean);
+		const confinement = verifyImplementerConfinement(
+			confinementFile,
+			parsePrivateFileIdentity(confinementIdentity),
+		);
+		const scope = normalizeImplementScope(
+			readOwnedPrivateFile(
+				confinement.scopeFile,
+				confinement.scopeIdentity,
+			).split("\0").filter(Boolean),
+		);
+		const submodulePaths = readOwnedPrivateFile(
+			confinement.submodulePathsFile,
+			confinement.submodulePathsIdentity,
+		).split("\0").filter(Boolean);
 		const externalReadFiles = [
 			process.env.CONTEXT,
 			process.env.RLM_PROMPT_FILE,
 			process.env.RLM_ROOT_PROMPT_FILE,
 		].filter((candidate): candidate is string => Boolean(candidate));
-		return { auditFile, baselineIgnoreRoot, baselineIndexFile, externalReadFiles, gitDir, scope, submodulePaths };
+		return {
+			auditFile: confinement.auditFile,
+			auditIdentity: confinement.auditIdentity,
+			baselineIgnoreRoot: confinement.baselineIgnoreRoot,
+			externalReadFiles,
+			gitDir: confinement.gitDir,
+			scope,
+			submodulePaths,
+		};
 	} catch {
 		return undefined;
 	}
@@ -222,8 +245,8 @@ function block(reason: string, ctx: { hasUI: boolean; ui: { notify(message: stri
 export function registerImplementWriteScope(pi: ExtensionAPI): void {
 	const root = process.env.YPI_IMPLEMENT_ROOT;
 	if (!root) return;
-	const policy = readPolicyFromEnvironment();
 	pi.on("tool_call", (event, ctx) => {
+		const policy = readPolicyFromEnvironment();
 		if (!IMPLEMENT_TOOL_SET.has(event.toolName)) {
 			return block(`Implementer tool "${event.toolName}" is outside the explicit confinement allowlist`, ctx);
 		}
@@ -238,7 +261,11 @@ export function registerImplementWriteScope(pi: ExtensionAPI): void {
 		const decision = checkImplementWritePath(root, ctx.cwd, event.input.path, policy);
 		if (!decision.allowed) return block(decision.reason || "Implementer write blocked", ctx);
 		try {
-			appendFileSync(policy.auditFile, `${decision.relativePath}\0`, { mode: 0o600 });
+				appendOwnedPrivateFile(
+					policy.auditFile,
+					policy.auditIdentity,
+					`${decision.relativePath}\0`,
+				);
 		} catch {
 			return block("Implementer write audit could not be recorded; the write was blocked", ctx);
 		}

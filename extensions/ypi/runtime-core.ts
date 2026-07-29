@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import {
 	allocateCallCount,
@@ -8,6 +8,10 @@ import {
 	assertWithinMaxCalls,
 } from "./guardrails.ts";
 import { currentDepth, maxDepth, nextDepth, safeTraceId } from "./env.ts";
+import {
+	appendOwnedPrivateFile,
+	parsePrivateFileIdentity,
+} from "./internal/private-path.ts";
 import {
 	buildChildEnvironment,
 	childExtensionsEnabled,
@@ -102,17 +106,43 @@ export class RecursiveChildError extends Error {
 	}
 }
 
+function errorWithLifecycleCleanupFailures(
+	primary: unknown,
+	label: string,
+	cleanupErrors: Error[],
+): RecursiveChildError {
+	const primaryMessage = primary instanceof Error
+		? primary.message
+		: String(primary);
+	const exitCode = primary instanceof RecursiveChildError
+		? primary.exitCode
+		: (primary as Error & { exitCode?: number })?.exitCode || 1;
+	const details = primary instanceof RecursiveChildError
+		? primary.details
+		: undefined;
+	return new RecursiveChildError(
+		`${primaryMessage}\n\n${label}: ${cleanupErrors.map((error) => error.message).join("; ")}`,
+		exitCode,
+		details,
+	);
+}
+
 function nowTraceTime(): string {
 	const d = new Date();
 	return d.toTimeString().slice(0, 8) + `.${String(d.getMilliseconds()).padStart(3, "0")}`;
 }
 
 function trace(message: string): void {
-	if (!process.env.PI_TRACE_FILE) return;
+	if (!process.env.PI_TRACE_FILE || !process.env.YPI_TRACE_FILE_IDENTITY) return;
 	try {
-		writeFileSync(process.env.PI_TRACE_FILE, `${message}\n`, { flag: "a" });
+		appendOwnedPrivateFile(
+			process.env.PI_TRACE_FILE,
+			parsePrivateFileIdentity(process.env.YPI_TRACE_FILE_IDENTITY),
+			`${message}\n`,
+		);
 	} catch {
 		delete process.env.PI_TRACE_FILE;
+		delete process.env.YPI_TRACE_FILE_IDENTITY;
 	}
 }
 
@@ -247,12 +277,23 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			trace(
 				`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} ADMISSION_CLEANUP_FAILED call=${callCount} errors=${admissionCleanupErrors.length} detail=${admissionCleanupErrors.map((item) => item.message).join("; ")}`,
 			);
+			throw errorWithLifecycleCleanupFailures(
+				error,
+				"Recursive child admission cleanup also failed",
+				admissionCleanupErrors,
+			);
 		}
 		throw error;
 	}
 
 	let workspace: WorkspaceReport | undefined;
 	let terminalError: unknown;
+	let hasTerminalError = false;
+	const throwTerminal = (error: unknown): never => {
+		hasTerminalError = true;
+		terminalError = error;
+		throw error;
+	};
 	try {
 		if (request.signal?.aborted) throw new RecursiveChildError("Child Pi cancelled during admission before work started", 130);
 		const extensionPath = request.extensionPath === null ? "" : request.extensionPath || runtime.extensionPath;
@@ -276,12 +317,8 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			YPI_EXTENSION_PATH: extensionPath,
 			YPI_RLM_QUERY_CALLER: request.caller,
 			YPI_IMPLEMENT_ROOT: "",
-			YPI_IMPLEMENT_AUDIT_FILE: "",
-			YPI_IMPLEMENT_BASELINE_IGNORE_ROOT: "",
-			YPI_IMPLEMENT_BASELINE_INDEX: "",
-			YPI_IMPLEMENT_GIT_DIR: "",
-			YPI_IMPLEMENT_SCOPE_FILE: "",
-			YPI_IMPLEMENT_SUBMODULES_FILE: "",
+			YPI_IMPLEMENT_CONFINEMENT_FILE: "",
+			YPI_IMPLEMENT_CONFINEMENT_IDENTITY: "",
 			...resources.workspace.childEnvironment,
 			RLM_WRITE_MODE_CEILING: "review",
 			...(requestedMode === "implement" ? { RLM_AMBIENT_EXTENSIONS: "0" } : {}),
@@ -341,10 +378,13 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 						// The child may already have exited.
 					}
 					throw error;
-				}
-				request.onChildSpawn?.(pid);
-			},
-			quiesceProcessGroup: resources.workspace.quiesceProcessGroup,
+					}
+					request.onChildSpawn?.(pid);
+				},
+				onLaunchReady() {
+					resources.workspace.noteChildLaunchReady();
+				},
+				quiesceProcessGroup: resources.workspace.quiesceProcessGroup,
 			launchGate: {
 				launcherPath: path.join(runtime.root, "scripts", "launch-recursive-child.ts"),
 				...(resources.workspace.childLaunchGate || {
@@ -417,6 +457,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		}
 		return { text: output.text, stderr: output.stderr, warnings: output.warnings, details };
 	} catch (error) {
+		hasTerminalError = true;
 		terminalError = error;
 		if (!workspace) {
 			try {
@@ -428,23 +469,35 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 						: `Original child error: ${error instanceof Error ? error.message : String(error)}\n\n`;
 					const report = formatWorkspaceReport(finalizationError.report);
 					const exitCode = error instanceof RecursiveChildError ? error.exitCode : 1;
-					throw new RecursiveChildError(`${original}${finalizationError.message}\n\n${report}`, exitCode);
+					throwTerminal(
+						new RecursiveChildError(
+							`${original}${finalizationError.message}\n\n${report}`,
+							exitCode,
+						),
+					);
 				}
-				throw finalizationError;
+				throwTerminal(finalizationError);
 			}
 		}
 		if (requestedMode === "implement" && workspace) {
 			const report = formatWorkspaceReport(workspace);
 			if (error instanceof RecursiveChildError) {
-				if (error.details) throw error;
-				throw new RecursiveChildError(`${error.message}\n\n${report}`, error.exitCode);
+				if (error.details) throwTerminal(error);
+				throwTerminal(
+					new RecursiveChildError(
+						`${error.message}\n\n${report}`,
+						error.exitCode,
+					),
+				);
 			}
-			throw new RecursiveChildError(
-				`${error instanceof Error ? error.message : String(error)}\n\n${report}`,
-				(error as Error & { exitCode?: number }).exitCode || 1,
+			throwTerminal(
+				new RecursiveChildError(
+					`${error instanceof Error ? error.message : String(error)}\n\n${report}`,
+					(error as Error & { exitCode?: number }).exitCode || 1,
+				),
 			);
 		}
-		throw error;
+		return throwTerminal(error);
 	} finally {
 		const cleanupErrors = resources.cleanup();
 		try {
@@ -466,12 +519,17 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			trace(
 				`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} CLEANUP_FAILED call=${callCount} errors=${cleanupErrors.length} detail=${detail}`,
 			);
-			if (terminalError === undefined) {
+			if (!hasTerminalError) {
 				throw new RecursiveChildError(
 					`Recursive child cleanup failed: ${detail}`,
 					1,
 				);
 			}
+			throw errorWithLifecycleCleanupFailures(
+				terminalError,
+				"Recursive child cleanup also failed",
+				cleanupErrors,
+			);
 		}
 	}
 }

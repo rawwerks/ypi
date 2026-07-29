@@ -1450,15 +1450,13 @@ fi
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ASYNC NOTIFY
+# ASYNC LIFECYCLE
 # ═══════════════════════════════════════════════════════════════════════════
 
 echo ""
-echo "=== Async Notify ==="
+echo "=== Async Lifecycle ==="
 
-# G53: --async --notify writes valid JSON to the peer inbox even when child output
-# contains quotes/backslashes/newlines, and async temp files honor TMPDIR.
-if _feature_exists "notifyPid"; then
+if _feature_exists "createAsyncJob"; then
     # G53a: metadata capture through command substitution must not wait for the
     # background child to close the inherited stdout pipe.
     cat > "$MOCK_BIN/pi" << 'SLOWPI'
@@ -1650,48 +1648,50 @@ PY
         fail "G53g: async acknowledgement EPIPE cancels cleanly" "metadata pipe probe failed"
     fi
 
-    cat > "$MOCK_BIN/pi" << 'NASTYPI'
-#!/bin/bash
-printf '%s\n' 'He said "hello" and used C:\path\to\file'
-printf '%s\n' 'second line with a } brace and , comma'
-NASTYPI
-    chmod +x "$MOCK_BIN/pi"
+    case "$SNAPSHOT_OUTPUT" in
+        "$TEST_TMP"/*) pass "G53h: async temp output honors TMPDIR" ;;
+        *) fail "G53h: async temp output honors TMPDIR" "output=$SNAPSHOT_OUTPUT" ;;
+    esac
 
-    # The inbox finder searches /tmp/pi_peer_* by agent-mail convention, so the fake
-    # peer must live there. Unique per test pid; cleaned up afterward.
+    # The retired flag must fail before admission and ordinary async completion
+    # must never scan or append to the former peer-inbox protocol.
     PEER_DIR="/tmp/pi_peer_rlmtest_$$"
     mkdir -p "$PEER_DIR"
     printf '{"pid":%s}\n' "$$" > "$PEER_DIR/meta.json"
 
-    JOB=$(
+    cat > "$MOCK_BIN/pi" << 'PEERLESSPI'
+#!/bin/bash
+printf '%s\n' 'ordinary async result'
+PEERLESSPI
+    chmod +x "$MOCK_BIN/pi"
+    PEERLESS_JOB=$(
         CONTEXT="$TEST_TMP/ctx.txt" \
         RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
         RLM_PROVIDER=test RLM_MODEL=test \
-        rlm_query --async --notify "$$" "Async hostile output?" 2>/dev/null || true
+        RLM_TRACE_ID="async_peerless_$$" \
+        RLM_CALL_COUNTER_FILE="$TEST_TMP/async_peerless.counter" \
+        rlm_query --async "Complete without peer delivery" 2>/dev/null
     )
+    PEERLESS_SENTINEL=$(printf '%s' "$PEERLESS_JOB" | python3 -c "import json,sys; print(json.load(sys.stdin)['sentinel'])")
+    for _ in $(seq 1 50); do [ -e "$PEERLESS_SENTINEL" ] && break; sleep 0.1; done
+    assert_eq "G53h: ordinary async job reaches its sentinel" "0" "$(cat "$PEERLESS_SENTINEL" 2>/dev/null || echo missing)"
 
-    OUT_PATH=$(printf '%s' "$JOB" | python3 -c "import json,sys; print(json.load(sys.stdin).get('output',''))" 2>/dev/null || echo "")
-    case "$OUT_PATH" in
-        "$TEST_TMP"/*) pass "G53: async temp output honors TMPDIR" ;;
-        *) fail "G53: async temp output honors TMPDIR" "output=$OUT_PATH" ;;
-    esac
-
-    INBOX="$PEER_DIR/inbox.jsonl"
-    for _ in $(seq 1 100); do [ -s "$INBOX" ] && break; sleep 0.1; done
-
-    if [ -s "$INBOX" ]; then
-        LINE=$(tail -n 1 "$INBOX")
-        if printf '%s' "$LINE" | python3 -c "import json,sys; json.loads(sys.stdin.read())" 2>/dev/null; then
-            pass "G53: notify writes valid JSON despite hostile child output"
-        else
-            fail "G53: notify writes valid JSON despite hostile child output" "invalid JSON: $LINE"
-        fi
-        MSG_OK=$(printf '%s' "$LINE" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print('yes' if 'He said \"hello\"' in d.get('message','') else 'no')" 2>/dev/null || echo "no")
-        assert_eq "G53: notify message preserves the hostile content" "yes" "$MSG_OK"
-        EXIT_OK=$(printf '%s' "$LINE" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print('yes' if d.get('exit_code') == 0 and 'exit=0' in d.get('message','') else 'no')" 2>/dev/null || echo "no")
-        assert_eq "G53: notify includes terminal exit status" "yes" "$EXIT_OK"
+    set +e
+    RETIRED_NOTIFY=$(
+        CONTEXT="$TEST_TMP/ctx.txt" \
+        RLM_DEPTH=0 RLM_MAX_DEPTH=3 \
+        RLM_PROVIDER=test RLM_MODEL=test \
+        rlm_query --async --notify "$$" "Retired notification path" 2>&1
+    )
+    RETIRED_NOTIFY_RC=$?
+    set -e
+    assert_eq "G53h: retired notify flag exits 2" "2" "$RETIRED_NOTIFY_RC"
+    assert_contains "G53h: retired notify flag explains the supported evidence path" "read the async output and sentinel paths" "$RETIRED_NOTIFY"
+    assert_not_contains "G53h: retired notify flag admits no job" '"job_id"' "$RETIRED_NOTIFY"
+    if [ ! -e "$PEER_DIR/inbox.jsonl" ]; then
+        pass "G53h: ordinary async runtime leaves former peer inbox untouched"
     else
-        fail "G53: notify writes to the peer inbox" "no inbox content at $INBOX"
+        fail "G53h: ordinary async runtime leaves former peer inbox untouched" "unexpected inbox content"
     fi
 
     rm -rf "$PEER_DIR"
@@ -1702,7 +1702,7 @@ echo "MOCK_PI_CALLED"
 MOCK_PI
     chmod +x "$MOCK_BIN/pi"
 else
-    skip "G53: async notify" "NOTIFY_PID not implemented yet"
+    skip "G53: async lifecycle" "createAsyncJob not implemented yet"
 fi
 
 

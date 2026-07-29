@@ -7,11 +7,11 @@ import {
 	acquireRecoveryMutex,
 	loadRecoveryLease,
 	pathExistsWithoutFollowing,
-	pathModifiedAtEpochSeconds,
 	readMutexOwner,
 	releaseRecoveryMutex,
-	removeValidatedArtifact,
-	scanRegistryArtifacts,
+	retireInterruptedLeaseArtifact,
+	scanLegacyStagedArtifacts,
+	scanRetiredLeaseArtifacts,
 	validateRegistryDirectory,
 	type InvalidRegistryEntry,
 	type RecoveryLease,
@@ -100,20 +100,14 @@ function lockIsStale(
 ): boolean {
 	if (!pathExistsWithoutFollowing(lockPath)) return false;
 	const owner = readMutexOwner(lockPath);
+	if (!owner) return false;
 	const pid = Number.isSafeInteger(owner?.pid) ? Number(owner?.pid) : undefined;
 	const created = Number.isSafeInteger(owner?.createdAtEpochSeconds)
 		? Number(owner?.createdAtEpochSeconds)
 		: undefined;
-	const unknownOwnerOldEnough = owner === undefined
-		&& pathModifiedAtEpochSeconds(lockPath) <= Math.min(
-			cutoffEpochSeconds,
-			nowEpochSeconds - LAUNCH_REGISTRATION_GRACE_SECONDS,
-		);
 	return !alive(pid)
-		&& (
-			(created !== undefined && created <= cutoffEpochSeconds)
-			|| unknownOwnerOldEnough
-		);
+		&& created !== undefined
+		&& created <= cutoffEpochSeconds;
 }
 
 export function recoverImplementerWorkspaces(
@@ -151,6 +145,10 @@ export function recoverImplementerWorkspaces(
 			stdout.push(`${label}: preserved invalid registry lock ${paths.lock}`);
 			return { exitCode: 1, stdout, stderr };
 		}
+		if (!readMutexOwner(paths.lock)) {
+			stdout.push(`${label}: skipped (preserved incomplete or replaced registry lock: ${paths.lock})`);
+			return { exitCode: 0, stdout, stderr };
+		}
 	}
 
 	const now = dependencies.nowEpochSeconds();
@@ -168,24 +166,25 @@ export function recoverImplementerWorkspaces(
 	if (staleLock && !options.force) {
 		stdout.push(`Stale implementer registry lock: ${paths.lock} (use --force to recover)`);
 	}
-	if (staleLock && options.force) removeValidatedArtifact(paths.lock);
+	if (staleLock && options.force) {
+		const owner = readMutexOwner(paths.lock);
+		if (!owner) {
+			stdout.push(`${label}: skipped (preserved incomplete or replaced registry lock: ${paths.lock})`);
+			return { exitCode: 0, stdout, stderr };
+		}
+		releaseRecoveryMutex(paths.lock, owner.token);
+	}
 
 	const loaded = readRecoveryLeases(paths.leases, commonGitDir);
-	const staged = scanRegistryArtifacts(
-		paths.staging,
-		"staged",
-		cutoff,
-		dependencies.processAlive,
-	);
-	const retired = scanRegistryArtifacts(
+	const staged = scanLegacyStagedArtifacts(paths.staging);
+	const retired = scanRetiredLeaseArtifacts(
 		paths.retired,
-		"retired",
+		commonGitDir,
 		cutoff,
 		dependencies.processAlive,
 	);
 	const invalid = [
 		...loaded.invalid,
-		...staged.invalid,
 		...retired.invalid,
 	];
 	const stale: RecoveryLease[] = [];
@@ -196,11 +195,14 @@ export function recoverImplementerWorkspaces(
 	}
 	stdout.push(
 		`${label}: ${stale.length} `
-		+ `(active/recent: ${active}, staged: ${staged.stale.length}/${staged.activeCount}, `
+		+ `(active/recent: ${active}, staged-preserved: ${staged.length}, `
 		+ `retired: ${retired.stale.length}/${retired.activeCount}, invalid: ${invalid.length})`,
 	);
 	for (const entry of invalid) {
 		stdout.push(`  preserved invalid lease ${entry.path}: ${entry.reason}`);
+	}
+	for (const entry of staged) {
+		stdout.push(`  preserved staged artifact ${entry.path}: ${entry.reason}`);
 	}
 	if (!options.force) {
 		for (const lease of stale) {
@@ -209,30 +211,34 @@ export function recoverImplementerWorkspaces(
 				+ `scope=[${lease.record.scope.join(", ")}] from ${lease.directory}`,
 			);
 		}
-		for (const artifact of staged.stale) {
-			stdout.push(`  would discard pre-admission staged lease ${artifact}`);
-		}
 		for (const artifact of retired.stale) {
-			stdout.push(`  would finish removing retired lease ${artifact}`);
+			stdout.push(`  would finish removing retired lease ${artifact.directory}`);
 		}
-		if (stale.length || staged.stale.length || retired.stale.length) {
+		if (stale.length || retired.stale.length) {
 			stdout.push("  (use --force to salvage refs and remove recovered worktrees)");
+		}
+		if (staged.length) {
+			stdout.push("  staged artifacts require manual inspection because no complete resource inventory exists");
 		}
 		return { exitCode: 0, stdout, stderr };
 	}
 
 	let lockToken = "";
-	let failures = invalid.length;
+	let failures = invalid.length + staged.length;
 	let recovered = 0;
 	try {
 		lockToken = acquireRecoveryMutex(paths.lock, now);
-		for (const artifact of staged.stale) {
-			removeValidatedArtifact(artifact);
-			stdout.push(`  discarded pre-admission staged lease ${path.basename(artifact)}`);
-		}
 		for (const artifact of retired.stale) {
-			removeValidatedArtifact(artifact);
-			stdout.push(`  removed retired lease ${path.basename(artifact)}`);
+			try {
+				retireInterruptedLeaseArtifact(artifact, commonGitDir);
+				stdout.push(`  removed retired lease ${path.basename(artifact.directory)}`);
+			} catch (error) {
+				failures++;
+				stderr.push(
+					`  preserved retired lease ${path.basename(artifact.directory)}: `
+					+ `${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
 		}
 		for (const lease of stale) {
 			try {
@@ -255,7 +261,6 @@ export function recoverImplementerWorkspaces(
 				);
 			}
 		}
-		dependencies.git.text(repoRoot, ["worktree", "prune", "--expire", "now"]);
 		stdout.push(`  recovered leases: ${recovered}`);
 	} finally {
 		if (lockToken) releaseRecoveryMutex(paths.lock, lockToken);

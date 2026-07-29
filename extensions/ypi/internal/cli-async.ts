@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { safeTraceId } from "../env.ts";
+import { atomicCopyFile, atomicCreateFile, atomicWriteFile } from "./atomic-file.ts";
+import { createPrivateTempDirectory, withPrivateUmask } from "./private-path.ts";
 
 export class AsyncAdmissionError extends Error {
 	readonly exitCode: number;
@@ -18,7 +20,6 @@ export class AsyncAdmissionError extends Error {
 export interface AsyncJobInput {
 	prompt: string;
 	fork: boolean;
-	notifyPid?: number;
 	cwd: string;
 	context?: string;
 	contextPath?: string;
@@ -29,7 +30,6 @@ export interface AsyncJobInput {
 export interface AsyncJob {
 	prompt: string;
 	fork: boolean;
-	notifyPid?: number;
 	cwd: string;
 	contextPath?: string;
 	ownedContextPath?: string;
@@ -52,8 +52,7 @@ function assertInsideJobDir(job: AsyncJob, candidate: string): void {
 }
 
 function snapshotFile(source: string, target: string): string {
-	copyFileSync(source, target);
-	chmodSync(target, 0o600);
+	atomicCopyFile(source, target);
 	return target;
 }
 
@@ -61,19 +60,19 @@ export function createAsyncJob(input: AsyncJobInput): AsyncJob {
 	const traceId = safeTraceId(process.env.RLM_TRACE_ID || randomBytes(4).toString("hex"));
 	process.env.RLM_TRACE_ID = traceId;
 	const root = process.env.TMPDIR || tmpdir();
-	const jobDir = mkdtempSync(path.join(root, `rlm_async_${traceId}_`));
+	const jobDir = createPrivateTempDirectory(path.join(root, `rlm_async_${traceId}_`));
 	const jobPath = path.join(jobDir, "job.json");
 	const outputPath = path.join(jobDir, "output.txt");
 	const sentinelPath = path.join(jobDir, "done");
 	const admissionPath = path.join(jobDir, "admitted");
 	const childPidPath = path.join(jobDir, "child.pid");
 	try {
-		writeFileSync(outputPath, "", { flag: "wx", mode: 0o600 });
+		atomicCreateFile(outputPath, "");
 
 		let ownedContextPath: string | undefined;
 		if (input.context !== undefined) {
 			ownedContextPath = path.join(jobDir, "context.txt");
-			writeFileSync(ownedContextPath, input.context, { flag: "wx", mode: 0o600 });
+			atomicCreateFile(ownedContextPath, input.context);
 		} else if (input.contextPath && existsSync(input.contextPath)) {
 			ownedContextPath = snapshotFile(input.contextPath, path.join(jobDir, "context.txt"));
 		}
@@ -90,7 +89,6 @@ export function createAsyncJob(input: AsyncJobInput): AsyncJob {
 		return {
 			prompt: input.prompt,
 			fork: input.fork,
-			notifyPid: input.notifyPid,
 			cwd: input.cwd,
 			contextPath: ownedContextPath,
 			ownedContextPath,
@@ -111,13 +109,13 @@ export function createAsyncJob(input: AsyncJobInput): AsyncJob {
 }
 
 export function launchAsyncWorker(job: AsyncJob, cliPath: string): number {
-	writeFileSync(job.jobPath, `${JSON.stringify(job)}\n`, { flag: "wx", mode: 0o600 });
-	const child = spawn(process.execPath, [cliPath, "--ypi-async-worker", job.jobPath], {
+	atomicCreateFile(job.jobPath, `${JSON.stringify(job)}\n`);
+	const child = withPrivateUmask(() => spawn(process.execPath, [cliPath, "--ypi-async-worker", job.jobPath], {
 		cwd: job.cwd,
 		env: process.env,
 		stdio: "ignore",
 		detached: process.platform !== "win32",
-	});
+	}));
 	child.unref();
 	return child.pid || 0;
 }
@@ -132,11 +130,11 @@ export function readAsyncJob(jobPath: string): AsyncJob {
 }
 
 export function markAsyncJobAdmitted(job: AsyncJob): void {
-	writeFileSync(job.admissionPath, "accepted\n", { flag: "wx", mode: 0o600 });
+	atomicCreateFile(job.admissionPath, "accepted\n");
 }
 
 export function markAsyncJobChildPid(job: AsyncJob, pid: number): void {
-	writeFileSync(job.childPidPath, `${pid}\n`, { flag: "wx", mode: 0o600 });
+	atomicCreateFile(job.childPidPath, `${pid}\n`);
 }
 
 function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
@@ -186,37 +184,9 @@ export async function waitForAsyncAdmission(job: AsyncJob, timeoutMilliseconds =
 	throw new Error(`Async recursion admission timed out after ${timeoutMilliseconds}ms`);
 }
 
-function notifyPeer(job: AsyncJob, code: number, output: string): void {
-	if (!job.notifyPid) return;
-	// Pi peer inboxes are a host protocol surface rooted at /tmp, independent
-	// from caller-selected TMPDIR used for ypi-owned job artifacts.
-	const inboxRoot = "/tmp";
-	for (const name of (() => { try { return readdirSync(inboxRoot); } catch { return []; } })()) {
-		if (!name.startsWith("pi_peer_")) continue;
-		const dir = path.join(inboxRoot, name);
-		try {
-			const meta = JSON.parse(readFileSync(path.join(dir, "meta.json"), "utf8"));
-			if (Number(meta.pid) !== job.notifyPid) continue;
-			const message = {
-				from_pid: process.pid,
-				from_project: "rlm_query",
-				exit_code: code,
-				message: `[rlm_query --async result exit=${code}]\n\n${output.slice(-50_000)}`,
-				timestamp: new Date().toISOString(),
-				id: `async_${path.basename(path.dirname(job.jobPath))}`,
-			};
-			writeFileSync(path.join(dir, "inbox.jsonl"), `${JSON.stringify(message)}\n`, { flag: "a" });
-			break;
-		} catch {
-			// Ignore malformed or concurrently removed peer directories.
-		}
-	}
-}
-
 export function finishAsyncJob(job: AsyncJob, code: number, output: string): void {
-	writeFileSync(job.outputPath, output, { mode: 0o600 });
-	writeFileSync(job.sentinelPath, `${code}\n`, { flag: "wx", mode: 0o600 });
-	notifyPeer(job, code, output);
+	atomicWriteFile(job.outputPath, output);
+	atomicCreateFile(job.sentinelPath, `${code}\n`);
 	rmSync(job.jobPath, { force: true });
 	if (job.ownedContextPath) rmSync(job.ownedContextPath, { force: true });
 	if (job.parentSessionSnapshot) rmSync(job.parentSessionSnapshot, { force: true });

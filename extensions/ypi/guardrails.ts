@@ -2,9 +2,16 @@ import { constants, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { accessSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import {
+	appendOwnedPrivateFile,
+	parsePrivateFileIdentity,
+} from "./internal/private-path.ts";
+import { atomicWriteFile } from "./internal/atomic-file.ts";
+import { createPrivateDirectory } from "./internal/private-path.ts";
 
 const LOCK_RETRY_MS = 10;
 const LOCK_RETRIES = 500;
+export const MAX_TIMEOUT_SECONDS = Math.floor(2_147_483_647 / 1000);
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -39,10 +46,10 @@ export async function allocateCallCount(deadlineMilliseconds?: number): Promise<
 			throw error;
 		}
 		try {
-			mkdirSync(lockDir);
+			createPrivateDirectory(lockDir);
 			try {
 				const next = readCounter(counterFile) + 1;
-				writeFileSync(counterFile, `${next}\n`);
+				atomicWriteFile(counterFile, `${next}\n`);
 				process.env.RLM_CALL_COUNT = String(next);
 				return next;
 			} finally {
@@ -73,8 +80,14 @@ export function remainingTimeoutSeconds(): number | undefined {
 	const configured = process.env.RLM_TIMEOUT;
 	if (configured === undefined || configured === "") return undefined;
 	const timeout = exactNonNegativeInteger("RLM_TIMEOUT", configured);
-	const start = exactNonNegativeInteger("RLM_START_TIME", process.env.RLM_START_TIME || `${Math.floor(Date.now() / 1000)}`);
-	const elapsed = Math.floor(Date.now() / 1000) - start;
+	if (timeout > MAX_TIMEOUT_SECONDS) {
+		throw new Error(
+			`Invalid RLM_TIMEOUT: ${JSON.stringify(configured)} exceeds the supported maximum of ${MAX_TIMEOUT_SECONDS} seconds.`,
+		);
+	}
+	const now = Math.floor(Date.now() / 1000);
+	const start = exactNonNegativeInteger("RLM_START_TIME", process.env.RLM_START_TIME || `${now}`);
+	const elapsed = Math.max(0, now - start);
 	return timeout - elapsed;
 }
 
@@ -125,11 +138,16 @@ export function readCostSummary(costFile = process.env.RLM_COST_FILE): CostLedge
 }
 
 function appendTelemetryLine(line: string): void {
-	if (!process.env.RLM_COST_FILE) return;
+	if (!process.env.RLM_COST_FILE || !process.env.YPI_COST_FILE_IDENTITY) return;
 	try {
-		writeFileSync(process.env.RLM_COST_FILE, `${line}\n`, { flag: "a" });
+		appendOwnedPrivateFile(
+			process.env.RLM_COST_FILE,
+			parsePrivateFileIdentity(process.env.YPI_COST_FILE_IDENTITY),
+			`${line}\n`,
+		);
 	} catch {
 		delete process.env.RLM_COST_FILE;
+		delete process.env.YPI_COST_FILE_IDENTITY;
 	}
 }
 

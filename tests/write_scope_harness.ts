@@ -197,7 +197,10 @@ const submoduleRead = await toolCallHandler?.(
 	{ cwd: lease.cwd, hasUI: false },
 ) as { block?: boolean; reason?: string } | undefined;
 record(submoduleRead?.block === true && submoduleRead.reason?.includes("submodule") === true, "submodule-path read is blocked", JSON.stringify(submoduleRead));
-const auditFile = lease.childEnvironment.YPI_IMPLEMENT_AUDIT_FILE;
+const confinementFile = lease.childEnvironment.YPI_IMPLEMENT_CONFINEMENT_FILE;
+const auditFile = confinementFile
+	? path.join(path.dirname(confinementFile), "writes")
+	: undefined;
 record(
 	Boolean(auditFile)
 		&& existsSync(auditFile!)

@@ -13,6 +13,7 @@ import {
 	unlinkSync,
 	writeSync,
 } from "node:fs";
+import type { BigIntStats } from "node:fs";
 import path from "node:path";
 import { atomicCreateFile } from "./atomic-file.ts";
 import {
@@ -72,6 +73,65 @@ interface ForkSourceLease {
 	descriptor: number;
 	bytes: number;
 	sha256: string;
+}
+
+export type TranscriptLifecycleHookForTests = (
+	stage: "before-publish" | "before-temporary-retire" | "after-temporary-retire",
+	temporary: string,
+	childSession: string,
+) => void;
+
+let transcriptLifecycleHookForTests: TranscriptLifecycleHookForTests | undefined;
+
+export function setTranscriptLifecycleHookForTests(
+	hook: TranscriptLifecycleHookForTests | undefined,
+): void {
+	transcriptLifecycleHookForTests = hook;
+}
+
+function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
+	return left.dev === right.dev && left.ino === right.ino;
+}
+
+function retireHeldTemporary(
+	temporary: string,
+	descriptor: number,
+	expectedLinks: bigint,
+): void {
+	const held = fstatSync(descriptor, { bigint: true });
+	const current = lstatSync(temporary, { bigint: true });
+	const uid = process.getuid?.();
+	if (
+		!held.isFile()
+		|| held.isSymbolicLink()
+		|| !current.isFile()
+		|| current.isSymbolicLink()
+		|| !sameFileIdentity(held, current)
+		|| held.nlink !== expectedLinks
+		|| current.nlink !== expectedLinks
+		|| (uid !== undefined && (Number(held.uid) !== uid || Number(current.uid) !== uid))
+		|| (
+			process.platform !== "win32"
+			&& (
+				Number(held.mode & 0o777n) !== PRIVATE_FILE_MODE
+				|| Number(current.mode & 0o777n) !== PRIVATE_FILE_MODE
+			)
+		)
+	) {
+		throw proofError("Required transcript temporary identity changed; preserving uncertain evidence.");
+	}
+	unlinkSync(temporary);
+}
+
+function combinePublicationAndCleanupError(
+	publicationError: unknown,
+	cleanupError: unknown,
+): AggregateError {
+	return new AggregateError(
+		[publicationError, cleanupError],
+		"Required transcript publication failed and its temporary could not be retired safely.",
+		{ cause: publicationError },
+	);
 }
 
 export function transcriptsRequired(): boolean {
@@ -185,6 +245,7 @@ function createHeldTranscript(
 		`.${path.basename(childSession)}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`,
 	);
 	let descriptor: number | undefined;
+	let temporaryRetired = false;
 	try {
 		descriptor = openSync(
 			temporary,
@@ -194,12 +255,24 @@ function createHeldTranscript(
 				| (constants.O_NOFOLLOW || 0),
 			PRIVATE_FILE_MODE,
 		);
-		fchmodSync(descriptor, PRIVATE_FILE_MODE);
-		const baseline = copyForkBaseline(baselineSource, descriptor);
-		fsyncSync(descriptor);
-		linkSync(temporary, childSession);
-		unlinkSync(temporary);
-		fsyncSync(directory.descriptor);
+			fchmodSync(descriptor, PRIVATE_FILE_MODE);
+			const baseline = copyForkBaseline(baselineSource, descriptor);
+			fsyncSync(descriptor);
+			transcriptLifecycleHookForTests?.("before-publish", temporary, childSession);
+			linkSync(temporary, childSession);
+			transcriptLifecycleHookForTests?.(
+				"before-temporary-retire",
+				temporary,
+				childSession,
+			);
+			retireHeldTemporary(temporary, descriptor, 2n);
+			temporaryRetired = true;
+			transcriptLifecycleHookForTests?.(
+				"after-temporary-retire",
+				temporary,
+				childSession,
+			);
+			fsyncSync(directory.descriptor);
 
 		const metadata = fstatSync(descriptor, { bigint: true });
 		const pathMetadata = lstatSync(childSession, { bigint: true });
@@ -221,14 +294,22 @@ function createHeldTranscript(
 			directory,
 			receiptPath: `${childSession}.receipt.json`,
 		};
-	} catch (error) {
-		try {
-			unlinkSync(temporary);
-		} catch {
-			// Preserve uncertain filesystem evidence.
-		}
-		if (descriptor !== undefined) closeSync(descriptor);
-		throw error;
+		} catch (error) {
+			try {
+				if (descriptor !== undefined && !temporaryRetired) {
+					transcriptLifecycleHookForTests?.(
+						"before-temporary-retire",
+						temporary,
+						childSession,
+					);
+					retireHeldTemporary(temporary, descriptor, 1n);
+				}
+			} catch (cleanupError) {
+				if (descriptor !== undefined) closeSync(descriptor);
+				throw combinePublicationAndCleanupError(error, cleanupError);
+			}
+			if (descriptor !== undefined) closeSync(descriptor);
+			throw error;
 	}
 }
 

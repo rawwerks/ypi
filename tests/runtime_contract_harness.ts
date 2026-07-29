@@ -238,6 +238,7 @@ async function run(): Promise<void> {
 	console.log("\n=== Recursion Runtime Contract Harness ===");
 	clearRuntimeEnv();
 	ensureEnvironment(runtime, extensionContext(), pi);
+	equal("extension pins Node-backed adapters to the running executable", process.env.YPI_NODE_BIN, process.execPath);
 	equal("default max depth remains empirically bounded", process.env.RLM_MAX_DEPTH, "3");
 	equal("default total call backstop leaves long-tree headroom", process.env.RLM_MAX_CALLS, "65536");
 	equal("default active child concurrency is bounded", process.env.RLM_MAX_CONCURRENT_CALLS, "3");

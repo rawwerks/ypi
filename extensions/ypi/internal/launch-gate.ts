@@ -8,7 +8,6 @@ import {
 	readFileSync,
 } from "node:fs";
 import path from "node:path";
-import { atomicWriteFile } from "./atomic-file.ts";
 import { processIsAlive } from "./process-liveness.ts";
 
 export interface LaunchGateRequest {
@@ -29,6 +28,7 @@ export class LaunchGateError extends Error {
 }
 
 const WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(4));
+const EXEC_STATUS_SHIM = "/usr/bin/env";
 
 function requireValue(args: string[], index: number, flag: string): string {
 	const value = args[index + 1];
@@ -139,7 +139,13 @@ function resolveExecutable(command: string, environment: NodeJS.ProcessEnv): str
 }
 
 export function runRecursiveChildLaunchGate(request: LaunchGateRequest): never | number {
-	atomicWriteFile(request.pidFile, `${process.pid}\n`);
+	while (!existsSync(request.pidFile)) {
+		if (!processIsAlive(request.ownerPid)) return 125;
+		wait(10);
+	}
+	if (readReadyPid(request.pidFile) !== process.pid) {
+		throw new LaunchGateError("recursive child registered PID does not match this process", 126);
+	}
 	while (!existsSync(request.readyFile)) {
 		if (!processIsAlive(request.ownerPid)) return 125;
 		wait(10);
@@ -152,7 +158,7 @@ export function runRecursiveChildLaunchGate(request: LaunchGateRequest): never |
 		throw new LaunchGateError("Node.js >=22.15 with process.execve is required for recursive child launch", 126);
 	}
 	const executable = resolveExecutable(request.command[0], process.env);
-	const envExecutable = resolveExecutable("env", process.env);
+	const envExecutable = resolveExecutable(EXEC_STATUS_SHIM, process.env);
 	try {
 		// Node treats a failed process.execve as fatal rather than catchable on
 		// supported releases. `env` performs the target exec in the already

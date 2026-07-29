@@ -11,7 +11,6 @@ import { resolveRuntime, type YpiRuntime } from "./runtime.ts";
 interface CliFlags {
 	fork: boolean;
 	async: boolean;
-	notifyPid?: number;
 	prompt: string;
 }
 
@@ -40,14 +39,23 @@ function activeRuntime(): YpiRuntime {
 }
 
 function usage(): never {
-	console.error('Usage: rlm_query [--fork] [--async] [--notify PID] "your prompt here"');
+	console.error('Usage: rlm_query [--fork] [--async] "your prompt here"');
 	process.exit(1);
+}
+
+function rejectRetiredFlags(args: string[]): void {
+	for (const argument of args) {
+		if (argument === "--notify") {
+			console.error("✗ --notify was removed; read the async output and sentinel paths");
+			process.exit(2);
+		}
+		if (argument !== "--fork" && argument !== "--async") return;
+	}
 }
 
 function parseFlags(args: string[]): CliFlags {
 	let fork = false;
 	let async = false;
-	let notifyPid: number | undefined;
 	let index = 0;
 	flagLoop: while (args[index]?.startsWith("--")) {
 		switch (args[index]) {
@@ -59,13 +67,6 @@ function parseFlags(args: string[]): CliFlags {
 				async = true;
 				index++;
 				break;
-			case "--notify": {
-				const raw = args[index + 1];
-				if (!raw || !/^\d+$/.test(raw)) usage();
-				notifyPid = Number(raw);
-				index += 2;
-				break;
-			}
 			default:
 				// Preserve the historical parser: an unknown --token becomes the prompt.
 				break flagLoop;
@@ -73,11 +74,7 @@ function parseFlags(args: string[]): CliFlags {
 	}
 	const prompt = args[index];
 	if (!prompt) usage();
-	if (notifyPid !== undefined && !async) {
-		console.error("✗ --notify requires --async");
-		process.exit(1);
-	}
-	return { fork, async, notifyPid, prompt };
+	return { fork, async, prompt };
 }
 
 function parentContext(cwd = process.cwd()) {
@@ -206,6 +203,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 	process.stdout.on("error", onStdoutError);
 	let source: ContextSource | undefined;
 	try {
+		rejectRetiredFlags(args);
 		const flags = parseFlags(args);
 		const remaining = remainingTimeoutSeconds();
 		source = await resolveContextSource({
@@ -220,7 +218,6 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 				job = createAsyncJob({
 					prompt: flags.prompt,
 					fork: flags.fork,
-					notifyPid: flags.notifyPid,
 					cwd: process.cwd(),
 					context: source.context,
 					contextPath: source.contextPath,

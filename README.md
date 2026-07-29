@@ -80,7 +80,6 @@ to the file named by `CONTEXT`. Its public flags are:
 |---|---|
 | `--async` | Admit a background review call and return its job paths. |
 | `--fork` | Copy the current parent session into the child session. |
-| `--notify` | With `--async`, signal the supplied caller PID at terminal state. |
 <!-- rlm-query-flags:end -->
 
 For example:

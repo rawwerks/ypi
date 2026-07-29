@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { constants as osConstants } from "node:os";
 import type { CostSummary } from "../guardrails.ts";
 import { atomicCreateFile } from "./atomic-file.ts";
+import { withPrivateUmask } from "./private-path.ts";
 import {
 	createBoundedCapture,
 	createJsonDecoder,
@@ -23,6 +24,7 @@ export interface ChildProcessOptions {
 	onToolActivity?: (activity: ChildToolActivity) => void;
 	onTextDrain?: () => Promise<void>;
 	onSpawn?: (pid: number) => void;
+	onLaunchReady?: () => void;
 	quiesceProcessGroup?: boolean;
 	launchGate?: {
 		launcherPath: string;
@@ -47,7 +49,7 @@ function signalledExitCode(signal: NodeJS.Signals | null): number {
 export function runChildProcess(options: ChildProcessOptions): Promise<ChildProcessResult> {
 	return new Promise((resolve, reject) => {
 		const piExecutable = process.env.YPI_PI_BIN || "pi";
-		const executable = options.launchGate ? process.env.YPI_NODE_BIN || "node" : piExecutable;
+		const executable = options.launchGate ? process.env.YPI_NODE_BIN || process.execPath : piExecutable;
 		const args = options.launchGate
 			? [
 				options.launchGate.launcherPath,
@@ -62,12 +64,12 @@ export function runChildProcess(options: ChildProcessOptions): Promise<ChildProc
 				...options.args,
 			]
 			: options.args;
-		const child = spawn(executable, args, {
+		const child = withPrivateUmask(() => spawn(executable, args, {
 			cwd: options.cwd,
 			env: options.env,
 			stdio: ["pipe", "pipe", "pipe"],
 			detached: process.platform !== "win32",
-		});
+		}));
 		let stdoutCharacters = 0;
 		const rawStderr = createBoundedCapture(MAX_TOOL_OUTPUT_CHARS);
 		const plainText = createBoundedCapture(MAX_TOOL_OUTPUT_CHARS);
@@ -200,10 +202,12 @@ export function runChildProcess(options: ChildProcessOptions): Promise<ChildProc
 		});
 		if (child.pid) {
 			try {
-				options.onSpawn?.(child.pid);
-				if (options.launchGate) {
-					atomicCreateFile(options.launchGate.readyFile, `${child.pid}\n`, { mode: 0o600 });
-				}
+					options.onSpawn?.(child.pid);
+					if (options.launchGate) {
+						atomicCreateFile(options.launchGate.pidFile, `${child.pid}\n`, { mode: 0o600 });
+						atomicCreateFile(options.launchGate.readyFile, `${child.pid}\n`, { mode: 0o600 });
+						options.onLaunchReady?.();
+					}
 			} catch (error) {
 				launchRegistrationError = error instanceof Error
 					? error

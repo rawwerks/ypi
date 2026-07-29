@@ -1,6 +1,12 @@
-import { closeSync, existsSync, mkdtempSync, openSync, rmSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fchmodSync, openSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import {
+	createOwnedPrivateTempDirectory,
+	PRIVATE_FILE_MODE,
+	retireOwnedPrivateTree,
+	sealOwnedPrivateDirectory,
+} from "./private-path.ts";
 
 export interface ContextSource {
 	context?: string;
@@ -24,10 +30,12 @@ export class CliInputError extends Error {
 }
 
 async function spoolStdin(options: ContextSourceOptions): Promise<{ path: string; bytes: number; cleanup(): void }> {
-	const directory = mkdtempSync(path.join(process.env.TMPDIR || tmpdir(), "ypi_cli_stdin_"));
-	const contextPath = path.join(directory, "context.bin");
-	const descriptor = openSync(contextPath, "wx", 0o600);
-	let descriptorOpen = true;
+	const owner = createOwnedPrivateTempDirectory(
+		path.join(process.env.TMPDIR || tmpdir(), "ypi_cli_stdin_"),
+	);
+	const contextPath = path.join(owner.path, "context.bin");
+	let descriptor: number | undefined;
+	let contextCreated = false;
 	let bytes = 0;
 	let timedOut = false;
 	const abortInput = () => process.stdin.destroy(new CliInputError("Recursive input cancelled before completion", 130));
@@ -39,6 +47,9 @@ async function spoolStdin(options: ContextSourceOptions): Promise<{ path: string
 		}, Math.max(0, options.timeoutMilliseconds));
 	options.signal?.addEventListener("abort", abortInput, { once: true });
 	try {
+		descriptor = openSync(contextPath, "wx", PRIVATE_FILE_MODE);
+		contextCreated = true;
+		fchmodSync(descriptor, PRIVATE_FILE_MODE);
 		if (options.signal?.aborted) throw new CliInputError("Recursive input cancelled before completion", 130);
 		for await (const chunk of process.stdin) {
 			if (timedOut) throw new CliInputError("Timeout exceeded while reading recursive input under RLM_TIMEOUT", 124);
@@ -50,19 +61,44 @@ async function spoolStdin(options: ContextSourceOptions): Promise<{ path: string
 		}
 		if (timedOut) throw new CliInputError("Timeout exceeded while reading recursive input under RLM_TIMEOUT", 124);
 	} catch (error) {
-		if (descriptorOpen) {
+		if (descriptor !== undefined) {
 			closeSync(descriptor);
-			descriptorOpen = false;
+			descriptor = undefined;
 		}
-		rmSync(directory, { recursive: true, force: true });
+		let cleanupFailure: unknown;
+		try {
+			const partial = sealOwnedPrivateDirectory(
+				owner,
+				contextCreated ? ["context.bin"] : [],
+			);
+			retireOwnedPrivateTree(partial);
+		} catch (cleanupError) {
+			cleanupFailure = cleanupError;
+		}
 		if (timedOut) throw new CliInputError("Timeout exceeded while reading recursive input under RLM_TIMEOUT", 124);
+		if (cleanupFailure) {
+			const primary = error instanceof Error ? error : new Error(String(error));
+			const combined = new Error(
+				`${primary.message}\nCLI input cleanup also failed: ${
+					cleanupFailure instanceof Error ? cleanupFailure.message : String(cleanupFailure)
+				}`,
+				{ cause: primary },
+			) as Error & { exitCode?: number };
+			combined.exitCode = (primary as Error & { exitCode?: number }).exitCode;
+			throw combined;
+		}
 		throw error;
 	} finally {
 		if (timeout) clearTimeout(timeout);
 		options.signal?.removeEventListener("abort", abortInput);
 	}
-	if (descriptorOpen) closeSync(descriptor);
-	return { path: contextPath, bytes, cleanup: () => rmSync(directory, { recursive: true, force: true }) };
+	if (descriptor !== undefined) closeSync(descriptor);
+	const tree = sealOwnedPrivateDirectory(owner, ["context.bin"]);
+	return {
+		path: contextPath,
+		bytes,
+		cleanup: () => retireOwnedPrivateTree(tree),
+	};
 }
 
 export async function resolveContextSource(options: ContextSourceOptions = {}): Promise<ContextSource> {

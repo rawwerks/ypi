@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
@@ -13,6 +14,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { implementerLeaseRecordDigest } from "../extensions/ypi/internal/implementer-lease.ts";
+import { readImplementerLeaseFile } from "../extensions/ypi/internal/implementer-lease-file.ts";
 import { acquireWorkspace, type WorkspaceLifecycleStage } from "../extensions/ypi/internal/workspace-policy.ts";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -332,14 +335,28 @@ exec "$YPI_REAL_GIT" "$@"
 	const sleeperExit = waitForExit(sleeper);
 	if (!sleeper.pid || !lease.childLaunchGate) throw new Error("launch-gate fixture is unavailable");
 	writeFileSync(lease.childLaunchGate.pidFile, `${sleeper.pid}\n`, { mode: 0o600 });
+	writeFileSync(lease.childLaunchGate.readyFile, `${sleeper.pid}\n`, { mode: 0o600 });
+	lease.noteChildLaunchReady();
 	const commonGitDir = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir");
 	const leasesRoot = path.join(commonGitDir, "ypi-implementers", "leases");
 	const leaseDirectory = path.join(leasesRoot, readdirSync(leasesRoot)[0]);
 	const recordPath = path.join(leaseDirectory, "lease.json");
-	const recordValue = JSON.parse(readFileSync(recordPath, "utf8"));
+	const recordValue = readImplementerLeaseFile(
+		leaseDirectory,
+		path.basename(leaseDirectory),
+		commonGitDir,
+	);
 	recordValue.ownerPid = 2_000_000_000;
 	delete recordValue.childPid;
-	writeFileSync(recordPath, `${JSON.stringify(recordValue, null, 2)}\n`, { mode: 0o600 });
+	recordValue.revision = 0;
+	recordValue.recordDigest = implementerLeaseRecordDigest(recordValue);
+	const payload = Buffer.from(`${JSON.stringify(recordValue)}\n`, "utf8");
+	const digest = createHash("sha256").update(payload).digest("hex");
+	const commit = Buffer.from(
+		`commit\t0\t${payload.length}\t${digest}\n`,
+		"ascii",
+	);
+	writeFileSync(recordPath, Buffer.concat([payload, commit]), { mode: 0o600 });
 
 	const liveCleanup = cleanup(root, parent);
 	record(

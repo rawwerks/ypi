@@ -1,9 +1,14 @@
-import { randomBytes } from "node:crypto";
-import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MAX_CONCURRENT_CALLS } from "./internal/concurrency.ts";
+import {
+	createPrivateTempDirectory,
+	ensurePrivateAppendFile,
+	withPrivateUmask,
+} from "./internal/private-path.ts";
 import type { YpiRuntime } from "./runtime.ts";
 import { debug } from "./runtime.ts";
 
@@ -65,7 +70,10 @@ export function shellHelperEnabled(runtime: YpiRuntime): boolean {
 // Trace IDs flow into temp filenames and session-log filenames, so strip anything that
 // could escape the intended directory before the value is used as a path component.
 export function safeTraceId(traceId: string): string {
-	return traceId.replace(/[^a-zA-Z0-9._-]/g, "_");
+	const sanitized = traceId.replace(/[^a-zA-Z0-9._-]/g, "_");
+	if (sanitized.length <= 64) return sanitized;
+	const digest = createHash("sha256").update(sanitized).digest("hex").slice(0, 32);
+	return `${sanitized.slice(0, 31)}-${digest}`;
 }
 
 function ensureRuntimeStatePaths(): void {
@@ -77,11 +85,10 @@ function ensureRuntimeStatePaths(): void {
 	].some((variable) => !process.env[variable]);
 	if (!missing) return;
 
-	const stateRoot = mkdtempSync(path.join(
+	const stateRoot = createPrivateTempDirectory(path.join(
 		tmpdir(),
 		`ypi_runtime_${process.env.RLM_TRACE_ID}_`,
 	));
-	chmodSync(stateRoot, 0o700);
 	process.env.RLM_CALL_COUNTER_FILE ||= path.join(stateRoot, "calls.counter");
 	process.env.RLM_CONCURRENCY_DIR ||= path.join(stateRoot, "concurrency");
 	process.env.PI_TRACE_FILE ||= path.join(stateRoot, "trace.jsonl");
@@ -91,19 +98,21 @@ function ensureRuntimeStatePaths(): void {
 function ensurePrivateTelemetryFile(variable: "PI_TRACE_FILE" | "RLM_COST_FILE"): void {
 	const filePath = process.env[variable];
 	if (!filePath) return;
+	const identityVariable = variable === "PI_TRACE_FILE"
+		? "YPI_TRACE_FILE_IDENTITY"
+		: "YPI_COST_FILE_IDENTITY";
 	try {
-		mkdirSync(path.dirname(filePath), { recursive: true });
-		const descriptor = openSync(filePath, "a", 0o600);
-		closeSync(descriptor);
-		chmodSync(filePath, 0o600);
+		process.env[identityVariable] = JSON.stringify(ensurePrivateAppendFile(filePath));
 	} catch {
 		// Telemetry is observational. An unwritable or invalid sink must never
 		// prevent product work from starting.
 		delete process.env[variable];
+		delete process.env[identityVariable];
 	}
 }
 
 export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext, pi?: ExtensionAPI): void {
+	process.env.YPI_NODE_BIN ||= process.execPath;
 	process.env.RLM_DEPTH = process.env.RLM_DEPTH || "0";
 	process.env.RLM_MAX_DEPTH = process.env.RLM_MAX_DEPTH || String(DEFAULT_MAX_DEPTH);
 	process.env.RLM_MAX_CALLS = process.env.RLM_MAX_CALLS || String(DEFAULT_MAX_CALLS);
@@ -142,7 +151,10 @@ export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext, p
 		}
 	}
 	if (process.env.RLM_SESSION_DIR && sharedSessionsEnabled()) {
-		mkdirSync(process.env.RLM_SESSION_DIR, { recursive: true });
+		withPrivateUmask(() => mkdirSync(process.env.RLM_SESSION_DIR!, {
+			recursive: true,
+			mode: 0o700,
+		}));
 	}
 
 	if (ctx?.model) {

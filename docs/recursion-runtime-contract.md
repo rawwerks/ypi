@@ -72,10 +72,10 @@ batch. The root waits for the full batch before mutating or integrating.
 
 `extensions/ypi/cli.ts` owns only:
 
-- `--fork`, `--async`, and `--notify` parsing;
+- `--fork` and `--async` parsing;
 - explicit, piped, or file-backed context selection;
-- background job metadata, immutable input snapshots, sentinel, notification,
-  and cancellation behavior;
+- background job metadata, immutable input snapshots, sentinel, and
+  cancellation behavior;
 - backpressure and broken-pipe handling;
 - command-line error presentation.
 

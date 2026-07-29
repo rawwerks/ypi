@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
@@ -19,9 +20,13 @@ import {
 	implementerRegistryPaths,
 } from "../extensions/ypi/internal/implementer-registry-layout.ts";
 import {
+	implementerLeaseRecordDigest,
 	parseImplementerLeaseRecord,
 	type ImplementerLeaseRecord,
 } from "../extensions/ypi/internal/implementer-lease.ts";
+import {
+	readImplementerLeaseFile,
+} from "../extensions/ypi/internal/implementer-lease-file.ts";
 import { parseImplementerRecoveryArguments } from "../extensions/ypi/internal/implementer-recovery/cli.ts";
 import { createRecoveryGit } from "../extensions/ypi/internal/implementer-recovery/git.ts";
 import { leaseNeedsRecovery } from "../extensions/ypi/internal/implementer-recovery/service.ts";
@@ -87,6 +92,32 @@ function expectThrow(label: string, expected: string, action: () => unknown): vo
 		const message = error instanceof Error ? error.message : String(error);
 		record(message.includes(expected), label, message);
 	}
+}
+
+function writeFixtureLeaseRecord(
+	recordPath: string,
+	recordValue: ImplementerLeaseRecord,
+): void {
+	recordValue.revision = 0;
+	recordValue.recordDigest = implementerLeaseRecordDigest(recordValue);
+	const payload = Buffer.from(`${JSON.stringify(recordValue)}\n`, "utf8");
+	const digest = createHash("sha256").update(payload).digest("hex");
+	const commit = `commit\t0\t${payload.length}\t${digest}\n`;
+	writeFileSync(recordPath, Buffer.concat([payload, Buffer.from(commit, "ascii")]), {
+		mode: 0o600,
+	});
+}
+
+function readFixtureLeaseRecord(
+	recordPath: string,
+	commonGitDir: string,
+): ImplementerLeaseRecord {
+	const leaseDirectory = path.dirname(recordPath);
+	return readImplementerLeaseFile(
+		leaseDirectory,
+		path.basename(leaseDirectory),
+		commonGitDir,
+	);
 }
 
 console.log("\n=== Implementer recovery module and CLI harness ===");
@@ -226,7 +257,7 @@ console.log("\n=== Implementer recovery module and CLI harness ===");
 const token = "a".repeat(32);
 const commonGitDir = "/tmp/ypi-common";
 const validRecord: ImplementerLeaseRecord = {
-	schemaVersion: 1,
+	schemaVersion: 3,
 	token,
 	ownerPid: 42,
 	createdAtEpochSeconds: 10,
@@ -236,7 +267,26 @@ const validRecord: ImplementerLeaseRecord = {
 	scope: ["src"],
 	state: "worktree-ready",
 	attemptRef: `refs/ypi/attempt-${token}`,
+	worktreeIndexOwnedByYpi: false,
+	leaseResources: {},
+	leaseDirectoryIdentity: {
+		device: "1",
+		inode: "2",
+		kind: "directory",
+		mode: 0o700,
+		links: "2",
+	},
+	leaseFileIdentity: {
+		device: "1",
+		inode: "3",
+		kind: "file",
+		mode: 0o600,
+		links: "1",
+	},
+	revision: 0,
+	recordDigest: "",
 };
+validRecord.recordDigest = implementerLeaseRecordDigest(validRecord);
 record(
 	parseImplementerLeaseRecord(validRecord, token, commonGitDir).scope[0] === "src",
 	"runtime and recovery share one accepted lease schema",
@@ -311,9 +361,9 @@ expectThrow(
 		const leasesRoot = path.join(common, "ypi-implementers", "leases");
 		const leaseDirectory = path.join(leasesRoot, readdirSync(leasesRoot)[0]);
 		const recordPath = path.join(leaseDirectory, "lease.json");
-		const recordValue = JSON.parse(readFileSync(recordPath, "utf8"));
+		const recordValue = readFixtureLeaseRecord(recordPath, common);
 		recordValue.ownerPid = 2_000_000_000;
-		writeFileSync(recordPath, `${JSON.stringify(recordValue, null, 2)}\n`, { mode: 0o600 });
+		writeFixtureLeaseRecord(recordPath, recordValue);
 
 		const result = spawnSync("node", [
 			recoveryScript,
@@ -350,6 +400,55 @@ expectThrow(
 			mode: "implement",
 			scope: ["slice.txt"],
 		});
+		const common = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir");
+		const leasesRoot = path.join(common, "ypi-implementers", "leases");
+		const leaseDirectory = path.join(leasesRoot, readdirSync(leasesRoot)[0]);
+		const recordPath = path.join(leaseDirectory, "lease.json");
+		const recordValue = readFixtureLeaseRecord(recordPath, common);
+		const container = path.dirname(lease.cwd);
+		git(root, "worktree", "remove", "--force", lease.cwd);
+		recordValue.ownerPid = 2_000_000_000;
+		recordValue.state = "reserved";
+		delete recordValue.workspaceIdentity;
+		writeFixtureLeaseRecord(recordPath, recordValue);
+
+		const result = spawnSync("node", [
+			recoveryScript,
+			"--repo", root,
+			"--age", "0",
+			"--force",
+		], {
+			encoding: "utf8",
+			env: cleanEnvironment(),
+		});
+		const refs = git(root, "for-each-ref", "--format=%(refname)", "refs/ypi/attempt-*")
+			.split("\n")
+			.filter(Boolean);
+		record(
+			result.status === 1
+				&& String(result.stderr).includes("workspace filesystem identity is unavailable")
+				&& existsSync(container)
+				&& existsSync(leaseDirectory)
+				&& readFileSync(path.join(container, "owner"), "utf8") === `${recordValue.token}\n`
+				&& refs.length === 0
+				&& git(root, "status", "--porcelain=v2", "--untracked-files=all") === "",
+			"recovery preserves an identityless workspace container and its lease",
+			String(result.stderr || result.stdout || ""),
+		);
+	} finally {
+		rmSync(parent, { recursive: true, force: true });
+	}
+}
+
+{
+	const { parent, root } = fixture();
+	try {
+		const lease = acquireWorkspace({
+			cwd: root,
+			childDepth: 1,
+			mode: "implement",
+			scope: ["slice.txt"],
+		});
 		writeFileSync(path.join(lease.cwd, "slice.txt"), "must survive git failure\n");
 		const common = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir");
 		const leaseDirectory = path.join(
@@ -359,9 +458,9 @@ expectThrow(
 			readdirSync(path.join(common, "ypi-implementers", "leases"))[0],
 		);
 		const recordPath = path.join(leaseDirectory, "lease.json");
-		const recordValue = JSON.parse(readFileSync(recordPath, "utf8"));
+		const recordValue = readFixtureLeaseRecord(recordPath, common);
 		recordValue.ownerPid = 2_000_000_000;
-		writeFileSync(recordPath, `${JSON.stringify(recordValue, null, 2)}\n`, { mode: 0o600 });
+		writeFixtureLeaseRecord(recordPath, recordValue);
 
 		const resolvedGit = spawnSync("/bin/sh", ["-c", "command -v git"], {
 			encoding: "utf8",
@@ -427,14 +526,14 @@ expectThrow(
 			readdirSync(path.join(common, "ypi-implementers", "leases"))[0],
 		);
 		const recordPath = path.join(leaseDirectory, "lease.json");
-		const recordValue = JSON.parse(readFileSync(recordPath, "utf8"));
+		const recordValue = readFixtureLeaseRecord(recordPath, common);
 		const tree = git(root, "rev-parse", "HEAD^{tree}");
 		const rogue = git(root, "commit-tree", tree, "-m", "wrong ancestry");
 		git(root, "update-ref", recordValue.attemptRef, rogue);
 		recordValue.ownerPid = 2_000_000_000;
 		recordValue.attemptCommit = rogue;
 		recordValue.state = "ref-verified";
-		writeFileSync(recordPath, `${JSON.stringify(recordValue, null, 2)}\n`, { mode: 0o600 });
+		writeFixtureLeaseRecord(recordPath, recordValue);
 
 		const result = spawnSync("node", [
 			recoveryScript,
@@ -486,9 +585,9 @@ expectThrow(
 			readdirSync(path.join(common, "ypi-implementers", "leases"))[0],
 		);
 		const recordPath = path.join(leaseDirectory, "lease.json");
-		const recordValue = JSON.parse(readFileSync(recordPath, "utf8"));
+		const recordValue = readFixtureLeaseRecord(recordPath, common);
 		recordValue.ownerPid = 2_000_000_000;
-		writeFileSync(recordPath, `${JSON.stringify(recordValue, null, 2)}\n`, { mode: 0o600 });
+		writeFixtureLeaseRecord(recordPath, recordValue);
 
 		const result = spawnSync("node", [
 			recoveryScript,

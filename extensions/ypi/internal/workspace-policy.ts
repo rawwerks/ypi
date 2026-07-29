@@ -2,11 +2,9 @@ import { spawnSync } from "node:child_process";
 import {
 	existsSync,
 	lstatSync,
-	mkdirSync,
 	readFileSync,
 	readdirSync,
 	rmSync,
-	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,7 +17,35 @@ import {
 	withImplementerRegistryLock,
 	writeImplementerLeaseRecord,
 } from "./workspace-registry.ts";
+import {
+	captureWorkspaceContainerIdentity,
+	captureWorkspaceDirectoryIdentity,
+	captureWorkspaceTreeIdentity,
+	retireEmptyWorkspaceContainer,
+	verifyWorkspaceContainer,
+} from "./workspace-container.ts";
 import type { ImplementerLeaseRecord } from "./implementer-lease.ts";
+import {
+	IMPLEMENTER_CONFINEMENT_SCHEMA_VERSION,
+	verifyImplementerConfinement,
+} from "./implementer-confinement.ts";
+import {
+	recordImplementerLeaseResource,
+	recordImplementerLeaseResourceTree,
+} from "./implementer-lease-resources.ts";
+import { atomicCreateFile } from "./atomic-file.ts";
+import {
+	capturePrivateFileIdentity,
+	createPrivateDirectory,
+	ensurePrivateDescendantDirectory,
+	readOwnedPrivateFile,
+	type PrivatePathIdentity,
+	withPrivateUmask,
+} from "./private-path.ts";
+import {
+	assertWorktreeUnregistered as assertUnregisteredInInventory,
+	WORKTREE_INVENTORY_ARGUMENTS,
+} from "./worktree-inventory.ts";
 
 export type ChildMode = "review" | "implement";
 export type WorkspaceMode = "read-only" | "git-worktree";
@@ -67,6 +93,7 @@ export interface WorkspaceLease {
 	};
 	prepareChildLaunch(): void;
 	noteChildPid(pid: number): void;
+	noteChildLaunchReady(): void;
 	finalize(): WorkspaceReport;
 	cleanup(): void;
 }
@@ -98,10 +125,12 @@ interface Gitlink {
 
 interface ConfinementState {
 	auditFile: string;
+	auditIdentity: PrivatePathIdentity;
 	baselineIgnoreRoot: string;
-	baselineIndexFile: string;
 	childPidFile: string;
 	childReadyFile: string;
+	confinementFile: string;
+	confinementIdentity: PrivatePathIdentity;
 	gitDir: string;
 	scopeFile: string;
 	scope: string[];
@@ -111,6 +140,7 @@ interface ConfinementState {
 
 const WORKSPACE_ADMISSION_TIMEOUT_MS = 5_000;
 const WORKSPACE_FINALIZATION_TIMEOUT_MS = 120_000;
+const WORKSPACE_GIT_MAX_BUFFER = Infinity;
 const INTERNAL_GIT_CONFIG = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"];
 
 function remainingSetupMilliseconds(input: WorkspacePolicyInput): number {
@@ -163,14 +193,15 @@ function setupGit(
 	environment: NodeJS.ProcessEnv = {},
 	stdinText?: string,
 ): ReturnType<typeof spawnSync> {
-	const result = spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
+	const result = withPrivateUmask(() => spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
 		cwd: root,
 		encoding: "utf8",
 		input: stdinText,
 		stdio: ["pipe", "pipe", "pipe"],
 		timeout: remainingSetupMilliseconds(input),
+		maxBuffer: WORKSPACE_GIT_MAX_BUFFER,
 		env: vcsEnvironment(environment),
-	});
+	}));
 	assertWithinDeadline(input, result, `git ${args[0] || "operation"}`);
 	return result;
 }
@@ -198,14 +229,15 @@ function finalizationGit(
 	stdinText?: string,
 	preserveOutput = false,
 ): string {
-	const result = spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
+	const result = withPrivateUmask(() => spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
 		cwd: root,
 		encoding: "utf8",
 		input: stdinText,
 		stdio: ["pipe", "pipe", "pipe"],
 		timeout: WORKSPACE_FINALIZATION_TIMEOUT_MS,
+		maxBuffer: WORKSPACE_GIT_MAX_BUFFER,
 		env: vcsEnvironment(environment),
-	});
+	}));
 	if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
 		throw new Error(`${operation} exceeded ${WORKSPACE_FINALIZATION_TIMEOUT_MS}ms`);
 	}
@@ -213,6 +245,44 @@ function finalizationGit(
 		throw new Error(`${operation} failed${stderr(result) ? `: ${stderr(result)}` : ""}`);
 	}
 	return preserveOutput ? rawOutput(result) : output(result);
+}
+
+function assertWorktreeUnregistered(root: string, worktree: string): void {
+	const result = withPrivateUmask(() => spawnSync(
+		"git",
+		[...INTERNAL_GIT_CONFIG, ...WORKTREE_INVENTORY_ARGUMENTS],
+		{
+			cwd: root,
+			stdio: ["ignore", "pipe", "pipe"],
+			timeout: WORKSPACE_FINALIZATION_TIMEOUT_MS,
+			maxBuffer: WORKSPACE_GIT_MAX_BUFFER,
+			env: vcsEnvironment(),
+		},
+	));
+	if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
+		throw new Error(
+			`Git worktree inventory exceeded ${WORKSPACE_FINALIZATION_TIMEOUT_MS}ms`,
+		);
+	}
+	if (result.error) {
+		throw new Error(`Could not inspect Git worktree registration: ${result.error.message}`);
+	}
+	if (result.status !== 0) {
+		const diagnostics = Buffer.isBuffer(result.stderr)
+			? result.stderr.toString("utf8").trim()
+			: String(result.stderr || "").trim();
+		throw new Error(
+			`Could not inspect Git worktree registration${
+				diagnostics ? `: ${diagnostics}` : ""
+			}`,
+		);
+	}
+	assertUnregisteredInInventory(
+		Buffer.isBuffer(result.stdout)
+			? result.stdout
+			: Buffer.from(result.stdout || ""),
+		worktree,
+	);
 }
 
 function readOnlyLease(cwd: string): WorkspaceLease {
@@ -230,10 +300,11 @@ function readOnlyLease(cwd: string): WorkspaceLease {
 			changedPaths: [],
 			treeRestored: true,
 			reportComplete: true,
-		}),
-		prepareChildLaunch() {},
-		noteChildPid() {},
-		cleanup() {},
+			}),
+			prepareChildLaunch() {},
+			noteChildPid() {},
+			noteChildLaunchReady() {},
+			cleanup() {},
 	};
 }
 
@@ -310,10 +381,10 @@ function materializeBaselineIgnoreFiles(
 		if ((mode !== "100644" && mode !== "100755") || type !== "blob" || !oid) continue;
 		if (gitPath.split("/").at(-1) !== ".gitignore") continue;
 		const destination = path.join(ignoreRoot, ...gitPath.split("/"));
-		mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+		ensurePrivateDescendantDirectory(ignoreRoot, path.dirname(destination));
 		const blob = setupGit(input, root, ["cat-file", "blob", oid]);
 		if (blob.status !== 0) throw new Error(`Could not read baseline ignore rule ${gitPath}`);
-		writeFileSync(destination, typeof blob.stdout === "string" ? blob.stdout : Buffer.from(blob.stdout || ""));
+		atomicCreateFile(destination, typeof blob.stdout === "string" ? blob.stdout : Buffer.from(blob.stdout || ""));
 	}
 }
 
@@ -323,37 +394,52 @@ function createConfinementState(
 	baselineHead: string,
 	leaseDirectory: string,
 	scope: string[],
+	record: ImplementerLeaseRecord,
 ): ConfinementState {
 	const auditFile = path.join(leaseDirectory, "writes");
 	const baselineIgnoreRoot = path.join(leaseDirectory, "baseline-ignore");
-	const baselineIndexFile = path.join(leaseDirectory, "baseline-index");
 	const childPidFile = path.join(leaseDirectory, "child-pid");
 	const childReadyFile = path.join(leaseDirectory, "child-ready");
+	const confinementFile = path.join(leaseDirectory, "confinement.json");
 	const scopeFile = path.join(leaseDirectory, "scope");
 	const submodulePathsFile = path.join(leaseDirectory, "submodules");
-	mkdirSync(baselineIgnoreRoot, { mode: 0o700 });
-	writeFileSync(auditFile, "", { mode: 0o600 });
-	writeFileSync(scopeFile, scope.join("\0"), { mode: 0o600 });
-	checkedSetupGit(
-		input,
-		root,
-		["read-tree", baselineHead],
-		"Baseline index creation",
-		{ GIT_INDEX_FILE: baselineIndexFile },
-	);
+	createPrivateDirectory(baselineIgnoreRoot);
+	atomicCreateFile(auditFile, "");
+	atomicCreateFile(scopeFile, scope.join("\0"));
 	const gitDir = checkedSetupGit(input, root, ["rev-parse", "--absolute-git-dir"], "Git directory discovery");
 	const gitlinks = parseGitlinks(
 		checkedSetupGit(input, root, ["ls-files", "--stage", "-z"], "Submodule inventory", {}, true),
 		root,
 	);
-	writeFileSync(submodulePathsFile, gitlinks.map((entry) => entry.path).join("\0"), { mode: 0o600 });
+	atomicCreateFile(submodulePathsFile, gitlinks.map((entry) => entry.path).join("\0"));
 	materializeBaselineIgnoreFiles(input, root, baselineHead, baselineIgnoreRoot);
+	recordImplementerLeaseResource(record, leaseDirectory, "writes");
+	recordImplementerLeaseResource(record, leaseDirectory, "scope");
+	recordImplementerLeaseResource(record, leaseDirectory, "submodules");
+	recordImplementerLeaseResourceTree(record, leaseDirectory, "baseline-ignore");
+	atomicCreateFile(
+		confinementFile,
+		`${JSON.stringify({
+			schemaVersion: IMPLEMENTER_CONFINEMENT_SCHEMA_VERSION,
+			gitDir,
+			leaseDirectoryIdentity: record.leaseDirectoryIdentity,
+			resources: record.leaseResources,
+		}, null, 2)}\n`,
+	);
+	const confinementIdentity = recordImplementerLeaseResource(
+		record,
+		leaseDirectory,
+		"confinement.json",
+	);
+	persistLeaseRecord(record);
 	return {
 		auditFile,
+		auditIdentity: capturePrivateFileIdentity(auditFile),
 		baselineIgnoreRoot,
-		baselineIndexFile,
 		childPidFile,
 		childReadyFile,
+		confinementFile,
+		confinementIdentity,
 		gitDir,
 		scopeFile,
 		scope,
@@ -365,7 +451,7 @@ function createConfinementState(
 function checkIgnored(
 	root: string,
 	relativePath: string,
-	baseline: Pick<ConfinementState, "baselineIgnoreRoot" | "baselineIndexFile" | "gitDir"> | undefined,
+	baseline: Pick<ConfinementState, "baselineIgnoreRoot" | "gitDir"> | undefined,
 ): boolean {
 	const args = baseline
 		? [
@@ -377,14 +463,14 @@ function checkIgnored(
 			"--stdin",
 		]
 		: ["check-ignore", "-q", "-z", "--stdin"];
-	const environment = baseline ? { GIT_INDEX_FILE: baseline.baselineIndexFile } : {};
 	const result = spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
 		cwd: root,
 		encoding: "utf8",
 		input: `${relativePath}\0`,
 		stdio: ["pipe", "pipe", "pipe"],
 		timeout: WORKSPACE_FINALIZATION_TIMEOUT_MS,
-		env: vcsEnvironment(environment),
+		maxBuffer: WORKSPACE_GIT_MAX_BUFFER,
+		env: vcsEnvironment(),
 	});
 	if (result.status === 0) return true;
 	if (result.status === 1) return false;
@@ -396,8 +482,15 @@ function isWithinSubmodule(relativePath: string, gitlinks: Gitlink[]): boolean {
 }
 
 function auditedPaths(confinement: ConfinementState, root: string): string[] {
+	verifyImplementerConfinement(
+		confinement.confinementFile,
+		confinement.confinementIdentity,
+	);
 	if (!existsSync(confinement.auditFile)) throw new Error("Implementer write audit is missing");
-	const paths = parseNulPaths(readFileSync(confinement.auditFile, "utf8"));
+	const paths = parseNulPaths(readOwnedPrivateFile(
+		confinement.auditFile,
+		confinement.auditIdentity,
+	));
 	for (const relativePath of paths) {
 		if (!pathIsWithinImplementScope(relativePath, confinement.scope)) {
 			throw new Error(`Implementer write audit contains a path outside declared scope: ${relativePath}`);
@@ -454,13 +547,14 @@ function assertCheckoutOwnership(root: string, baselineHead: string, baselineTre
 }
 
 function bestEffortChangedPaths(root: string, baselineHead: string): { paths: string[]; finalHead?: string } {
-	const command = (args: string[]) => spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
+	const command = (args: string[]) => withPrivateUmask(() => spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
 		cwd: root,
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 5_000,
+		maxBuffer: WORKSPACE_GIT_MAX_BUFFER,
 		env: vcsEnvironment(),
-	});
+	}));
 	const head = command(["rev-parse", "HEAD"]);
 	const diff = command(["diff", "--name-only", "-z", baselineHead, "--"]);
 	const untracked = command(["ls-files", "--others", "--exclude-standard", "-z"]);
@@ -485,6 +579,10 @@ function assertSnapshotPathsReviewable(
 	paths: string[],
 	confinement: ConfinementState,
 ): void {
+	verifyImplementerConfinement(
+		confinement.confinementFile,
+		confinement.confinementIdentity,
+	);
 	for (const relativePath of paths) {
 		if (isWithinSubmodule(relativePath, confinement.gitlinks)) {
 			throw new Error(`Snapshot contains a submodule path that cannot be represented by the superproject: ${relativePath}`);
@@ -556,6 +654,19 @@ function bestEffortDiscardSetupWorktree(root: string, record: ImplementerLeaseRe
 		}
 	}
 	if (record.worktreeContainer && existsSync(record.worktreeContainer)) {
+		if (
+			record.workspaceIdentity?.ownerDevice
+			&& record.workspaceIdentity.ownerInode
+		) {
+			try {
+				verifyWorkspaceContainer(
+					record,
+					record.worktreeRoot && existsSync(record.worktreeRoot) ? "present" : "absent",
+				);
+			} catch (error) {
+				return error instanceof Error ? error.message : String(error);
+			}
+		}
 		try {
 			const container = lstatSync(record.worktreeContainer);
 			const markerPath = path.join(record.worktreeContainer, "owner");
@@ -578,7 +689,10 @@ function bestEffortDiscardSetupWorktree(root: string, record: ImplementerLeaseRe
 			try {
 				const entries = readdirSync(record.worktreeContainer);
 				if (entries.length === 0) {
-					rmSync(record.worktreeContainer);
+					if (!record.workspaceIdentity) {
+						return "workspace filesystem identity is unavailable";
+					}
+					retireEmptyWorkspaceContainer(record);
 					return undefined;
 				}
 				const markerPath = path.join(record.worktreeContainer, "owner");
@@ -605,20 +719,40 @@ function bestEffortDiscardSetupWorktree(root: string, record: ImplementerLeaseRe
 		}
 	}
 	if (record.worktreeRoot && existsSync(record.worktreeRoot)) {
+		if (!record.workspaceIdentity?.worktreeDevice || !record.workspaceIdentity.worktreeInode) {
+			return "workspace checkout identity is unavailable";
+		}
+		try {
+			verifyWorkspaceContainer(record, "present");
+		} catch (error) {
+			return error instanceof Error ? error.message : String(error);
+		}
 		if (!record.worktreeContainer || !existsSync(record.worktreeContainer)) {
 			return "workspace container is unavailable";
 		}
-			const result = spawnSync("git", [...INTERNAL_GIT_CONFIG, "worktree", "remove", "--force", record.worktreeRoot], {
+		const worktreeRoot = record.worktreeRoot;
+		const result = withPrivateUmask(() => spawnSync("git", [...INTERNAL_GIT_CONFIG, "worktree", "remove", "--force", worktreeRoot], {
 			cwd: root,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
 			timeout: WORKSPACE_FINALIZATION_TIMEOUT_MS,
+			maxBuffer: WORKSPACE_GIT_MAX_BUFFER,
 			env: vcsEnvironment(),
-		});
+		}));
 		if (result.status !== 0) return stderr(result) || "git worktree remove failed";
+		try {
+			assertWorktreeUnregistered(root, worktreeRoot);
+		} catch (error) {
+			return error instanceof Error ? error.message : String(error);
+		}
 	}
 	if (record.worktreeContainer && existsSync(record.worktreeContainer)) {
-		rmSync(record.worktreeContainer, { recursive: true, force: true });
+		if (!record.workspaceIdentity) return "workspace filesystem identity is unavailable";
+		try {
+			retireEmptyWorkspaceContainer(record);
+		} catch (error) {
+			return error instanceof Error ? error.message : String(error);
+		}
 	}
 	return undefined;
 }
@@ -660,9 +794,13 @@ function createGitWorktreeLease(
 			writeImplementerLeaseRecord(record);
 		}, input.setupDeadlineMilliseconds);
 		input.lifecycleHook?.("after-container-recorded");
-		mkdirSync(record.worktreeContainer, { mode: 0o700 });
+		createPrivateDirectory(record.worktreeContainer);
+		record.workspaceIdentity = captureWorkspaceDirectoryIdentity(record);
+		persistLeaseRecord(record);
 		input.lifecycleHook?.("after-container-created");
-		writeFileSync(path.join(record.worktreeContainer, "owner"), `${record.token}\n`, { flag: "wx", mode: 0o600 });
+		atomicCreateFile(path.join(record.worktreeContainer, "owner"), `${record.token}\n`);
+		record.workspaceIdentity = captureWorkspaceContainerIdentity(record);
+		persistLeaseRecord(record);
 		input.lifecycleHook?.("after-owner-marker-created");
 		withImplementerRegistryLock(commonGitDir, () => {
 			checkedSetupGit(
@@ -671,14 +809,21 @@ function createGitWorktreeLease(
 				["worktree", "add", "--detach", worktreeRoot, baselineHead],
 				"Detached implementer worktree creation",
 			);
+			record.workspaceIdentity = captureWorkspaceTreeIdentity(record);
 			record.state = "worktree-ready";
 			writeImplementerLeaseRecord(record);
 			input.lifecycleHook?.("after-worktree-created");
-		}, input.setupDeadlineMilliseconds);
-		const leaseDirectory = implementerLeaseDirectory(commonGitDir, record.token);
-		const confinement = createConfinementState(input, worktreeRoot, baselineHead, leaseDirectory, scope);
-		const snapshotIndexFile = path.join(leaseDirectory, "snapshot-index");
-		let finalized: WorkspaceReport | undefined;
+			}, input.setupDeadlineMilliseconds);
+			const leaseDirectory = implementerLeaseDirectory(commonGitDir, record.token);
+			const confinement = createConfinementState(
+				input,
+				worktreeRoot,
+				baselineHead,
+				leaseDirectory,
+				scope,
+				record,
+			);
+			let finalized: WorkspaceReport | undefined;
 		let finalizationError: WorkspaceFinalizationError | undefined;
 
 		return {
@@ -690,15 +835,13 @@ function createGitWorktreeLease(
 				pidFile: confinement.childPidFile,
 				readyFile: confinement.childReadyFile,
 			},
-			childEnvironment: {
-				YPI_IMPLEMENT_ROOT: worktreeRoot,
-				YPI_IMPLEMENT_AUDIT_FILE: confinement.auditFile,
-				YPI_IMPLEMENT_BASELINE_IGNORE_ROOT: confinement.baselineIgnoreRoot,
-				YPI_IMPLEMENT_BASELINE_INDEX: confinement.baselineIndexFile,
-				YPI_IMPLEMENT_GIT_DIR: confinement.gitDir,
-				YPI_IMPLEMENT_SCOPE_FILE: confinement.scopeFile,
-				YPI_IMPLEMENT_SUBMODULES_FILE: confinement.submodulePathsFile,
-			},
+				childEnvironment: {
+					YPI_IMPLEMENT_ROOT: worktreeRoot,
+					YPI_IMPLEMENT_CONFINEMENT_FILE: confinement.confinementFile,
+					YPI_IMPLEMENT_CONFINEMENT_IDENTITY: JSON.stringify(
+						confinement.confinementIdentity,
+					),
+				},
 			prepareChildLaunch() {
 				if (finalized || finalizationError) {
 					throw new Error("Implementer workspace is no longer available for child launch");
@@ -709,6 +852,14 @@ function createGitWorktreeLease(
 			noteChildPid(pid: number) {
 				if (!Number.isSafeInteger(pid) || pid <= 0 || finalized || finalizationError) return;
 				record.childPid = pid;
+				persistLeaseRecord(record);
+			},
+			noteChildLaunchReady() {
+				if (finalized || finalizationError) {
+					throw new Error("Implementer workspace is no longer available for child launch");
+				}
+				recordImplementerLeaseResource(record, leaseDirectory, "child-pid");
+				recordImplementerLeaseResource(record, leaseDirectory, "child-ready");
 				persistLeaseRecord(record);
 			},
 			finalize() {
@@ -727,16 +878,16 @@ function createGitWorktreeLease(
 					assertCheckoutOwnership(worktreeRoot, baselineHead, baselineTree);
 					assertRootCheckoutUntouched(root, baselineHead, baselineTree);
 
-					const snapshotEnvironment = { GIT_INDEX_FILE: snapshotIndexFile };
-					finalizationGit(worktreeRoot, ["read-tree", baselineHead], "Snapshot index initialization", snapshotEnvironment);
-					finalizationGit(worktreeRoot, ["add", "-A", "--", "."], "Snapshot staging", snapshotEnvironment);
-					const snapshotTree = finalizationGit(worktreeRoot, ["write-tree"], "Snapshot tree creation", snapshotEnvironment);
+					record.worktreeIndexOwnedByYpi = true;
+					persistLeaseRecord(record);
+					finalizationGit(worktreeRoot, ["read-tree", baselineHead], "Snapshot index initialization");
+					finalizationGit(worktreeRoot, ["add", "-A", "--", "."], "Snapshot staging");
+					const snapshotTree = finalizationGit(worktreeRoot, ["write-tree"], "Snapshot tree creation");
 					attemptCommit = finalizationGit(
 						worktreeRoot,
 						["commit-tree", snapshotTree, "-p", baselineHead, "-m", `ypi implementer attempt ${record.token.slice(0, 12)}`],
 						"Snapshot commit creation",
 						{
-							...snapshotEnvironment,
 							GIT_AUTHOR_NAME: "ypi",
 							GIT_AUTHOR_EMAIL: "ypi@localhost",
 							GIT_COMMITTER_NAME: "ypi",
@@ -751,6 +902,7 @@ function createGitWorktreeLease(
 						undefined,
 						true,
 					));
+					finalizationGit(worktreeRoot, ["read-tree", baselineHead], "Post-snapshot index reset");
 					assertPathsWithinScope(changedPaths, scope);
 					assertSnapshotPathsReviewable(worktreeRoot, changedPaths, confinement);
 					diffStat = finalizationGit(
@@ -780,8 +932,9 @@ function createGitWorktreeLease(
 					assertSubmodulesUnchanged(worktreeRoot, confinement.gitlinks);
 					assertNoUnsnapshottedIgnoredPaths(worktreeRoot);
 					assertCheckoutOwnership(worktreeRoot, baselineHead, baselineTree);
-					finalizationGit(worktreeRoot, ["add", "-A", "--", "."], "Pre-removal tree verification staging", snapshotEnvironment);
-					const finalWorktreeTree = finalizationGit(worktreeRoot, ["write-tree"], "Pre-removal tree verification", snapshotEnvironment);
+					finalizationGit(worktreeRoot, ["read-tree", baselineHead], "Pre-removal index reset");
+					finalizationGit(worktreeRoot, ["add", "-A", "--", "."], "Pre-removal tree verification staging");
+					const finalWorktreeTree = finalizationGit(worktreeRoot, ["write-tree"], "Pre-removal tree verification");
 					if (finalWorktreeTree !== snapshotTree) {
 						throw new Error("Implementer worktree changed after the salvage ref was captured; removal was refused");
 					}
@@ -789,11 +942,14 @@ function createGitWorktreeLease(
 
 					withImplementerRegistryLock(commonGitDir, () => {
 						input.lifecycleHook?.("before-worktree-remove");
+						verifyWorkspaceContainer(record, "present");
 						finalizationGit(root, ["worktree", "remove", "--force", worktreeRoot], "Ephemeral worktree removal");
+						verifyWorkspaceContainer(record, "absent");
+						assertWorktreeUnregistered(root, worktreeRoot);
 						record.state = "worktree-removed";
 						writeImplementerLeaseRecord(record);
 						input.lifecycleHook?.("before-container-remove");
-						if (record.worktreeContainer) rmSync(record.worktreeContainer, { recursive: true, force: true });
+						retireEmptyWorkspaceContainer(record);
 						input.lifecycleHook?.("after-worktree-remove");
 						removeImplementerLeaseRecord(commonGitDir, record.token);
 					});

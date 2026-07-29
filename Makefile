@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-guardrails test-native test-runtime-contract test-eval-contracts test-concurrency test-child-process test-transcripts test-session-tools test-workspace-policy test-parallel-workspace test-implementer-recovery test-workspace-crash test-workspace-concurrent-crash test-write-scope test-publication-policy test-config-surface typecheck-runtime build-runtime-cli check-runtime-cli test-provider-allowlist test-extensions test-e2e test-recursion-e2e test-extensions-e2e eval-depth-ablation eval-runtime-parity test-fast doctor test-doctor pre-push-checks check-upstream install-hooks land ci-status ci-last-failure clean
+.PHONY: test test-unit test-guardrails test-timeout-range test-native test-runtime-contract test-eval-contracts test-concurrency test-child-process test-transcripts test-session-tools test-private-path-ownership test-implementer-registry-generation test-workspace-retirement-generation test-workspace-policy test-parallel-workspace test-implementer-recovery test-workspace-crash test-workspace-concurrent-crash test-write-scope test-publication-policy test-config-surface typecheck-runtime build-runtime-cli check-runtime-cli test-provider-allowlist test-extensions test-e2e test-recursion-e2e test-extensions-e2e eval-depth-ablation eval-runtime-parity test-fast doctor test-doctor pre-push-checks check-upstream install-hooks land ci-status ci-last-failure clean
 
 # Fast tests — no LLM calls, uses mock pi
 test-unit:
@@ -9,6 +9,10 @@ test-unit:
 test-guardrails:
 	@echo "Running guardrail tests..."
 	@bash tests/test_guardrails.sh
+
+test-timeout-range:
+	@echo "Running timeout range tests..."
+	@bun tests/timeout_range_harness.ts
 
 test-native:
 	@echo "Running native extension tool tests..."
@@ -34,14 +38,36 @@ test-child-process:
 test-transcripts:
 	@echo "Running required transcript proof tests..."
 	@bun tests/transcript_harness.ts
+	@bun tests/n88_n90_harness.ts
 
 test-session-tools:
 	@echo "Running session presentation tool tests..."
 	@bash tests/test_session_tools.sh
 
+test-private-path-ownership:
+	@echo "Running private path ownership tests..."
+	@bun tests/private_path_ownership_harness.ts
+	@bun tests/private_path_lifecycle_harness.ts
+	@bun tests/n84_telemetry_append_harness.ts
+	@bun tests/n91_telemetry_init_harness.ts
+
+test-implementer-registry-generation:
+	@echo "Running implementer registry generation tests..."
+	@bun tests/implementer_registry_generation_harness.ts
+
+test-workspace-retirement-generation:
+	@echo "Running workspace retirement generation tests..."
+	@bun tests/workspace_retirement_generation_harness.ts
+
 test-workspace-policy:
 	@echo "Running recursive workspace policy tests..."
 	@bun tests/workspace_policy_harness.ts
+	@bun tests/worktree_inventory_harness.ts
+	@bun tests/workspace_container_replacement_harness.ts
+	@REPLACE_TARGET=checkout bun tests/workspace_container_replacement_harness.ts
+	@REPLACE_TARGET=registration bun tests/workspace_container_replacement_harness.ts
+	@REPLACE_TARGET=setup-registration bun tests/workspace_container_replacement_harness.ts
+	@bun tests/workspace_git_buffer_harness.ts
 
 test-parallel-workspace:
 	@echo "Running parallel implementer workspace tests..."
@@ -52,6 +78,8 @@ test-parallel-workspace:
 test-implementer-recovery:
 	@echo "Running implementer recovery module and CLI tests..."
 	@bun tests/implementer_recovery_harness.ts
+	@bun tests/worktree_index_ownership_harness.ts
+	@bun tests/recovery_exact_worktree_harness.ts
 
 test-workspace-crash:
 	@echo "Running workspace worktree/ref crash matrix..."
@@ -64,6 +92,8 @@ test-workspace-concurrent-crash:
 test-write-scope:
 	@echo "Running implementer write-scope tests..."
 	@bun tests/write_scope_harness.ts
+	@bun tests/implementer_confinement_harness.ts
+	@bun tests/n89_audit_identity_harness.ts
 
 test-publication-policy:
 	@echo "Running publication authority tests..."
@@ -96,7 +126,7 @@ test-doctor:
 	@bash tests/test_doctor.sh
 
 # All fast tests (no LLM calls)
-test-fast: typecheck-runtime check-runtime-cli test-unit test-guardrails test-native test-runtime-contract test-eval-contracts test-concurrency test-child-process test-transcripts test-session-tools test-workspace-policy test-parallel-workspace test-implementer-recovery test-workspace-crash test-workspace-concurrent-crash test-write-scope test-publication-policy test-config-surface test-provider-allowlist test-doctor
+test-fast: typecheck-runtime check-runtime-cli test-unit test-guardrails test-timeout-range test-native test-runtime-contract test-eval-contracts test-concurrency test-child-process test-transcripts test-session-tools test-private-path-ownership test-implementer-registry-generation test-workspace-retirement-generation test-workspace-policy test-parallel-workspace test-implementer-recovery test-workspace-crash test-workspace-concurrent-crash test-write-scope test-publication-policy test-config-surface test-provider-allowlist test-doctor
 
 # Extension compatibility — requires real pi installed
 test-extensions:

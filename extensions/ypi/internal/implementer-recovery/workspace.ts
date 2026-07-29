@@ -1,15 +1,7 @@
 import {
-	closeSync,
-	constants,
-	fstatSync,
 	lstatSync,
-	openSync,
-	readFileSync,
 	readdirSync,
 	realpathSync,
-	rmSync,
-	rmdirSync,
-	unlinkSync,
 } from "node:fs";
 import path from "node:path";
 import { pathIsWithinImplementScope } from "../implement-scope.ts";
@@ -17,6 +9,15 @@ import {
 	isGitObjectId,
 	type ImplementerLeaseRecord,
 } from "../implementer-lease.ts";
+import {
+	retireEmptyWorkspaceContainer,
+	verifyWorkspaceContainer,
+	workspaceLocation,
+} from "../workspace-container.ts";
+import {
+	assertWorktreeUnregistered as assertUnregisteredInInventory,
+	WORKTREE_INVENTORY_ARGUMENTS,
+} from "../worktree-inventory.ts";
 import {
 	pathExistsWithoutFollowing,
 	retireRecoveryLease,
@@ -43,6 +44,17 @@ function splitNulRecords(value: Uint8Array): Buffer[] {
 		start = index + 1;
 	}
 	return records;
+}
+
+function assertWorktreeUnregistered(
+	git: RecoveryGit,
+	repoRoot: string,
+	worktree: string,
+): void {
+	assertUnregisteredInInventory(
+		git.run(repoRoot, [...WORKTREE_INVENTORY_ARGUMENTS]),
+		worktree,
+	);
 }
 
 function uniquePaths(...groups: string[][]): string[] {
@@ -86,73 +98,24 @@ function captureWorktreeTree(
 	git: RecoveryGit,
 	worktree: string,
 	baseline: string,
-	indexPath: string,
+	leaseDirectory: string,
+	record: ImplementerLeaseRecord,
 ): string {
 	assertNoUnsnapshottedPaths(git, worktree);
-	rmSync(indexPath, { force: true });
-	const environment = { GIT_INDEX_FILE: indexPath };
-	git.text(worktree, ["read-tree", baseline], environment);
-	git.text(worktree, ["add", "-A", "--", "."], environment);
-	return git.text(worktree, ["write-tree"], environment);
-}
-
-function validateWorkspaceLocation(record: ImplementerLeaseRecord): {
-	container: string;
-	worktree: string;
-} {
-	if (!record.worktreeContainer || !record.worktreeRoot) {
-		throw new Error("record has no worktree path");
-	}
-	const container = record.worktreeContainer;
-	const worktree = record.worktreeRoot;
-	if (
-		!path.isAbsolute(container)
-		|| !path.isAbsolute(worktree)
-		|| path.basename(container) !== `ypi_ws_${record.token}`
-		|| worktree !== path.join(container, "checkout")
-	) {
-		throw new Error("recorded worktree path is not an owned ypi workspace");
-	}
-	return { container, worktree };
-}
-
-function readRegularFileNoFollow(candidate: string): Buffer {
-	let descriptor: number | undefined;
-	try {
-		descriptor = openSync(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
-		const metadata = fstatSync(descriptor);
-		if (!metadata.isFile()) throw new Error("path is not a regular file");
-		return Buffer.from(readFileSync(descriptor));
-	} finally {
-		if (descriptor !== undefined) closeSync(descriptor);
-	}
-}
-
-function verifyOwnedContainer(record: ImplementerLeaseRecord): {
-	container: string;
-	worktree: string;
-} {
-	const location = validateWorkspaceLocation(record);
-	const metadata = lstatSync(location.container);
-	if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-		throw new Error("recorded worktree path is not an owned ypi workspace");
-	}
-	let owner: string;
-	try {
-		owner = readRegularFileNoFollow(path.join(location.container, "owner")).toString("utf8").trim();
-	} catch (error) {
-		throw new Error(`workspace ownership marker is unavailable: ${(error as Error).message}`);
-	}
-	if (owner !== record.token) {
-		throw new Error("workspace ownership marker does not match the lease");
-	}
-	if (pathExistsWithoutFollowing(location.worktree)) {
-		const worktreeMetadata = lstatSync(location.worktree);
-		if (!worktreeMetadata.isDirectory() || worktreeMetadata.isSymbolicLink()) {
-			throw new Error("recorded checkout is not an owned worktree directory");
+	if (!record.worktreeIndexOwnedByYpi) {
+		const baselineTree = git.text(worktree, ["rev-parse", `${baseline}^{tree}`]);
+		const currentIndexTree = git.text(worktree, ["write-tree"]);
+		if (currentIndexTree !== baselineTree) {
+			throw new Error(
+				"worktree index differs from the baseline and is not recorded as ypi-owned; preserve it for explicit inspection",
+			);
 		}
+		record.worktreeIndexOwnedByYpi = true;
+		writeRecoveryLease(leaseDirectory, record);
 	}
-	return location;
+	git.text(worktree, ["read-tree", baseline]);
+	git.text(worktree, ["add", "-A", "--", "."]);
+	return git.text(worktree, ["write-tree"]);
 }
 
 function verifyWorktree(
@@ -160,7 +123,7 @@ function verifyWorktree(
 	record: ImplementerLeaseRecord,
 	commonGitDir: string,
 ): string {
-	const { worktree } = verifyOwnedContainer(record);
+	const { worktree } = verifyWorkspaceContainer(record, "present");
 	const discovered = git.optionalText(worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
 	if (
 		!discovered
@@ -171,48 +134,18 @@ function verifyWorktree(
 	return worktree;
 }
 
-function removePartialContainer(
-	container: string,
-	record: ImplementerLeaseRecord,
-): void {
-	const metadata = lstatSync(container);
-	if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-		throw new Error("partial workspace container is not an owned directory");
-	}
-	const entries = readdirSync(container);
-	if (entries.length === 0) {
-		rmdirSync(container);
-		return;
-	}
-	const markerPath = path.join(container, "owner");
-	if (entries.length !== 1 || entries[0] !== "owner") {
-		throw new Error("partial workspace container has unexpected content");
-	}
-	const marker = lstatSync(markerPath);
-	if (!marker.isFile() || marker.isSymbolicLink()) {
-		throw new Error("partial workspace ownership marker is invalid");
-	}
-	const actual = readRegularFileNoFollow(markerPath);
-	const expected = Buffer.from(`${record.token}\n`);
-	if (actual.length > expected.length || !expected.subarray(0, actual.length).equals(actual)) {
-		throw new Error("partial workspace ownership marker is invalid");
-	}
-	unlinkSync(markerPath);
-	rmdirSync(container);
-}
-
 function removeContainerWithoutWorktree(record: ImplementerLeaseRecord): void {
-	const { container, worktree } = validateWorkspaceLocation(record);
+	const { container, worktree } = workspaceLocation(record);
 	if (pathExistsWithoutFollowing(worktree)) {
 		throw new Error("worktree still exists");
 	}
 	if (!pathExistsWithoutFollowing(container)) return;
-	try {
-		verifyOwnedContainer(record);
-		rmSync(container, { recursive: true });
-	} catch {
-		removePartialContainer(container, record);
+	if (!record.workspaceIdentity) {
+		throw new Error(
+			"workspace filesystem identity is unavailable; preserve it for explicit inspection",
+		);
 	}
+	retireEmptyWorkspaceContainer(record);
 }
 
 function verifyAttemptRef(
@@ -268,10 +201,13 @@ function snapshotWorktree(
 	if (outside.length > 0) {
 		throw new Error(`worktree contains paths outside scope: ${outside.join(", ")}`);
 	}
-	const indexPath = path.join(leaseDirectory, "cleanup-index");
-	const environment = { GIT_INDEX_FILE: indexPath };
-	try {
-		const tree = captureWorktreeTree(git, worktree, record.baselineHead, indexPath);
+	const tree = captureWorktreeTree(
+		git,
+		worktree,
+		record.baselineHead,
+		leaseDirectory,
+		record,
+	);
 		const commit = git.text(
 			worktree,
 			[
@@ -283,7 +219,6 @@ function snapshotWorktree(
 				`ypi cleanup salvage ${record.token.slice(0, 12)}`,
 			],
 			{
-				...environment,
 				GIT_AUTHOR_NAME: "ypi",
 				GIT_AUTHOR_EMAIL: "ypi@localhost",
 				GIT_COMMITTER_NAME: "ypi",
@@ -306,9 +241,6 @@ function snapshotWorktree(
 		record.state = "ref-verified";
 		writeRecoveryLease(leaseDirectory, record);
 		return commit;
-	} finally {
-		rmSync(indexPath, { force: true });
-	}
 }
 
 function removeRecoveredWorktree(
@@ -318,11 +250,16 @@ function removeRecoveredWorktree(
 	leaseDirectory: string,
 	record: ImplementerLeaseRecord,
 ): void {
+	verifyWorkspaceContainer(record, "present");
 	git.text(repoRoot, ["worktree", "remove", "--force", worktree]);
+	if (pathExistsWithoutFollowing(worktree)) {
+		throw new Error("Git reported worktree removal but the checkout still exists");
+	}
+	assertWorktreeUnregistered(git, repoRoot, worktree);
+	verifyWorkspaceContainer(record, "absent");
 	record.state = "worktree-removed";
 	writeRecoveryLease(leaseDirectory, record);
-	const { container } = verifyOwnedContainer(record);
-	if (pathExistsWithoutFollowing(container)) rmSync(container, { recursive: true });
+	retireEmptyWorkspaceContainer(record);
 	retireRecoveryLease(leaseDirectory, record.token);
 }
 
@@ -336,33 +273,35 @@ function discardReservedWorkspace(
 		retireRecoveryLease(leaseDirectory, record.token);
 		return;
 	}
-	const { container, worktree } = validateWorkspaceLocation(record);
+	const { container, worktree } = workspaceLocation(record);
 	if (!pathExistsWithoutFollowing(container)) {
+		assertWorktreeUnregistered(git, repoRoot, worktree);
 		retireRecoveryLease(leaseDirectory, record.token);
 		return;
 	}
 	if (!pathExistsWithoutFollowing(worktree)) {
+		assertWorktreeUnregistered(git, repoRoot, worktree);
 		removeContainerWithoutWorktree(record);
 		retireRecoveryLease(leaseDirectory, record.token);
 		return;
 	}
 	try {
-		verifyOwnedContainer(record);
+		verifyWorkspaceContainer(record, "present");
 	} catch {
 		if (pathExistsWithoutFollowing(worktree)) {
 			throw new Error("unmarked reserved workspace unexpectedly contains a checkout");
 		}
-		removePartialContainer(container, record);
-		retireRecoveryLease(leaseDirectory, record.token);
-		return;
+		throw new Error(
+			"workspace identity became unavailable during reserved-workspace cleanup; preserve it for explicit inspection",
+		);
 	}
-	try {
-		git.text(repoRoot, ["worktree", "remove", "--force", worktree]);
-	} catch {
-		rmSync(container, { recursive: true });
-		git.text(repoRoot, ["worktree", "prune", "--expire", "now"]);
+	git.text(repoRoot, ["worktree", "remove", "--force", worktree]);
+	if (pathExistsWithoutFollowing(worktree)) {
+		throw new Error("Git reported worktree removal but the checkout still exists");
 	}
-	if (pathExistsWithoutFollowing(container)) rmSync(container, { recursive: true });
+	assertWorktreeUnregistered(git, repoRoot, worktree);
+	verifyWorkspaceContainer(record, "absent");
+	retireEmptyWorkspaceContainer(record);
 	retireRecoveryLease(leaseDirectory, record.token);
 }
 
@@ -387,18 +326,13 @@ export function recoverLeaseWorkspace(
 		const worktree = verifyWorktree(git, record, commonGitDir);
 		if (!commit) commit = snapshotWorktree(git, worktree, leaseDirectory, record);
 		const refTree = git.text(repoRoot, ["rev-parse", `${commit}^{tree}`]);
-		const verificationIndex = path.join(leaseDirectory, "cleanup-verify-index");
-		let currentTree: string;
-		try {
-			currentTree = captureWorktreeTree(
+			const currentTree = captureWorktreeTree(
 				git,
 				worktree,
 				record.baselineHead,
-				verificationIndex,
+				leaseDirectory,
+				record,
 			);
-		} finally {
-			rmSync(verificationIndex, { force: true });
-		}
 		if (currentTree !== refTree) {
 			throw new Error("worktree changed after its verified attempt ref was captured");
 		}
@@ -409,6 +343,9 @@ export function recoverLeaseWorkspace(
 		};
 	}
 	if (commit) {
+		if (record.worktreeRoot) {
+			assertWorktreeUnregistered(git, repoRoot, record.worktreeRoot);
+		}
 		removeContainerWithoutWorktree(record);
 		retireRecoveryLease(leaseDirectory, record.token);
 		return {

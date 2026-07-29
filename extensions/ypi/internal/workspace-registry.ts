@@ -2,31 +2,46 @@ import { randomBytes } from "node:crypto";
 import {
 	existsSync,
 	lstatSync,
-	mkdirSync,
-	readFileSync,
 	readdirSync,
 	renameSync,
-	rmSync,
 } from "node:fs";
 import path from "node:path";
-import { atomicWriteJson } from "./atomic-file.ts";
 import { normalizeImplementScope, scopesOverlap } from "./implement-scope.ts";
 import {
 	IMPLEMENTER_LEASE_SCHEMA_VERSION,
+	implementerLeaseRecordDigest,
 	implementerAttemptRef,
-	parseImplementerLeaseRecord,
 	type ImplementerLeaseRecord,
 } from "./implementer-lease.ts";
+import {
+	initializeImplementerLeaseFile,
+	readImplementerLeaseFile,
+	writeImplementerLeaseFile,
+} from "./implementer-lease-file.ts";
 import {
 	implementerRegistryPaths,
 	type ImplementerRegistryPaths,
 } from "./implementer-registry-layout.ts";
+import {
+	createImplementerMutex,
+	retireImplementerMutex,
+	type ImplementerMutexOwner,
+} from "./implementer-mutex.ts";
+import {
+	assertPrivateDirectory,
+	capturePrivateDirectoryIdentity,
+	createOwnedPrivateFile,
+	createPrivateDirectory,
+	ensurePrivateDirectory,
+} from "./private-path.ts";
+import { retireImplementerLeaseOwnedTree } from "./implementer-lease-resources.ts";
 
 export const MAX_PARALLEL_IMPLEMENTERS = 3;
 
 interface RegistryLock {
 	token: string;
 	path: string;
+	owner: ImplementerMutexOwner;
 	release(): void;
 }
 
@@ -38,14 +53,11 @@ function assertRegistryDirectory(directory: string): void {
 	if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
 		throw new Error(`Implementer registry path ${directory} is not an owned directory. Inspect it before admitting writers.`);
 	}
+	assertPrivateDirectory(directory);
 }
 
 function ensureRegistryDirectory(directory: string): void {
-	try {
-		mkdirSync(directory, { mode: 0o700 });
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-	}
+	ensurePrivateDirectory(directory);
 	assertRegistryDirectory(directory);
 }
 
@@ -59,26 +71,16 @@ function acquireRegistryLock(commonGitDir: string, deadlineMilliseconds?: number
 	ensureRegistryDirectory(paths.leases);
 	const deadline = deadlineMilliseconds ?? Date.now() + DEFAULT_LOCK_TIMEOUT_MS;
 	const token = randomBytes(16).toString("hex");
+	let owner: ImplementerMutexOwner | undefined;
 	while (true) {
-		let created = false;
 		try {
-			mkdirSync(paths.lock, { mode: 0o700 });
-			created = true;
-			atomicWriteJson(
-				path.join(paths.lock, "owner.json"),
-				{
-					schemaVersion: IMPLEMENTER_LEASE_SCHEMA_VERSION,
-					token,
-					pid: process.pid,
-					createdAtEpochSeconds: Math.floor(Date.now() / 1000),
-				},
+			owner = createImplementerMutex(
+				paths.lock,
+				token,
+				Math.floor(Date.now() / 1000),
 			);
 			break;
 		} catch (error) {
-			if (created) {
-				rmSync(paths.lock, { recursive: true, force: true });
-				throw error;
-			}
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 			if (Date.now() >= deadline) {
 				throw new Error(`Implementer lease registry is busy or interrupted at ${paths.lock}. Run rlm_cleanup --repo <checkout> to inspect and recover stale state.`);
@@ -89,13 +91,9 @@ function acquireRegistryLock(commonGitDir: string, deadlineMilliseconds?: number
 	return {
 		token,
 		path: paths.lock,
+		owner: owner!,
 		release() {
-			try {
-				const owner = JSON.parse(readFileSync(path.join(paths.lock, "owner.json"), "utf8")) as { token?: unknown };
-				if (owner.token === token) rmSync(paths.lock, { recursive: true, force: true });
-			} catch {
-				// Uncertain ownership remains for explicit cleanup.
-			}
+			retireImplementerMutex(paths.lock, this.owner);
 		},
 	};
 }
@@ -106,11 +104,28 @@ export function withImplementerRegistryLock<T>(
 	deadlineMilliseconds?: number,
 ): T {
 	const lock = acquireRegistryLock(commonGitDir, deadlineMilliseconds);
+	let actionFailed = false;
+	let actionError: unknown;
+	let result!: T;
 	try {
-		return action(implementerRegistryPaths(commonGitDir));
-	} finally {
-		lock.release();
+		result = action(implementerRegistryPaths(commonGitDir));
+	} catch (error) {
+		actionFailed = true;
+		actionError = error;
 	}
+	try {
+		lock.release();
+	} catch (releaseError) {
+		if (actionFailed) {
+			throw new AggregateError(
+				[actionError, releaseError],
+				"Implementer registry action failed and lock release also failed",
+			);
+		}
+		throw releaseError;
+	}
+	if (actionFailed) throw actionError;
+	return result;
 }
 
 export function readImplementerLeaseRecords(commonGitDir: string): ImplementerLeaseRecord[] {
@@ -128,11 +143,11 @@ export function readImplementerLeaseRecords(commonGitDir: string): ImplementerLe
 		.map((entry) => {
 			const recordPath = path.join(paths.leases, entry.name, "lease.json");
 			try {
-				const metadata = lstatSync(recordPath);
-				if (!metadata.isFile() || metadata.isSymbolicLink()) {
-					throw new Error(`Implementer lease ${entry.name} metadata is not a regular file`);
-				}
-				return parseImplementerLeaseRecord(JSON.parse(readFileSync(recordPath, "utf8")), entry.name, commonGitDir);
+				return readImplementerLeaseFile(
+					path.join(paths.leases, entry.name),
+					entry.name,
+					commonGitDir,
+				);
 			} catch (error) {
 				const cause = error instanceof Error ? error.message : String(error);
 				throw new Error(`${cause}. Run rlm_cleanup --repo <checkout> and inspect ${recordPath} before admitting more writers.`);
@@ -151,28 +166,35 @@ export function writeImplementerLeaseRecord(record: ImplementerLeaseRecord): voi
 		throw new Error(`Implementer lease directory ${directory} is unavailable`);
 	}
 	assertRegistryDirectory(directory);
-	const target = path.join(directory, "lease.json");
-	atomicWriteJson(target, record);
+	writeImplementerLeaseFile(directory, record);
 }
 
 function createImplementerLeaseRecord(
-	record: ImplementerLeaseRecord,
+	record: Omit<
+		ImplementerLeaseRecord,
+		"leaseDirectoryIdentity" | "leaseFileIdentity" | "revision" | "recordDigest"
+	>,
 	onStaged?: (record: ImplementerLeaseRecord) => void,
-): void {
+): ImplementerLeaseRecord {
 	const paths = implementerRegistryPaths(record.commonGitDir);
-	ensureRegistryDirectory(paths.staging);
 	const finalDirectory = implementerLeaseDirectory(record.commonGitDir, record.token);
-	const stagingDirectory = path.join(
-		paths.staging,
-		`.lease-${record.token}-${process.pid}-${randomBytes(4).toString("hex")}.tmp`,
-	);
-	mkdirSync(stagingDirectory, { mode: 0o700 });
+	createPrivateDirectory(finalDirectory);
 	try {
-		atomicWriteJson(path.join(stagingDirectory, "lease.json"), record);
-		onStaged?.(record);
-		renameSync(stagingDirectory, finalDirectory);
+		const recordPath = path.join(finalDirectory, "lease.json");
+		const leaseFileIdentity = createOwnedPrivateFile(recordPath, "");
+		const complete: ImplementerLeaseRecord = {
+			...record,
+			leaseDirectoryIdentity: capturePrivateDirectoryIdentity(finalDirectory),
+			leaseFileIdentity,
+			revision: 0,
+			recordDigest: "",
+		};
+		complete.recordDigest = implementerLeaseRecordDigest(complete);
+		initializeImplementerLeaseFile(finalDirectory, complete);
+		onStaged?.(complete);
+		return complete;
 	} catch (error) {
-		rmSync(stagingDirectory, { recursive: true, force: true });
+		// An incomplete no-clobber lease is recovery evidence. Preserve it.
 		throw error;
 	}
 }
@@ -182,10 +204,15 @@ export function removeImplementerLeaseRecord(commonGitDir: string, token: string
 	const active = implementerLeaseDirectory(commonGitDir, token);
 	if (!existsSync(active)) return;
 	assertRegistryDirectory(active);
+	const record = readImplementerLeaseFile(
+		active,
+		token,
+		commonGitDir,
+	);
 	ensureRegistryDirectory(paths.retired);
 	const retired = path.join(paths.retired, `.lease-${token}-${process.pid}-${randomBytes(4).toString("hex")}.done`);
 	renameSync(active, retired);
-	rmSync(retired, { recursive: true, force: true });
+	retireImplementerLeaseOwnedTree(record, retired);
 }
 
 export function reserveImplementerLease(
@@ -211,7 +238,10 @@ export function reserveImplementerLease(
 			throw new Error(`Implementer concurrency cap ${MAX_PARALLEL_IMPLEMENTERS} is already in use. Wait for a live slice to finish before admitting another.`);
 		}
 		const token = randomBytes(16).toString("hex");
-		const record: ImplementerLeaseRecord = {
+		const pending: Omit<
+			ImplementerLeaseRecord,
+			"leaseDirectoryIdentity" | "leaseFileIdentity" | "revision" | "recordDigest"
+		> = {
 			schemaVersion: IMPLEMENTER_LEASE_SCHEMA_VERSION,
 			token,
 			ownerPid: process.pid,
@@ -219,11 +249,13 @@ export function reserveImplementerLease(
 			root,
 			commonGitDir,
 			baselineHead,
-			scope,
-			state: "reserved",
-			attemptRef: implementerAttemptRef(token),
-		};
-		createImplementerLeaseRecord(record, onStaged);
+				scope,
+				state: "reserved",
+				attemptRef: implementerAttemptRef(token),
+				worktreeIndexOwnedByYpi: false,
+				leaseResources: {},
+			};
+		const record = createImplementerLeaseRecord(pending, onStaged);
 		onReserved?.(record);
 		return record;
 	}, deadlineMilliseconds);

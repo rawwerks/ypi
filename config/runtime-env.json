@@ -46,17 +46,15 @@
     { "name": "YPI_CLI_EXTENSION_OVERRIDE", "visibility": "internal" },
     { "name": "YPI_CLI_ROOT_OVERRIDE", "visibility": "internal" },
     { "name": "YPI_CLI_SYSTEM_PROMPT_OVERRIDE", "visibility": "internal" },
+    { "name": "YPI_COST_FILE_IDENTITY", "visibility": "internal" },
     { "name": "YPI_EXTENSION_PATH", "visibility": "internal" },
     { "name": "YPI_EXTENSION_PROMPT_MODE", "visibility": "internal" },
     { "name": "YPI_EXTENSION_ROOT", "visibility": "internal" },
-    { "name": "YPI_IMPLEMENT_AUDIT_FILE", "visibility": "internal" },
-    { "name": "YPI_IMPLEMENT_BASELINE_IGNORE_ROOT", "visibility": "internal" },
-    { "name": "YPI_IMPLEMENT_BASELINE_INDEX", "visibility": "internal" },
-    { "name": "YPI_IMPLEMENT_GIT_DIR", "visibility": "internal" },
+    { "name": "YPI_IMPLEMENT_CONFINEMENT_FILE", "visibility": "internal" },
+    { "name": "YPI_IMPLEMENT_CONFINEMENT_IDENTITY", "visibility": "internal" },
     { "name": "YPI_IMPLEMENT_ROOT", "visibility": "internal" },
-    { "name": "YPI_IMPLEMENT_SCOPE_FILE", "visibility": "internal" },
-    { "name": "YPI_IMPLEMENT_SUBMODULES_FILE", "visibility": "internal" },
     { "name": "YPI_SHELL_HELPER", "visibility": "internal" },
+    { "name": "YPI_TRACE_FILE_IDENTITY", "visibility": "internal" },
     { "name": "HOME", "visibility": "platform" },
     { "name": "PATH", "visibility": "platform" },
     { "name": "PI_CODING_AGENT_DIR", "visibility": "platform" },
@@ -79,7 +77,6 @@
   },
   "cli_flags": [
     { "name": "--async", "argument": null },
-    { "name": "--fork", "argument": null },
-    { "name": "--notify", "argument": "PID" }
+    { "name": "--fork", "argument": null }
   ]
 }

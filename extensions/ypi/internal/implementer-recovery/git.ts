@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { withPrivateUmask } from "../private-path.ts";
 
 const INTERNAL_GIT_CONFIG = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"];
 const DEFAULT_TIMEOUT_MILLISECONDS = 120_000;
@@ -22,13 +23,13 @@ export function createRecoveryGit(
 	timeoutMilliseconds = DEFAULT_TIMEOUT_MILLISECONDS,
 ): RecoveryGit {
 	const run = (cwd: string, args: string[], environment: NodeJS.ProcessEnv = {}): Buffer => {
-		const result = spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
+		const result = withPrivateUmask(() => spawnSync("git", [...INTERNAL_GIT_CONFIG, ...args], {
 			cwd,
 			env: gitEnvironment(environment),
 			stdio: ["ignore", "pipe", "pipe"],
 			timeout: timeoutMilliseconds,
 			maxBuffer: Infinity,
-		});
+		}));
 		if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
 			throw new Error(`git ${args.join(" ")} exceeded ${timeoutMilliseconds}ms`);
 		}

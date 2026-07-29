@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ensureEnvironment } from "../extensions/ypi/env.ts";
+import { acquireConcurrencySlot } from "../extensions/ypi/internal/concurrency.ts";
 import { registerNativeRlmQueryTool } from "../extensions/ypi/native-tool.ts";
 import { resolveRuntime } from "../extensions/ypi/runtime.ts";
 
@@ -81,6 +82,9 @@ for ((i=1; i<=$#; i++)); do
     SYSTEM_PROMPT_FILE="\${!j}"
   fi
 done
+if [ -n "\${YPI_IMPLEMENT_CONFINEMENT_FILE:-}" ]; then
+  YPI_IMPLEMENT_SCOPE_FILE="$(dirname "$YPI_IMPLEMENT_CONFINEMENT_FILE")/scope"
+fi
 {
   echo "ARGS: $*"
   echo "RLM_DEPTH=$RLM_DEPTH"
@@ -118,6 +122,20 @@ done
 } >> "$YPI_FAKE_PI_LOG"
 if [ "\${YPI_FAKE_PI_MODE:-ok}" = "fail" ]; then
   echo "fake child failure" >&2
+  exit 42
+elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "fail-and-corrupt-slot" ]; then
+  printf '%s\n' 'not-json' > "$RLM_CONCURRENCY_DIR/slot-$RLM_ACTIVE_SLOT_TOKEN/lease.json"
+  echo "fake child failure with cleanup corruption" >&2
+  exit 42
+elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "fail-and-block-resource-cleanup" ]; then
+  RESOURCE_ROOT=$(dirname "$RLM_PROMPT_FILE")
+  printf '%s\n' "$RESOURCE_ROOT" > "$YPI_FAKE_RESOURCE_DIR_FILE"
+  chmod 000 "$RESOURCE_ROOT"
+  echo "fake child failure with resource cleanup obstruction" >&2
+  exit 42
+elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "fail-and-corrupt-registry" ]; then
+  printf '%s\n' 'unexpected' > "$RLM_CONCURRENCY_DIR/unexpected"
+  echo "fake child failure with parent resume obstruction" >&2
   exit 42
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "signal" ]; then
   kill -TERM $$
@@ -367,6 +385,23 @@ async function run(): Promise<void> {
 	await expectThrow("N3: expired timeout throws before spawn", "Timeout exceeded", () => invoke());
 	assertNotContains("N3: expired timeout did not spawn child", readLog(), "ARGS:");
 
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "3";
+	process.env.RLM_TIMEOUT = "2147484";
+	ensureEnvironment(runtime, context());
+	await expectThrow(
+		"N3b: timer-overflow timeout fails closed",
+		"supported maximum of 2147483 seconds",
+		() => invoke(),
+	);
+	assertNotContains("N3b: timer-overflow timeout did not spawn child", readLog(), "ARGS:");
+	record(
+		!existsSync(process.env.RLM_CALL_COUNTER_FILE || ""),
+		"N3b: timer-overflow timeout allocates no call slot",
+	);
+
 	// N12: a fresh depth-0 call re-anchors the budget, so a stale session start time does not
 	// make a long-running root Pi immediately time out.
 	clearYpiEnv();
@@ -387,6 +422,89 @@ async function run(): Promise<void> {
 	process.env.YPI_FAKE_PI_MODE = "fail";
 	ensureEnvironment(runtime, context());
 	await expectThrow("N4: nonzero child exit throws", "Child Pi exited with 42", () => invoke());
+
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
+	process.env.YPI_FAKE_PI_MODE = "fail-and-corrupt-slot";
+	ensureEnvironment(runtime, context());
+	let primaryAndCleanupError: unknown;
+	try {
+		await invoke();
+	} catch (error) {
+		primaryAndCleanupError = error;
+	}
+	const primaryAndCleanupMessage = primaryAndCleanupError instanceof Error
+		? primaryAndCleanupError.message
+		: String(primaryAndCleanupError || "");
+	record(
+		primaryAndCleanupMessage.includes("Child Pi exited with 42")
+			&& primaryAndCleanupMessage.includes("Recursive child cleanup also failed")
+			&& (primaryAndCleanupError as Error & { exitCode?: number })?.exitCode === 42,
+		"N4a: primary child failure retains secondary cleanup failure and exit classification",
+		primaryAndCleanupMessage,
+	);
+
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "0";
+	process.env.RLM_MAX_DEPTH = "2";
+	process.env.YPI_FAKE_PI_MODE = "fail-and-block-resource-cleanup";
+	const resourceDirectoryReceipt = path.join(scratch, "blocked-resource-directory");
+	process.env.YPI_FAKE_RESOURCE_DIR_FILE = resourceDirectoryReceipt;
+	ensureEnvironment(runtime, context());
+	let primaryAndResourceError: unknown;
+	try {
+		await invoke();
+	} catch (error) {
+		primaryAndResourceError = error;
+	}
+	const primaryAndResourceMessage = primaryAndResourceError instanceof Error
+		? primaryAndResourceError.message
+		: String(primaryAndResourceError || "");
+	record(
+		primaryAndResourceMessage.includes("Child Pi exited with 42")
+			&& primaryAndResourceMessage.includes("Recursive child cleanup also failed")
+			&& (primaryAndResourceError as Error & { exitCode?: number })?.exitCode === 42,
+		"N4a: primary child failure retains resource cleanup failure and exit classification",
+		primaryAndResourceMessage,
+	);
+	if (existsSync(resourceDirectoryReceipt)) {
+		const blockedResourceDirectory = readFileSync(resourceDirectoryReceipt, "utf8").trim();
+		if (blockedResourceDirectory) {
+			chmodSync(blockedResourceDirectory, 0o700);
+			rmSync(blockedResourceDirectory, { recursive: true, force: true });
+		}
+	}
+
+	clearYpiEnv();
+	resetLog();
+	process.env.RLM_DEPTH = "1";
+	process.env.RLM_MAX_DEPTH = "3";
+	process.env.YPI_FAKE_PI_MODE = "fail-and-corrupt-registry";
+	ensureEnvironment(runtime, context());
+	const inheritedForResumeFailure = await acquireConcurrencySlot();
+	process.env.RLM_ACTIVE_SLOT_TOKEN = inheritedForResumeFailure.token;
+	let primaryAndResumeError: unknown;
+	try {
+		await invoke();
+	} catch (error) {
+		primaryAndResumeError = error;
+	}
+	const primaryAndResumeMessage = primaryAndResumeError instanceof Error
+		? primaryAndResumeError.message
+		: String(primaryAndResumeError || "");
+	record(
+		primaryAndResumeMessage.includes("Child Pi exited with 42")
+			&& primaryAndResumeMessage.includes("Recursive child cleanup also failed")
+			&& primaryAndResumeMessage.includes("unexpected state")
+			&& (primaryAndResumeError as Error & { exitCode?: number })?.exitCode === 42,
+		"N4a: primary child failure retains inherited-slot resume failure and exit classification",
+		primaryAndResumeMessage,
+	);
+	rmSync(path.join(process.env.RLM_CONCURRENCY_DIR || "", "unexpected"), { force: true });
+	await inheritedForResumeFailure.release();
 
 	clearYpiEnv();
 	resetLog();
@@ -1037,10 +1155,18 @@ async function run(): Promise<void> {
 	process.env.RLM_COST_FILE = permissiveCost;
 	process.env.RLM_DEPTH = "0";
 	process.env.RLM_MAX_DEPTH = "2";
-	process.env.RLM_JSON = "0";
-	ensureEnvironment(runtime, context());
-	await invoke("private telemetry permissions");
-	record((statSync(permissiveTrace).mode & 0o777) === 0o600 && (statSync(permissiveCost).mode & 0o777) === 0o600, "N10: existing telemetry sinks are tightened to private permissions");
+		process.env.RLM_JSON = "0";
+		ensureEnvironment(runtime, context());
+		await invoke("private telemetry permissions");
+		record(
+			process.env.PI_TRACE_FILE === undefined
+				&& process.env.RLM_COST_FILE === undefined
+				&& (statSync(permissiveTrace).mode & 0o777) === 0o644
+				&& (statSync(permissiveCost).mode & 0o777) === 0o644
+				&& readFileSync(permissiveTrace, "utf8") === ""
+				&& readFileSync(permissiveCost, "utf8") === "",
+			"N10: wrong-mode caller telemetry sinks are preserved and disabled",
+		);
 
 	clearYpiEnv();
 	resetLog();
