@@ -9,12 +9,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Root-chartered implementers now accept explicit repository-relative path
   scopes. Up to three disjoint children can edit detached ephemeral Git
   worktrees concurrently and return verified `refs/ypi/attempt-*` references.
-- A persisted common-Git-directory lease registry enforces overlap and
-  concurrency admission. `rlm_cleanup` salvages dead worktrees to exact verified
-  refs before removal and leaves live owners untouched. A PID launch gate closes
-  the parent-death window before child execution begins.
+- A persisted common-Git-directory lease registry enforces writer-scope
+  overlap. `rlm_cleanup` salvages dead worktrees to exact verified refs before
+  removal and leaves live owners untouched. A stable-process-identity launch
+  gate closes the parent-death window before child execution begins.
+- A root-owned generation coordinator now enforces tree-wide call allocation,
+  three-child concurrency, cooperative nested slot yielding, and terminal
+  cancellation. Detached descendants cannot admit new work after root death.
+  Fresh continuation processes adopt only exact private counter state, and
+  long evidence paths use an exactly retired bounded socket directory.
 - Single and concurrent `SIGKILL` matrices cover staging, ref creation,
   worktree removal, child death, and a parent death with two live leases.
+- A cross-depth cancellation harness covers independently detached writers and
+  recursive descendants, post-terminal admission refusal, bounded cleanup,
+  work preservation, and noninterference with unrelated processes.
 - A direct implementer-recovery harness covers the shared lease schema,
   durable atomic writes, failed ref inspection, wrong-parent refs, symlinked
   gitlinks, and Python-unreachable cleanup.
@@ -40,6 +48,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   syntax supported by the required Node version.
 - Recovery now distinguishes an absent attempt ref from a failed Git
   inspection and preserves the workspace on uncertain ref state.
+- Required transcript validation now proves a post-cleanup lifecycle-terminal
+  record in addition to child completion, transcript append, and receipt
+  integrity.
 
 ### Removed
 - The alternate native and shell recursion engines and their runtime selectors.

@@ -99,9 +99,12 @@ caller owns collection and cancellation.
 
 Every non-leaf child runs Pi with the same canonical extension and prompt.
 Recursion disappears when the next child would exceed `RLM_MAX_DEPTH`.
-`RLM_MAX_CALLS` is allocated across the whole tree through a shared counter.
-The optional timeout is also tree-wide. Cost and token values are observational
-telemetry and never an admission or termination control.
+`RLM_MAX_CALLS` and the three-child concurrency cap are enforced across the
+whole tree by a root-owned, generation-bound coordinator. The optional timeout
+is also tree-wide. Root cancellation terminalizes that authority before it
+signals registered child process groups; a detached survivor cannot admit or
+launch more recursive work after the root dies. Cost and token values are
+observational telemetry and never an admission or termination control.
 
 The root keeps its normal Pi tools. Review children exclude mutation and
 process-spawning tools. Child extension discovery is canonical-only unless the
@@ -132,11 +135,12 @@ scope or worktree, through escaping symlinks, inside `.git`, inside submodules,
 or to paths ignored by the baseline or final ignore rules are blocked both at
 tool execution and again during snapshot verification.
 
-A launch gate records the detached child PID before Pi can begin work. This
-lets recovery distinguish a live child from a dead lease even if the root
-process is killed during spawn. The gate and crash recovery run through the
-same Node/TypeScript runtime required by the rest of ypi; implement mode has no
-additional Python dependency.
+A launch gate records the detached child's stable process identity with the
+active root generation before Pi can begin work. This lets recovery distinguish
+a live child from a dead lease even if the root process is killed during spawn,
+and closes the final authority check-to-exec window. The gate and crash recovery
+run through the same Node/TypeScript runtime required by the rest of ypi;
+implement mode has no additional Python dependency.
 
 The worktree contains tracked files only. It does not reproduce ignored files
 or uninitialized submodule contents. Supply required external material through
@@ -186,6 +190,10 @@ cleanup invocation.
 `make test-workspace-concurrent-crash` kills children and a parent with multiple
 live leases, proving exact work preservation, live-lease isolation, registry
 recovery, and a continuously clean real checkout.
+`make test-cross-depth-cancellation` proves that root cancellation revokes
+admission before terminating independently detached writer and recursive
+descendant groups, preserves writable work, and does not signal unrelated
+processes.
 `make test-implementer-recovery` directly exercises the shared lease schema,
 atomic persistence, TypeScript recovery CLI, hostile metadata rejection, and
 the user-facing `rlm_cleanup` adapter.
@@ -217,7 +225,7 @@ against the source and must contain exactly the public variables.
 | `RLM_MAX_DEPTH` | `3` | Maximum recursion depth. |
 | `RLM_MODEL` | active Pi model | Root route and inherited child model. |
 | `RLM_PROVIDER` | active Pi provider | Root route and inherited child provider. |
-| `RLM_REQUIRE_TRANSCRIPTS` | `0` | Set to `1` to require a private explicit session directory plus stable-inode JSONL append proof and a durable receipt for every admitted child. |
+| `RLM_REQUIRE_TRANSCRIPTS` | `0` | Set to `1` to require a private explicit session directory, stable-inode JSONL append proof, a durable receipt, and a post-cleanup lifecycle-terminal record for every admitted child. |
 | `RLM_SESSION_DIR` | active Pi session directory | Directory for shared child sessions. |
 | `RLM_SHARED_SESSIONS` | `1` | Set to `0` to prevent child session sharing. |
 | `RLM_STDIN` | unset | Marker forcing an explicit stdin read, even when stdin appears interactive. |
@@ -278,7 +286,8 @@ make test-extensions
 
 The fast suite includes type checking, generated-bundle parity, shell and
 native contracts, guardrails, configuration drift, write confinement,
-publication authority, the workspace lifecycle, and its crash matrix.
+publication authority, transcript terminality, cross-depth cancellation, the
+workspace lifecycle, and its crash matrices.
 
 Provider-backed gates are explicit because they consume live model calls:
 

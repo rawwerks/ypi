@@ -146,7 +146,11 @@ line. A rebase or remote change requires a fresh run instead of silently moving
 proof state. The counter file is authoritative. Explicitly restoring
 `RLM_CALL_COUNT` prevents a missing or contaminated ambient value from becoming
 the fallback. The cost ledger preserves observational spend and token telemetry
-across sessions.
+across sessions. The concurrency directory also holds the root-generation
+authority manifest. The local socket normally lives there; when that pathname
+would exceed the Unix-domain limit, the runtime uses and retires a separate
+short private directory. These are runtime-owned internal state: do not edit,
+replace, or reuse them as a continuation control surface.
 
 ## Admission and coverage
 
@@ -222,6 +226,11 @@ completion watcher may wake the root, but it does not adjudicate or collect the
 result. If the root cannot keep ownership of collection and cancellation, stay
 sequential.
 
+Cancelling the root terminalizes its active coordinator generation before
+registered child process groups are signalled. Treat any admitted call after
+that terminal marker, or any transcript lacking its post-cleanup lifecycle
+terminal record, as a failed proof even when a child completion record exists.
+
 ## Freeze before provider-backed evaluation
 
 Before the first live-model lane:
@@ -229,8 +238,10 @@ Before the first live-model lane:
 1. close all source-review blockers;
 2. run `make test-fast` and `make test-extensions`;
 3. run `make test-eval-contracts` with mock Pi;
-4. commit every tracked change;
-5. require a clean checkout and record exact HEAD.
+4. validate required transcripts through their post-cleanup lifecycle terminal
+   records;
+5. commit every tracked change;
+6. require a clean checkout and record exact HEAD.
 
 Runtime parity runs only through the existing facade:
 

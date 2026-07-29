@@ -24,6 +24,9 @@ This repository has one recursion engine:
 - `extensions/ypi/native-tool.ts` adapts that engine to Pi's native
   `rlm_query` tool.
 - `extensions/ypi/cli.ts` adapts it to the `rlm_query` shell command.
+- `extensions/ypi/internal/tree-coordinator.ts` owns root-generation
+  authority, tree-wide call allocation, concurrency slots, launch
+  registration, and terminal cancellation.
 - `extensions/ypi/internal/implementer-lease.ts` owns the persisted writer
   lease contract shared by live execution and crash recovery.
 - `extensions/ypi/internal/implementer-recovery/` owns stale-lease
@@ -34,6 +37,9 @@ Every depth uses the same prompt, runtime, and extension. Review mode is
 read-only by default. Writable delegation is root-only and limited to three
 concurrent implementers with mechanically enforced, disjoint path scopes in an
 existing clean Git checkout. Descendants cannot escalate writable authority.
+Root cancellation marks the active coordinator generation terminal before it
+signals registered child process groups. Detached survivors cannot admit or
+launch new recursive work, and unrelated processes are never signal targets.
 
 The root wrapper enables the shell helper and includes its runtime source in
 the child prompt for self-inspection. Direct extension use exposes only the
@@ -170,6 +176,7 @@ agreement.
 - TypeScript type checking and generated-bundle parity
 - shell, native, and shared-runtime behavior
 - depth, timeout, call-count, session, and isolation guardrails
+- root-death and cross-depth cancellation terminality
 - configuration and provider-credential allowlist completeness
 - implementer admission, path-scope confinement, worktree/ref finalization,
   apply-order invariance, direct recovery-module coverage, and
@@ -252,3 +259,30 @@ The child environment is allowlisted. Completeness must be derived from Pi's
 real provider credential source, not guessed suffix patterns. This specifically
 caught `COPILOT_GITHUB_TOKEN` and `HF_TOKEN`. Covered by
 `tests/test_provider_allowlist.sh`.
+
+### 9. Root Death Left Detached Descendants Authoritative
+
+Immediate-child process-group cleanup did not cover an independently detached
+writer descendant. Bind admission and the final launch gate to one stable root
+identity and terminal generation, then signal only registered groups. Covered
+by `tests/cross_depth_cancellation_harness.ts`.
+
+### 10. Coordinator Startup Outlived Its Private Directory
+
+Synchronous environment setup can return before the Unix socket listen callback.
+If a nonrecursive caller then retires its private state, startup must terminalize
+and reject without an unhandled exception. Covered by
+`tests/n84_telemetry_append_harness.ts`.
+
+### 11. Continuation Could Not Adopt Its Call Counter
+
+A fresh root process has no in-memory counter identity. It may adopt only an
+exact private counter whose canonical contents match `RLM_CALL_COUNT`; mismatch
+or replacement remains a hard failure. Covered by the concurrency harness.
+
+### 12. Evidence Paths Exceeded Unix Socket Limits
+
+The persisted proof directory may be longer than a Unix-domain socket path.
+Use a bounded private socket directory when needed, close every coordinator
+connection explicitly, and retire that directory only after server close.
+Covered by the concurrency harness.

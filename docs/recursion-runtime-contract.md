@@ -11,7 +11,7 @@ to adapters. It owns:
 
 - depth and terminal-depth admission;
 - atomic tree-wide call allocation;
-- crash-recoverable tree-wide child-concurrency admission;
+- generation-bound tree-wide child-concurrency admission;
 - optional tree-wide timeout accounting;
 - provider, model, and thinking-level routing by child depth;
 - exact prompt, root charter, context, and session transport;
@@ -32,8 +32,11 @@ The writable lifecycle has one persisted contract:
 - `internal/implementer-lease.ts` owns lease states, object-ID rules, attempt
   ref naming, and schema validation;
 - `internal/atomic-file.ts` owns durable file replacement;
-- `internal/concurrency.ts` owns the three-generation queue, live-PID leases,
-  and cooperative slot yielding during nested calls;
+- `internal/tree-coordinator.ts` owns root-generation authority, atomic
+  tree-wide call allocation, the three-generation queue, cooperative slot
+  yielding, and registered child process identities;
+- `internal/concurrency.ts` is the narrow client for coordinator-backed slot
+  acquisition, launch registration, suspension, and release;
 - `internal/implementer-registry-layout.ts` owns implementer registry paths and
   conservative recovery-state detection;
 - `internal/workspace-registry.ts` owns live admission and registry mutation;
@@ -58,15 +61,25 @@ only after a verified ref or a proven pre-admission state.
 - live progress and cancellation bridging;
 - tool-result presentation.
 
-Native requests may execute in parallel. The shared runtime admits three active
-child generations and queues additional calls. Waiting parents cooperatively
-yield their inherited slot, so a full depth-1 batch cannot deadlock depth-2 or
-depth-3 work. The shared registry persists the configured cap and rejects
-per-process drift within one tree; cancellation and the tree deadline remain
-binding while a yielded parent reacquires its slot. Implement requests carry
-explicit path scopes; the writer registry refuses component-overlap. The
-extension blocks root mutators and unknown tools from a mixed implementer
-batch. The root waits for the full batch before mutating or integrating.
+Native requests may execute in parallel. A root-owned authenticated coordinator
+admits three active child generations and queues additional calls. Waiting
+parents cooperatively yield their inherited slot, so a full depth-1 batch
+cannot deadlock depth-2 or depth-3 work. The coordinator freezes the configured
+cap for one root generation and rejects per-process drift; cancellation and the
+tree deadline remain binding while a yielded parent reacquires its slot. Every
+request proves the exact private authority manifest, generation secret, caller
+process identity, and live stable root identity. Root cancellation first marks
+the generation terminal, then signals only registered child process groups.
+Detached survivors cannot admit or launch more work after root death.
+Continuation adopts a pre-existing call-counter inode only when it is a
+current-user-owned `0600` one-link file whose canonical contents exactly match
+the declared count. Long evidence paths use a separate bounded private socket
+directory, which is retired only after the server and all request connections
+close.
+Implement requests carry explicit path scopes; the writer registry refuses
+component-overlap. The extension blocks root mutators and unknown tools from a
+mixed implementer batch. The root waits for the full batch before mutating or
+integrating.
 
 ### Shell Adapter
 
@@ -133,10 +146,12 @@ event. It then atomically creates a per-call receipt beside the transcript.
 Transcript failure is secondary to an existing nonzero child outcome, so it
 does not replace exit `42`, timeout `124`, or cancellation `130`.
 `scripts/validate-recursion-transcripts.ts` requires one matching start,
-completion, transcript, and receipt for every call and recomputes the current
-digests. `rlm_sessions` is a direct-child, no-symlink presentation tool; it is
-limited to current-user-owned `0600` singly-linked files in a `0700` directory.
-It is not an evidence validator.
+completion, post-cleanup lifecycle terminal marker, transcript, and receipt for
+every call and recomputes the current digests. A completion record alone cannot
+prove that resource cleanup, slot release, and inherited-parent resumption
+succeeded. `rlm_sessions` is a direct-child, no-symlink presentation tool; it
+is limited to current-user-owned `0600` singly-linked files in a `0700`
+directory. It is not an evidence validator.
 
 ## Implement Mode
 
@@ -175,6 +190,10 @@ content must arrive through explicit context or remain root-owned.
 `tests/workspace_concurrent_crash_matrix.ts` kills children at six stages and a
 parent with two leases. It proves work preservation, live-lease isolation,
 registry recovery, and a continuously clean real checkout.
+`tests/cross_depth_cancellation_harness.ts` separately proves that root
+cancellation terminalizes authority before signalling independently detached
+writer and recursive-descendant process groups, blocks post-terminal
+admission, preserves writable work, and leaves unrelated processes untouched.
 
 ## Default Guardrails
 

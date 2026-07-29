@@ -81,6 +81,9 @@ lease for explicit `rlm_cleanup` recovery.
 `RLM_MAX_DEPTH` bounds ancestry and `RLM_MAX_CALLS` bounds total admitted child
 calls. `RLM_TIMEOUT` is optional and applies to the whole tree when the user
 sets it. Staleness is an observe-only warning; it never terminates work.
+The root owns one generation-bound authority for call admission and active
+child slots. Cancellation terminalizes that authority before registered child
+groups are signalled, so surviving descendants cannot admit or launch new work.
 
 Cost and token use are telemetry. Never set or recommend a dollar budget and
 never stop work because a dollar threshold was reached.
