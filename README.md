@@ -181,10 +181,9 @@ After verification, the reference is authoritative and the worktree is retained
 until recovery completes. `./rlm_cleanup --repo PATH` is dry-run by default;
 with `--force` it leaves live processes untouched, snapshots each dead lease to
 a verified attempt ref, proves the worktree still matches, removes it, and
-prunes stale worktree metadata. Attempt refs have a separate seven-day cleanup
-threshold.
-Refs created or confirmed during lease recovery are never expired in that same
-cleanup invocation.
+prunes stale worktree metadata. `--attempt-age` is a reporting threshold only:
+attempt refs older than it are listed and preserved. Age never authorizes ref
+deletion.
 
 `make test-workspace-crash` covers single-lease interruption points.
 `make test-workspace-concurrent-crash` kills children and a parent with multiple

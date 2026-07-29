@@ -180,8 +180,9 @@ copy. A launch gate persists the detached child PID before releasing Pi, so a
 parent death cannot create an unregistered writer. `rlm_cleanup` never removes
 a live lease. For a dead lease it snapshots the exact current worktree when
 needed, verifies the ref and worktree trees match, removes the worktree, and
-prunes stale Git metadata. A recovered ref is not eligible for age-based
-expiration until a later cleanup invocation.
+prunes stale Git metadata. Attempt refs are evidence and are never deleted by
+age; `--attempt-age` only controls which preserved refs the cleanup report
+lists.
 
 Worktrees contain tracked files only. Ignored files and uninitialized submodule
 content must arrive through explicit context or remain root-owned.
