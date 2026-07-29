@@ -1398,7 +1398,12 @@ function startLocalCoordinator(previous) {
   };
   server.on("connection", (socket) => acceptConnection(state, socket));
   state.ready = new Promise((resolve, reject) => {
-    server.once("error", (error) => {
+    let startupSettled = false;
+    const failStartup = (error) => {
+      if (startupSettled)
+        return;
+      startupSettled = true;
+      const failure = error instanceof Error ? error : new TreeCoordinatorError("Tree coordinator startup failed.", 130);
       if (state.status !== "terminal") {
         state.status = "terminal";
         try {
@@ -1406,25 +1411,56 @@ function startLocalCoordinator(previous) {
             ...state.manifest,
             status: "terminal",
             terminalAtEpochMilliseconds: Date.now(),
-            terminalReason: `coordinator-start-failed:${error.message}`.slice(0, 200)
+            terminalReason: `coordinator-start-failed:${failure.message}`.slice(0, 200)
           });
         } catch {}
       }
-      reject(error);
-    });
-    server.listen(socketPath, () => {
-      if (state.status === "terminal") {
+      try {
         server.close();
-        reject(new TreeCoordinatorError("Tree coordinator was terminalized during startup.", 130));
+      } catch {}
+      reject(failure);
+    };
+    server.on("error", (error) => {
+      if (!startupSettled) {
+        failStartup(error);
         return;
       }
-      chmodSync(socketPath, 384);
-      state.status = "active";
-      updateManifest(state, { ...state.manifest, status: "active" });
-      server.unref();
-      resolve();
+      if (state.status === "terminal")
+        return;
+      state.status = "terminal";
+      try {
+        updateManifest(state, {
+          ...state.manifest,
+          status: "terminal",
+          terminalAtEpochMilliseconds: Date.now(),
+          terminalReason: `coordinator-server-failed:${error.message}`.slice(0, 200)
+        });
+      } catch {}
+      for (const queued of state.queue.splice(0)) {
+        failureResponse(queued.socket, new TreeCoordinatorError("Recursive tree authority failed.", 130));
+      }
     });
+    try {
+      server.listen(socketPath, () => {
+        try {
+          if (state.status === "terminal") {
+            throw new TreeCoordinatorError("Tree coordinator was terminalized during startup.", 130);
+          }
+          chmodSync(socketPath, 384);
+          updateManifest(state, { ...state.manifest, status: "active" });
+          state.status = "active";
+          server.unref();
+          startupSettled = true;
+          resolve();
+        } catch (error) {
+          failStartup(error);
+        }
+      });
+    } catch (error) {
+      failStartup(error);
+    }
   });
+  state.ready.catch(() => {});
   process.env.YPI_TREE_AUTHORITY_FILE = manifestPath;
   process.env.YPI_TREE_AUTHORITY_IDENTITY = JSON.stringify(manifestIdentity);
   process.env.YPI_TREE_COORDINATOR_SOCKET = socketPath;

@@ -858,7 +858,13 @@ function startLocalCoordinator(previous?: LocalCoordinator): LocalCoordinator {
 	};
 	server.on("connection", (socket) => acceptConnection(state, socket));
 	state.ready = new Promise<void>((resolve, reject) => {
-		server.once("error", (error) => {
+		let startupSettled = false;
+		const failStartup = (error: unknown) => {
+			if (startupSettled) return;
+			startupSettled = true;
+			const failure = error instanceof Error
+				? error
+				: new TreeCoordinatorError("Tree coordinator startup failed.", 130);
 			if (state.status !== "terminal") {
 				state.status = "terminal";
 				try {
@@ -866,27 +872,71 @@ function startLocalCoordinator(previous?: LocalCoordinator): LocalCoordinator {
 						...state.manifest,
 						status: "terminal",
 						terminalAtEpochMilliseconds: Date.now(),
-						terminalReason: `coordinator-start-failed:${error.message}`.slice(0, 200),
+						terminalReason: `coordinator-start-failed:${failure.message}`.slice(0, 200),
 					});
 				} catch {
-					// Preserve the original startup error.
+					// Preserve the original startup error when the authority path vanished
+					// or was replaced concurrently.
 				}
 			}
-			reject(error);
-		});
-		server.listen(socketPath, () => {
-			if (state.status === "terminal") {
+			try {
 				server.close();
-				reject(new TreeCoordinatorError("Tree coordinator was terminalized during startup.", 130));
+			} catch {
+				// The server may not have reached its listening state.
+			}
+			reject(failure);
+		};
+		server.on("error", (error) => {
+			if (!startupSettled) {
+				failStartup(error);
 				return;
 			}
-			chmodSync(socketPath, 0o600);
-			state.status = "active";
-			updateManifest(state, { ...state.manifest, status: "active" });
-			server.unref();
-			resolve();
+			if (state.status === "terminal") return;
+			state.status = "terminal";
+			try {
+				updateManifest(state, {
+					...state.manifest,
+					status: "terminal",
+					terminalAtEpochMilliseconds: Date.now(),
+					terminalReason: `coordinator-server-failed:${error.message}`.slice(0, 200),
+				});
+			} catch {
+				// The next authority request still fails closed on the terminal state.
+			}
+			for (const queued of state.queue.splice(0)) {
+				failureResponse(
+					queued.socket,
+					new TreeCoordinatorError("Recursive tree authority failed.", 130),
+				);
+			}
 		});
+		try {
+			server.listen(socketPath, () => {
+				try {
+					if (state.status === "terminal") {
+						throw new TreeCoordinatorError(
+							"Tree coordinator was terminalized during startup.",
+							130,
+						);
+					}
+					chmodSync(socketPath, 0o600);
+					updateManifest(state, { ...state.manifest, status: "active" });
+					state.status = "active";
+					server.unref();
+					startupSettled = true;
+					resolve();
+				} catch (error) {
+					failStartup(error);
+				}
+			});
+		} catch (error) {
+			failStartup(error);
+		}
 	});
+	// Environment setup is synchronous and some callers never make a recursive
+	// request. Observe readiness here so a concurrent teardown cannot become an
+	// unhandled rejection; requestCoordinator still awaits the original promise.
+	void state.ready.catch(() => {});
 
 	process.env.YPI_TREE_AUTHORITY_FILE = manifestPath;
 	process.env.YPI_TREE_AUTHORITY_IDENTITY = JSON.stringify(manifestIdentity);
