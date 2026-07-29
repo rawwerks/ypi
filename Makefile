@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-guardrails test-timeout-range test-native test-runtime-contract test-eval-contracts test-concurrency test-child-process test-transcripts test-session-tools test-private-path-ownership test-implementer-registry-generation test-workspace-retirement-generation test-workspace-policy test-parallel-workspace test-implementer-recovery test-workspace-crash test-workspace-concurrent-crash test-write-scope test-publication-policy test-config-surface typecheck-runtime build-runtime-cli check-runtime-cli test-provider-allowlist test-extensions test-e2e test-recursion-e2e test-extensions-e2e eval-depth-ablation eval-runtime-parity test-fast doctor test-doctor pre-push-checks check-upstream install-hooks land ci-status ci-last-failure clean
+.PHONY: test test-unit test-guardrails test-timeout-range test-native test-runtime-contract test-eval-contracts test-concurrency test-atomic-file test-child-process test-transcripts test-session-tools test-private-path-ownership test-implementer-registry-generation test-workspace-retirement-generation test-workspace-policy test-parallel-workspace test-implementer-recovery test-workspace-crash test-workspace-concurrent-crash test-write-scope test-publication-policy test-config-surface typecheck-runtime build-runtime-cli check-runtime-cli test-provider-allowlist test-extensions test-e2e test-recursion-e2e test-extensions-e2e eval-depth-ablation eval-runtime-parity test-fast doctor test-doctor pre-push-checks check-upstream install-hooks land ci-status ci-last-failure clean
 
 # Fast tests — no LLM calls, uses mock pi
 test-unit:
@@ -30,6 +30,10 @@ test-eval-contracts:
 test-concurrency:
 	@echo "Running recursive concurrency tests..."
 	@bun tests/concurrency_harness.ts
+
+test-atomic-file:
+	@echo "Running atomic file publication tests..."
+	@bun tests/atomic_file_harness.ts
 
 test-child-process:
 	@echo "Running child process terminality tests..."

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -240,16 +241,19 @@ console.log("\n=== Implementer recovery module and CLI harness ===");
 	writeFileSync(symlinkDestination, "preserve\n");
 	symlinkSync(symlinkDestination, copyTarget);
 	const copyUmask = process.umask(0o777);
+	let copyRejected = false;
 	try {
 		atomicCopyFile(copySource, copyTarget, { mode: 0o600 });
+	} catch {
+		copyRejected = true;
 	} finally {
 		process.umask(copyUmask);
 	}
 	record(
-		readFileSync(copyTarget, "utf8") === "session snapshot\n"
-			&& readFileSync(symlinkDestination, "utf8") === "preserve\n"
-			&& (statSync(copyTarget).mode & 0o777) === 0o600,
-		"atomic copy replaces a target symlink without following it and enforces mode",
+		copyRejected
+			&& lstatSync(copyTarget).isSymbolicLink()
+			&& readFileSync(symlinkDestination, "utf8") === "preserve\n",
+		"atomic copy rejects and preserves a target symlink and its referent",
 	);
 	rmSync(root, { recursive: true, force: true });
 }
