@@ -28,6 +28,10 @@ import { formatCombinedChildOutput, normalizeChildOutput, type ChildToolActivity
 import { runChildProcess } from "./internal/child-process.ts";
 import { acquireChildResources } from "./internal/child-resources.ts";
 import { normalizeImplementScope } from "./internal/implement-scope.ts";
+import {
+	assertTreeCoordinatorActive,
+	terminateRootTreeCoordinator,
+} from "./internal/tree-coordinator.ts";
 import { finalizeTranscriptProof } from "./internal/transcript.ts";
 import {
 	WorkspaceFinalizationError,
@@ -184,16 +188,40 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		throw new RecursiveChildError("Writable recursion is root-only and cannot be escalated by a child. Continue implementation in the current agent or delegate a read-only review.", 1);
 	}
 	if (depth === 0) process.env.RLM_START_TIME = String(request.treeStartTimeSeconds ?? Math.floor(Date.now() / 1000));
+	const terminateTreeOnRootAbort = () => {
+		if (depth === 0) void terminateRootTreeCoordinator("root-request-cancelled");
+	};
+	request.signal?.addEventListener("abort", terminateTreeOnRootAbort, { once: true });
+	let rootAbortListenerAttached = Boolean(request.signal);
+	const removeRootAbortListener = () => {
+		if (!rootAbortListenerAttached) return;
+		request.signal?.removeEventListener("abort", terminateTreeOnRootAbort);
+		rootAbortListenerAttached = false;
+	};
 
-	const counterRemainingSeconds = timeoutOrThrow();
-	const counterDeadlineMilliseconds = counterRemainingSeconds === undefined ? undefined : Date.now() + counterRemainingSeconds * 1000;
-	assertWithinMaxCalls(0);
-	const callCount = await allocateCallCount(counterDeadlineMilliseconds);
-	assertWithinMaxCalls(callCount);
-	const setupRemainingSeconds = timeoutOrThrow();
-	const setupDeadlineMilliseconds = setupRemainingSeconds === undefined
-		? undefined
-		: Date.now() + setupRemainingSeconds * 1000;
+	let callCount: number;
+	let setupDeadlineMilliseconds: number | undefined;
+	try {
+		const counterRemainingSeconds = timeoutOrThrow();
+		const counterDeadlineMilliseconds = counterRemainingSeconds === undefined ? undefined : Date.now() + counterRemainingSeconds * 1000;
+		await assertTreeCoordinatorActive({
+			deadlineMilliseconds: counterDeadlineMilliseconds,
+			signal: request.signal,
+		});
+		assertWithinMaxCalls(0);
+		callCount = await allocateCallCount(
+			counterDeadlineMilliseconds,
+			request.signal,
+		);
+		assertWithinMaxCalls(callCount);
+		const setupRemainingSeconds = timeoutOrThrow();
+		setupDeadlineMilliseconds = setupRemainingSeconds === undefined
+			? undefined
+			: Date.now() + setupRemainingSeconds * 1000;
+	} catch (error) {
+		removeRootAbortListener();
+		throw error;
+	}
 	let parentSlotSuspension;
 	let concurrencySlot;
 	try {
@@ -225,6 +253,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 				`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} ADMISSION_RESUME_FAILED detail=${resumeFailure.message}`,
 			);
 		}
+		removeRootAbortListener();
 		const exitCode = (error as Error & { exitCode?: number }).exitCode || 1;
 		throw new RecursiveChildError(message, exitCode);
 	}
@@ -254,6 +283,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			scope: implementScope,
 		});
 	} catch (error) {
+		removeRootAbortListener();
 		const admissionCleanupErrors: Error[] = [];
 		try {
 			await concurrencySlot.release();
@@ -289,6 +319,10 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 	let workspace: WorkspaceReport | undefined;
 	let terminalError: unknown;
 	let hasTerminalError = false;
+	let completionEvidence: {
+		exitCode: number;
+		transcriptStatus: "verified" | "failed" | "not-required";
+	} | undefined;
 	const throwTerminal = (error: unknown): never => {
 		hasTerminalError = true;
 		terminalError = error;
@@ -351,6 +385,10 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		else if (resources.standaloneSystemPromptFile) args.push("--system-prompt", resources.standaloneSystemPromptFile);
 
 		const timeoutSeconds = timeoutOrThrow();
+		await assertTreeCoordinatorActive({
+			deadlineMilliseconds: setupDeadlineMilliseconds,
+			signal: request.signal,
+		});
 		request.onAdmitted?.(callCount);
 		trace(`[${nowTraceTime()}] depth=${depth}→${childDepth} PID=${process.pid} call=${callCount} trace=${traceId} caller=${request.caller} fork=${request.fork === true} mode=${requestedMode} workspace=${resources.workspace.mode}`);
 		const started = Date.now();
@@ -378,19 +416,16 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 						// The child may already have exited.
 					}
 					throw error;
-					}
-					request.onChildSpawn?.(pid);
-				},
-				onLaunchReady() {
-					resources.workspace.noteChildLaunchReady();
-				},
-				quiesceProcessGroup: resources.workspace.quiesceProcessGroup,
+				}
+				request.onChildSpawn?.(pid);
+			},
+			onLaunchReady() {
+				resources.workspace.noteChildLaunchReady();
+			},
+			quiesceProcessGroup: resources.workspace.quiesceProcessGroup,
 			launchGate: {
 				launcherPath: path.join(runtime.root, "scripts", "launch-recursive-child.ts"),
-				...(resources.workspace.childLaunchGate || {
-					pidFile: concurrencySlot.pidFile,
-					readyFile: concurrencySlot.readyFile,
-				}),
+				...resources.workspace.childLaunchGate,
 			},
 		});
 		const elapsed = Math.max(0, Math.round((Date.now() - started) / 1000));
@@ -415,7 +450,14 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 			transcriptFailure = error instanceof Error ? error : new Error(String(error));
 		}
 		workspace = resources.workspace.finalize();
-		trace(`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} COMPLETED exit=${processResult.code} elapsed=${elapsed}s caller=${request.caller} call=${callCount} trace=${traceId} cost=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.cost ?? "untracked"} tokens=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.tokens ?? "untracked"} cancelled=${processResult.cancelled} timeout=${processResult.timedOut} truncated=${processResult.textTruncated || processResult.jsonEventTruncated} transcript=${resources.transcriptProof ? transcriptFailure ? "failed" : "verified" : "not-required"} changed_paths=${workspace.changedPaths.length}`);
+		const transcriptStatus = resources.transcriptProof
+			? transcriptFailure ? "failed" : "verified"
+			: "not-required";
+		completionEvidence = {
+			exitCode: processResult.code,
+			transcriptStatus,
+		};
+		trace(`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} COMPLETED exit=${processResult.code} elapsed=${elapsed}s caller=${request.caller} call=${callCount} trace=${traceId} cost=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.cost ?? "untracked"} tokens=${processResult.jsonCostIncomplete ? "incomplete" : output.cost?.tokens ?? "untracked"} cancelled=${processResult.cancelled} timeout=${processResult.timedOut} truncated=${processResult.textTruncated || processResult.jsonEventTruncated} transcript=${transcriptStatus} changed_paths=${workspace.changedPaths.length}`);
 		const details: RecursiveChildDetails = {
 			implementation: "canonical",
 			depth,
@@ -499,6 +541,7 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 		}
 		return throwTerminal(error);
 	} finally {
+		removeRootAbortListener();
 		const cleanupErrors = resources.cleanup();
 		try {
 			await concurrencySlot.release();
@@ -529,6 +572,11 @@ export async function runRecursiveChild(runtime: YpiRuntime, request: RecursiveC
 				terminalError,
 				"Recursive child cleanup also failed",
 				cleanupErrors,
+			);
+		}
+		if (completionEvidence) {
+			trace(
+				`[${new Date().toISOString()}] depth=${depth} child_depth=${childDepth} LIFECYCLE_TERMINAL exit=${completionEvidence.exitCode} call=${callCount} trace=${traceId} transcript=${completionEvidence.transcriptStatus} cleanup=verified`,
 			);
 		}
 	}

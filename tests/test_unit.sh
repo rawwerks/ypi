@@ -112,6 +112,9 @@ if [ -n "${CONTEXT:-}" ] && [ -f "${CONTEXT:-}" ]; then
         echo "CONTEXT_CONTENT=$(cat "$CONTEXT")"
     fi
 fi
+if [ "${YPI_TEST_RECURSE_ONCE:-0}" = "1" ] && [ "$RLM_DEPTH" = "1" ]; then
+    exec rlm_query "Nested depth proof"
+fi
 MOCK_PI
 chmod +x "$MOCK_BIN/pi"
 
@@ -229,11 +232,11 @@ assert_contains "T4b: explicit empty stdin falls back to parent context" "dogs" 
 echo ""
 echo "=== Depth Handling ==="
 
-# T5: at max depth, rlm_query is removed from child's PATH
+# T5: a root can launch the child at the configured maximum depth.
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
-    RLM_DEPTH=2 \
-    RLM_MAX_DEPTH=3 \
+    RLM_DEPTH=0 \
+    RLM_MAX_DEPTH=1 \
     RLM_PROVIDER=test-provider \
     RLM_MODEL=test-model \
     rlm_query "Max depth question?"
@@ -258,11 +261,12 @@ set -e
 assert_contains "T6: beyond max depth error" "Max depth exceeded" "$OUTPUT"
 assert_not_contains "T6: beyond max depth no pi call" "MOCK_PI_CALLED" "$OUTPUT"
 
-# T7: depth increments correctly across levels
+# T7: a real nested child inherits root authority and increments depth.
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
-    RLM_DEPTH=1 \
+    RLM_DEPTH=0 \
     RLM_MAX_DEPTH=4 \
+    YPI_TEST_RECURSE_ONCE=1 \
     RLM_PROVIDER=test-provider \
     RLM_MODEL=test-model \
     RLM_SYSTEM_PROMPT="$PROJECT_DIR/SYSTEM_PROMPT.md" \
@@ -347,9 +351,10 @@ OUTPUT=$(
     RLM_TRACE_ID=auto-trace \
     rlm_query "Automatically traced question?"
 )
+AUTO_TRACE_LABEL=$(printf '%s' auto-trace | sha256sum | cut -c1-8)
 mapfile -t AUTO_TRACES < <(
     find "$TEST_TMP" -mindepth 2 -maxdepth 2 \
-        -path "$TEST_TMP/ypi_runtime_auto-trace_*/trace.jsonl" \
+        -path "$TEST_TMP/ypi_runtime_${AUTO_TRACE_LABEL}_*/trace.jsonl" \
         -type f -print
 )
 if [ "${#AUTO_TRACES[@]}" -eq 1 ]; then

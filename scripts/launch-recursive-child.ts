@@ -2,4 +2,4 @@
 
 import { runRecursiveChildLaunchGateCli } from "../extensions/ypi/internal/launch-gate.ts";
 
-process.exitCode = runRecursiveChildLaunchGateCli(process.argv.slice(2));
+process.exitCode = await runRecursiveChildLaunchGateCli(process.argv.slice(2));

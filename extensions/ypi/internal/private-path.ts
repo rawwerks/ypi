@@ -10,6 +10,7 @@ import {
 	mkdtempSync,
 	openSync,
 	readFileSync,
+	readSync,
 	readdirSync,
 	rmdirSync,
 	unlinkSync,
@@ -176,13 +177,15 @@ export function readOwnedPrivateFile(
 	candidate: string,
 	expected: PrivatePathIdentity,
 	encoding: BufferEncoding = "utf8",
+	maximumBytes?: number,
 ): string {
-	return readOwnedPrivateFileBytes(candidate, expected).toString(encoding);
+	return readOwnedPrivateFileBytes(candidate, expected, maximumBytes).toString(encoding);
 }
 
 export function readOwnedPrivateFileBytes(
 	candidate: string,
 	expected: PrivatePathIdentity,
+	maximumBytes?: number,
 ): Buffer {
 	if (expected.kind !== "file") {
 		throw controlError(`Private runtime read target is not a file: ${candidate}`);
@@ -193,12 +196,41 @@ export function readOwnedPrivateFileBytes(
 		constants.O_RDONLY | (constants.O_NOFOLLOW || 0),
 	);
 	try {
-		const opened = identityOf(fstatSync(descriptor, { bigint: true }));
+		const openedMetadata = fstatSync(descriptor, { bigint: true });
+		const opened = identityOf(openedMetadata);
 		if (!sameIdentity(opened, expected)) {
 			throw controlError(`Private runtime read target identity changed: ${candidate}`);
 		}
-		const value = readFileSync(descriptor);
-			assertPrivatePathIdentity(candidate, expected);
+		if (openedMetadata.size < 0n || openedMetadata.size > BigInt(Number.MAX_SAFE_INTEGER)) {
+			throw controlError(`Private runtime read target size is unsupported: ${candidate}`);
+		}
+		const size = Number(openedMetadata.size);
+		if (
+			maximumBytes !== undefined
+			&& (
+				!Number.isSafeInteger(maximumBytes)
+				|| maximumBytes < 0
+				|| size > maximumBytes
+			)
+		) {
+			throw controlError(`Private runtime read target exceeds ${maximumBytes} bytes: ${candidate}`);
+		}
+		const value = Buffer.alloc(size);
+		let offset = 0;
+		while (offset < value.length) {
+			const count = readSync(
+				descriptor,
+				value,
+				offset,
+				value.length - offset,
+				offset,
+			);
+			if (count <= 0) {
+				throw controlError(`Private runtime read target became shorter: ${candidate}`);
+			}
+			offset += count;
+		}
+		assertPrivatePathIdentity(candidate, expected);
 		return value;
 	} finally {
 		closeSync(descriptor);

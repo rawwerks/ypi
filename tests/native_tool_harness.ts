@@ -123,19 +123,15 @@ fi
 if [ "\${YPI_FAKE_PI_MODE:-ok}" = "fail" ]; then
   echo "fake child failure" >&2
   exit 42
-elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "fail-and-corrupt-slot" ]; then
-  printf '%s\n' 'not-json' > "$RLM_CONCURRENCY_DIR/slot-$RLM_ACTIVE_SLOT_TOKEN/lease.json"
-  echo "fake child failure with cleanup corruption" >&2
+elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "fail-and-revoke-coordinator" ]; then
+  /bin/rm -f -- "$YPI_TREE_COORDINATOR_SOCKET"
+  echo "fake child failure after coordinator revocation" >&2
   exit 42
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "fail-and-block-resource-cleanup" ]; then
   RESOURCE_ROOT=$(dirname "$RLM_PROMPT_FILE")
   printf '%s\n' "$RESOURCE_ROOT" > "$YPI_FAKE_RESOURCE_DIR_FILE"
   chmod 000 "$RESOURCE_ROOT"
   echo "fake child failure with resource cleanup obstruction" >&2
-  exit 42
-elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "fail-and-corrupt-registry" ]; then
-  printf '%s\n' 'unexpected' > "$RLM_CONCURRENCY_DIR/unexpected"
-  echo "fake child failure with parent resume obstruction" >&2
   exit 42
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "signal" ]; then
   kill -TERM $$
@@ -427,7 +423,7 @@ async function run(): Promise<void> {
 	resetLog();
 	process.env.RLM_DEPTH = "0";
 	process.env.RLM_MAX_DEPTH = "2";
-	process.env.YPI_FAKE_PI_MODE = "fail-and-corrupt-slot";
+	process.env.YPI_FAKE_PI_MODE = "fail-and-revoke-coordinator";
 	ensureEnvironment(runtime, context());
 	let primaryAndCleanupError: unknown;
 	try {
@@ -480,12 +476,13 @@ async function run(): Promise<void> {
 
 	clearYpiEnv();
 	resetLog();
-	process.env.RLM_DEPTH = "1";
+	process.env.RLM_DEPTH = "0";
 	process.env.RLM_MAX_DEPTH = "3";
-	process.env.YPI_FAKE_PI_MODE = "fail-and-corrupt-registry";
+	process.env.YPI_FAKE_PI_MODE = "fail-and-revoke-coordinator";
 	ensureEnvironment(runtime, context());
 	const inheritedForResumeFailure = await acquireConcurrencySlot();
 	process.env.RLM_ACTIVE_SLOT_TOKEN = inheritedForResumeFailure.token;
+	process.env.RLM_DEPTH = "1";
 	let primaryAndResumeError: unknown;
 	try {
 		await invoke();
@@ -498,13 +495,11 @@ async function run(): Promise<void> {
 	record(
 		primaryAndResumeMessage.includes("Child Pi exited with 42")
 			&& primaryAndResumeMessage.includes("Recursive child cleanup also failed")
-			&& primaryAndResumeMessage.includes("unexpected state")
+			&& primaryAndResumeMessage.includes("authority is unreachable")
 			&& (primaryAndResumeError as Error & { exitCode?: number })?.exitCode === 42,
 		"N4a: primary child failure retains inherited-slot resume failure and exit classification",
 		primaryAndResumeMessage,
 	);
-	rmSync(path.join(process.env.RLM_CONCURRENCY_DIR || "", "unexpected"), { force: true });
-	await inheritedForResumeFailure.release();
 
 	clearYpiEnv();
 	resetLog();
@@ -992,7 +987,7 @@ async function run(): Promise<void> {
 
 	clearYpiEnv();
 	resetLog();
-	process.env.RLM_DEPTH = "1";
+	process.env.RLM_DEPTH = "0";
 	process.env.RLM_MAX_DEPTH = "3";
 	process.env.RLM_PROVIDER = "openai";
 	process.env.RLM_MODEL = "gpt-5.5:xhigh";
@@ -1001,6 +996,7 @@ async function run(): Promise<void> {
 	process.env.RLM_CHILD_THINKING_LEVELS = "high,medium";
 	process.env.RLM_JSON = "0";
 	ensureEnvironment(runtime, context(), pi);
+	process.env.RLM_DEPTH = "1";
 	await invoke();
 	assertContains("N7b: second-depth child model selected", readLog(), "--model gpt-5.5:medium");
 	assertContains("N7b: second-depth child thinking selected", readLog(), "--thinking medium");

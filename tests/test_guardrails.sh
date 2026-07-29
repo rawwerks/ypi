@@ -96,6 +96,12 @@ export RLM_JSON=0
 
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/rlm_test.XXXXXX")
 export TMPDIR="$TEST_TMP"
+TREE_AUTHORITY_RUNNER="$PROJECT_DIR/tests/tree_authority_runner.ts"
+with_tree_authority() {
+    local depth="$1"
+    shift
+    bun "$TREE_AUTHORITY_RUNNER" "$depth" -- "$@"
+}
 cat > "$TEST_TMP/ctx.txt" << 'EOF'
 Test context for guardrail tests.
 EOF
@@ -256,20 +262,8 @@ assert_contains "G4c: read-only review still runs child" "MOCK_PI_CALLED" "$OUTP
 if [ -e "$TEST_TMP/git-registry" ]; then fail "G4c: read-only review never invokes Git" "git was called"; else pass "G4c: read-only review never invokes Git"; fi
 if [ "$GIT_REVIEW_MS" -lt 3000 ]; then pass "G4c: unavailable Git adds no review delay"; else fail "G4c: unavailable Git adds no review delay" "elapsed=${GIT_REVIEW_MS}ms"; fi
 
-# G4d: the shared call-counter lock cannot outlive the tree deadline.
-COUNTER_FILE="$TEST_TMP/deadline-lock.counter"
-mkdir "${COUNTER_FILE}.lock"
-START_NS=$(python3 -c 'import time; print(time.monotonic_ns())')
-set +e
-OUTPUT=$(CONTEXT="$TEST_TMP/ctx.txt" RLM_DEPTH=0 RLM_MAX_DEPTH=3 RLM_TIMEOUT=1 RLM_CALL_COUNTER_FILE="$COUNTER_FILE" rlm_query "Bound counter lock" 2>&1)
-COUNTER_TIMEOUT_RC=$?
-set -e
-END_NS=$(python3 -c 'import time; print(time.monotonic_ns())')
-COUNTER_TIMEOUT_MS=$(( (END_NS - START_NS) / 1000000 ))
-rm -rf "${COUNTER_FILE}.lock"
-assert_eq "G4d: counter lock timeout exits 124" "124" "$COUNTER_TIMEOUT_RC"
-assert_contains "G4d: counter lock timeout is explicit" "Timeout exceeded" "$OUTPUT"
-if [ "$COUNTER_TIMEOUT_MS" -lt 2500 ]; then pass "G4d: counter allocation obeys the tree deadline"; else fail "G4d: counter allocation obeys the tree deadline" "elapsed=${COUNTER_TIMEOUT_MS}ms"; fi
+# G4d moved to concurrency_harness.ts: the coordinator queue, rather than an
+# ownerless filesystem lock, must obey the tree deadline and fail with 124.
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -311,11 +305,11 @@ fi
 # G6b: per-depth child model/thinking lists override by child depth
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
-    RLM_DEPTH=1 RLM_MAX_DEPTH=3 \
+    RLM_MAX_DEPTH=3 \
     RLM_PROVIDER=openai RLM_MODEL=gpt-5.5:xhigh RLM_THINKING_LEVEL=xhigh \
     RLM_CHILD_MODELS='gpt-5.5:high,gpt-5.5:medium' \
     RLM_CHILD_THINKING_LEVELS='high,medium' \
-    rlm_query "Depth-specific model routing?"
+    with_tree_authority 1 rlm_query "Depth-specific model routing?"
 )
 assert_contains "G6b: second-depth model selected" "--model gpt-5.5:medium" "$OUTPUT"
 assert_contains "G6b: second-depth thinking selected" "--thinking medium" "$OUTPUT"
@@ -777,9 +771,10 @@ OUTPUT=$(
     RLM_PROVIDER=test RLM_MODEL=test \
     rlm_query "Private auto trace text"
 )
+AUTO_SUMMARY_LABEL=$(printf '%s' auto-summary | sha256sum | cut -c1-8)
 mapfile -t AUTO_SUMMARY_TRACES < <(
     find "$TEST_TMP" -mindepth 2 -maxdepth 2 \
-        -path "$TEST_TMP/ypi_runtime_auto-summary_*/trace.jsonl" \
+        -path "$TEST_TMP/ypi_runtime_${AUTO_SUMMARY_LABEL}_*/trace.jsonl" \
         -type f -print
 )
 if [ "${#AUTO_SUMMARY_TRACES[@]}" -eq 1 ]; then
@@ -910,11 +905,11 @@ assert_not_contains "G26: RLM_SESSION_FILE not unset" "RLM_SESSION_FILE=unset" "
 # G27: max depth nodes still get sessions (they have full tools)
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
-    RLM_DEPTH=2 RLM_MAX_DEPTH=3 \
+    RLM_MAX_DEPTH=3 \
     RLM_PROVIDER=test RLM_MODEL=test \
     RLM_TRACE_ID="abc12345" \
     RLM_SESSION_DIR="$SESSION_TMP" \
-    rlm_query "Max depth session test"
+    with_tree_authority 2 rlm_query "Max depth session test"
 )
 assert_contains "G27: max depth gets --session" "--session" "$OUTPUT"
 assert_not_contains "G27: max depth no --no-session" "--no-session" "$OUTPUT"
@@ -1096,10 +1091,10 @@ assert_not_contains "G35: no explicit extension when disabled" "-e $PROJECT_DIR/
 # G36: max depth nodes keep the exact ypi extension while ambient copies stay disabled
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
-    RLM_DEPTH=2 RLM_MAX_DEPTH=3 \
+    RLM_MAX_DEPTH=3 \
     YPI_EXTENSION_PATH="$PROJECT_DIR/extensions/recursive.ts" \
     RLM_PROVIDER=test RLM_MODEL=test \
-    rlm_query "Max depth extensions test"
+    with_tree_authority 2 rlm_query "Max depth extensions test"
 )
 assert_contains "G36: max depth disables ambient extension copies" "--no-extensions" "$OUTPUT"
 assert_contains "G36: max depth has ypi extension" "-e $PROJECT_DIR/extensions/recursive.ts" "$OUTPUT"
@@ -1119,10 +1114,10 @@ assert_not_contains "G37: root-to-child no explicit extension" "-e $PROJECT_DIR/
 # G38: RLM_CHILD_EXTENSIONS=0 applies at depth > 0
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
-    RLM_DEPTH=1 RLM_MAX_DEPTH=3 \
+    RLM_MAX_DEPTH=3 \
     RLM_PROVIDER=test RLM_MODEL=test \
     RLM_CHILD_EXTENSIONS=0 \
-    rlm_query "Child with ext off"
+    with_tree_authority 1 rlm_query "Child with ext off"
 )
 assert_contains "G38: child extensions disabled" "--no-extensions" "$OUTPUT"
 
@@ -1288,10 +1283,10 @@ printf '%s\n' '{"type":"turn_end","message":{"usage":{"totalTokens":1,"cost":{"t
 MOCK_PI
 chmod +x "$MOCK_BIN/pi"
 OUTPUT=$(
-    CONTEXT="$TEST_TMP/ctx.txt" RLM_DEPTH=0 RLM_MAX_DEPTH=3 RLM_JSON=1 \
-    RLM_BUDGET=0 RLM_COST_FILE="$COST_FILE" \
-    RLM_CALL_COUNTER_FILE="$TEST_TMP/incomplete-cost.counter" \
-    rlm_query "Continue after incomplete telemetry"
+	CONTEXT="$TEST_TMP/ctx.txt" RLM_DEPTH=0 RLM_MAX_DEPTH=3 RLM_JSON=1 \
+	RLM_BUDGET=0 RLM_COST_FILE="$COST_FILE" \
+	RLM_CALL_COUNTER_FILE="$TEST_TMP/incomplete-cost-retry.counter" \
+	rlm_query "Continue after incomplete telemetry"
 )
 assert_contains "G40c: incomplete telemetry never blocks later admission" "MOCK_PI_CALLED" "$OUTPUT"
 rm -f "$COST_FILE"

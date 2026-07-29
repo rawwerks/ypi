@@ -2,15 +2,10 @@ import {
 	accessSync,
 	closeSync,
 	constants,
-	existsSync,
 	fstatSync,
 	lstatSync,
-	mkdirSync,
 	openSync,
-	readFileSync,
 	readSync,
-	rmSync,
-	writeFileSync,
 } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,16 +14,9 @@ import {
 	appendOwnedPrivateFile,
 	parsePrivateFileIdentity,
 } from "./internal/private-path.ts";
-import { atomicWriteFile } from "./internal/atomic-file.ts";
-import { createPrivateDirectory } from "./internal/private-path.ts";
+import { allocateCoordinatedCall } from "./internal/tree-coordinator.ts";
 
-const LOCK_RETRY_MS = 10;
-const LOCK_RETRIES = 500;
 export const MAX_TIMEOUT_SECONDS = Math.floor(2_147_483_647 / 1000);
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function exactNonNegativeInteger(name: string, value: string): number {
 	if (!/^\d+$/.test(value)) throw new Error(`Invalid ${name}: ${JSON.stringify(value)} must be a non-negative integer.`);
@@ -37,45 +25,30 @@ function exactNonNegativeInteger(name: string, value: string): number {
 	return parsed;
 }
 
-function readCounter(filePath: string): number {
-	const raw = existsSync(filePath)
-		? readFileSync(filePath, "utf8").trim() || "0"
-		: process.env.RLM_CALL_COUNT || "0";
-	return exactNonNegativeInteger("RLM_CALL_COUNT/counter", raw);
-}
-
-export async function allocateCallCount(deadlineMilliseconds?: number): Promise<number> {
+export async function allocateCallCount(
+	deadlineMilliseconds?: number,
+	signal?: AbortSignal,
+): Promise<number> {
 	const remaining = deadlineMilliseconds === undefined ? remainingTimeoutSeconds() : undefined;
 	const deadline = deadlineMilliseconds ?? (remaining === undefined ? undefined : Date.now() + Math.max(0, remaining * 1000));
 	const counterFile = process.env.RLM_CALL_COUNTER_FILE || path.join(tmpdir(), "rlm_calls_default.counter");
 	process.env.RLM_CALL_COUNTER_FILE = counterFile;
-	const lockDir = `${counterFile}.lock`;
-	mkdirSync(path.dirname(counterFile), { recursive: true });
-
-	for (let attempt = 0; attempt < LOCK_RETRIES; attempt++) {
-		if (deadline !== undefined && Date.now() >= deadline) {
-			const error = new Error(`Timeout exceeded while waiting for call counter lock: ${lockDir}`) as Error & { exitCode: number };
-			error.exitCode = 124;
-			throw error;
-		}
-		try {
-			createPrivateDirectory(lockDir);
-			try {
-				const next = readCounter(counterFile) + 1;
-				atomicWriteFile(counterFile, `${next}\n`);
-				process.env.RLM_CALL_COUNT = String(next);
-				return next;
-			} finally {
-				rmSync(lockDir, { recursive: true, force: true });
-			}
-		} catch (error) {
-			const code = (error as NodeJS.ErrnoException).code;
-			if (code !== "EEXIST") throw error;
-			await sleep(LOCK_RETRY_MS);
-		}
-	}
-
-	throw new Error(`Timed out waiting for call counter lock: ${lockDir}`);
+	const maximum = exactNonNegativeInteger(
+		"RLM_MAX_CALLS",
+		process.env.RLM_MAX_CALLS || "65536",
+	);
+	const seed = exactNonNegativeInteger(
+		"RLM_CALL_COUNT",
+		process.env.RLM_CALL_COUNT || "0",
+	);
+	const next = await allocateCoordinatedCall(
+		maximum,
+		seed,
+		counterFile,
+		{ deadlineMilliseconds: deadline, signal },
+	);
+	process.env.RLM_CALL_COUNT = String(next);
+	return next;
 }
 
 export function assertWithinMaxCalls(callCount: number): void {

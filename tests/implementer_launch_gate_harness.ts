@@ -15,7 +15,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { atomicCreateFile } from "../extensions/ypi/internal/atomic-file.ts";
 import { runChildProcess } from "../extensions/ypi/internal/child-process.ts";
+import { acquireConcurrencySlot } from "../extensions/ypi/internal/concurrency.ts";
 import { parseLaunchGateArguments } from "../extensions/ypi/internal/launch-gate.ts";
+import { currentProcessStartIdentity, processStartIdentity } from "../extensions/ypi/internal/process-identity.ts";
+import {
+	assertTreeCoordinatorActive,
+	ensureRootTreeCoordinator,
+	terminateRootTreeCoordinator,
+} from "../extensions/ypi/internal/tree-coordinator.ts";
 
 const launcher = path.resolve(import.meta.dir, "..", "scripts", "launch-recursive-child.ts");
 const node = process.env.YPI_NODE_BIN || process.execPath;
@@ -47,25 +54,43 @@ async function runReleasedCommand(
 ): Promise<{ code: number | null; diagnostics: string }> {
 	const pidFile = path.join(root, `${label}.pid`);
 	const readyFile = path.join(root, `${label}.ready`);
-	const child = spawn(node, [
-		launcher,
-		"--pid-file",
-		pidFile,
-		"--ready-file",
-		readyFile,
-		"--owner-pid",
-		String(process.pid),
-		"--",
-		...command,
-	], { env, stdio: ["ignore", "pipe", "pipe"] });
-	const exit = waitForExit(child);
-	writeFileSync(pidFile, `${child.pid}\n`, { flag: "wx", mode: 0o600 });
-	writeFileSync(readyFile, `${child.pid}\n`, { flag: "wx", mode: 0o600 });
-	return exit;
+	const lease = await acquireConcurrencySlot();
+	try {
+		const child = spawn(node, [
+			launcher,
+			"--pid-file",
+			pidFile,
+			"--ready-file",
+			readyFile,
+			"--owner-pid",
+			String(process.pid),
+			"--owner-process-identity",
+			currentProcessStartIdentity(),
+			"--",
+			...command,
+		], {
+			env: { ...env, RLM_ACTIVE_SLOT_TOKEN: lease.token },
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const exit = waitForExit(child);
+		atomicCreateFile(pidFile, `${child.pid}\n`, { mode: 0o600 });
+		atomicCreateFile(readyFile, `${child.pid}\n`, { mode: 0o600 });
+		return await exit;
+	} finally {
+		await lease.release();
+	}
 }
 
 console.log("\n=== Implementer launch-gate harness ===");
 const root = mkdtempSync(path.join(tmpdir(), "ypi_launch_gate."));
+process.env.RLM_DEPTH = "0";
+process.env.RLM_CONCURRENCY_DIR = path.join(root, "coordinator");
+process.env.RLM_CALL_COUNTER_FILE = path.join(root, "calls.counter");
+process.env.RLM_MAX_CONCURRENT_CALLS = "3";
+process.env.RLM_MAX_CALLS = "65536";
+process.env.RLM_CALL_COUNT = "0";
+ensureRootTreeCoordinator();
+await assertTreeCoordinatorActive();
 
 {
 	const childProcessSource = readFileSync(
@@ -123,14 +148,16 @@ const root = mkdtempSync(path.join(tmpdir(), "ypi_launch_gate."));
 	const parsed = parseLaunchGateArguments([
 		"--pid-file", "pid",
 		"--ready-file", "ready",
-		"--owner-pid", "42",
+			"--owner-pid", "42",
+			"--owner-process-identity", "linux:test:identity",
 		"--",
 		"/bin/true",
 	]);
 	record(
 		parsed.pidFile === "pid"
 			&& parsed.readyFile === "ready"
-			&& parsed.ownerPid === 42
+				&& parsed.ownerPid === 42
+				&& parsed.ownerProcessIdentity === "linux:test:identity"
 			&& parsed.command.join("\0") === "/bin/true",
 		"launch-gate parser keeps control arguments separate from the child command",
 	);
@@ -138,7 +165,8 @@ const root = mkdtempSync(path.join(tmpdir(), "ypi_launch_gate."));
 		parseLaunchGateArguments([
 			"--pid-file", "pid",
 			"--ready-file", "ready",
-			"--owner-pid", "42.5",
+				"--owner-pid", "42.5",
+				"--owner-process-identity", "linux:test:identity",
 			"--",
 			"/bin/true",
 		]);
@@ -153,59 +181,79 @@ const root = mkdtempSync(path.join(tmpdir(), "ypi_launch_gate."));
 	const readyFile = path.join(root, "symlink.ready");
 	const readyTarget = path.join(root, "symlink.target");
 	const marker = path.join(root, "symlink.marker");
-	const child = spawn(node, [
-		launcher,
-		"--pid-file",
-		pidFile,
-		"--ready-file",
-		readyFile,
-		"--owner-pid",
-		String(process.pid),
-		"--",
-		"/bin/sh",
-		"-c",
-		`printf 'unsafe\\n' > '${marker}'`,
-	], { stdio: ["ignore", "pipe", "pipe"] });
-	const exit = waitForExit(child);
-	writeFileSync(pidFile, `${child.pid}\n`, { flag: "wx", mode: 0o600 });
-	writeFileSync(readyTarget, `${child.pid}\n`, { mode: 0o600 });
-	symlinkSync(readyTarget, readyFile);
-	const result = await exit;
-	record(
-		result.code === 126 && !existsSync(marker),
-		"launch gate refuses a symlinked ready signal without starting child work",
-		result.diagnostics,
-	);
+	const lease = await acquireConcurrencySlot();
+	try {
+		const child = spawn(node, [
+			launcher,
+			"--pid-file",
+			pidFile,
+			"--ready-file",
+			readyFile,
+			"--owner-pid",
+			String(process.pid),
+			"--owner-process-identity",
+			currentProcessStartIdentity(),
+			"--",
+			"/bin/sh",
+			"-c",
+			`printf 'unsafe\\n' > '${marker}'`,
+		], {
+			env: { ...process.env, RLM_ACTIVE_SLOT_TOKEN: lease.token },
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const exit = waitForExit(child);
+		atomicCreateFile(pidFile, `${child.pid}\n`, { mode: 0o600 });
+		writeFileSync(readyTarget, `${child.pid}\n`, { mode: 0o600 });
+		symlinkSync(readyTarget, readyFile);
+		const result = await exit;
+		record(
+			result.code === 126 && !existsSync(marker),
+			"launch gate refuses a symlinked ready signal without starting child work",
+			result.diagnostics,
+		);
+	} finally {
+		await lease.release();
+	}
 }
 
 {
 	const pidFile = path.join(root, "success.pid");
 	const readyFile = path.join(root, "success.ready");
 	const marker = path.join(root, "success.marker");
-	const child = spawn(node, [
-		launcher,
-		"--pid-file",
-		pidFile,
-		"--ready-file",
-		readyFile,
-		"--owner-pid",
-		String(process.pid),
-		"--",
-		"/bin/sh",
-		"-c",
-		`printf '%s\\n' "$$" > '${marker}'`,
-	], { stdio: ["ignore", "pipe", "pipe"] });
-	const exit = waitForExit(child);
-	writeFileSync(pidFile, `${child.pid}\n`, { flag: "wx", mode: 0o600 });
-	record(!existsSync(marker), "child command cannot run before the durable ready signal");
-	record(readFileSync(pidFile, "utf8").trim() === String(child.pid), "parent records the process-group PID before release");
-	writeFileSync(readyFile, `${child.pid}\n`, { flag: "wx", mode: 0o600 });
-	const result = await exit;
-	record(
-		result.code === 0 && readFileSync(marker, "utf8").trim() === String(child.pid),
-		"ready signal execs the child command under the registered PID",
-		result.diagnostics,
-	);
+	const lease = await acquireConcurrencySlot();
+	try {
+		const child = spawn(node, [
+			launcher,
+			"--pid-file",
+			pidFile,
+			"--ready-file",
+			readyFile,
+			"--owner-pid",
+			String(process.pid),
+			"--owner-process-identity",
+			currentProcessStartIdentity(),
+			"--",
+			"/bin/sh",
+			"-c",
+			`printf '%s\\n' "$$" > '${marker}'`,
+		], {
+			env: { ...process.env, RLM_ACTIVE_SLOT_TOKEN: lease.token },
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const exit = waitForExit(child);
+		atomicCreateFile(pidFile, `${child.pid}\n`, { mode: 0o600 });
+		record(!existsSync(marker), "child command cannot run before the durable ready signal");
+		record(readFileSync(pidFile, "utf8").trim() === String(child.pid), "parent records the process-group PID before release");
+		atomicCreateFile(readyFile, `${child.pid}\n`, { mode: 0o600 });
+		const result = await exit;
+		record(
+			result.code === 0 && readFileSync(marker, "utf8").trim() === String(child.pid),
+			"ready signal execs the child command under the registered PID",
+			result.diagnostics,
+		);
+	} finally {
+		await lease.release();
+	}
 }
 
 {
@@ -214,29 +262,41 @@ const root = mkdtempSync(path.join(tmpdir(), "ypi_launch_gate."));
 	const marker = path.join(root, "abandoned.marker");
 	const owner = spawn("/bin/sh", ["-c", "sleep 0.2"], { stdio: "ignore" });
 	if (!owner.pid) throw new Error("owner PID unavailable");
+	const ownerIdentity = processStartIdentity(owner.pid);
+	if (!ownerIdentity) throw new Error("owner process identity unavailable");
 	const ownerExit = waitForExit(owner);
-	const child = spawn(node, [
-		launcher,
-		"--pid-file",
-		pidFile,
-		"--ready-file",
-		readyFile,
-		"--owner-pid",
-		String(owner.pid),
-		"--",
-		"/bin/sh",
-		"-c",
-		`printf 'unsafe\\n' > '${marker}'`,
-	], { stdio: ["ignore", "pipe", "pipe"] });
-	const childExit = waitForExit(child);
-	writeFileSync(pidFile, `${child.pid}\n`, { flag: "wx", mode: 0o600 });
-	await ownerExit;
-	const result = await childExit;
-	record(
-		result.code === 125 && !existsSync(marker) && !existsSync(readyFile),
-		"an owner death before release exits without starting child work",
-		result.diagnostics,
-	);
+	const lease = await acquireConcurrencySlot();
+	try {
+		const child = spawn(node, [
+			launcher,
+			"--pid-file",
+			pidFile,
+			"--ready-file",
+			readyFile,
+			"--owner-pid",
+			String(owner.pid),
+			"--owner-process-identity",
+			ownerIdentity,
+			"--",
+			"/bin/sh",
+			"-c",
+			`printf 'unsafe\\n' > '${marker}'`,
+		], {
+			env: { ...process.env, RLM_ACTIVE_SLOT_TOKEN: lease.token },
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const childExit = waitForExit(child);
+		atomicCreateFile(pidFile, `${child.pid}\n`, { mode: 0o600 });
+		await ownerExit;
+		const result = await childExit;
+		record(
+			result.code === 125 && !existsSync(marker) && !existsSync(readyFile),
+			"an owner death before release exits without starting child work",
+			result.diagnostics,
+		);
+	} finally {
+		await lease.release();
+	}
 }
 
 {
@@ -304,10 +364,11 @@ const root = mkdtempSync(path.join(tmpdir(), "ypi_launch_gate."));
 	const priorNode = process.env.YPI_NODE_BIN;
 	process.env.YPI_PI_BIN = "/bin/true";
 	delete process.env.YPI_NODE_BIN;
+	const lease = await acquireConcurrencySlot();
 	try {
 		const result = await runChildProcess({
 			args: [],
-			env: hostileEnvironment,
+			env: { ...hostileEnvironment, RLM_ACTIVE_SLOT_TOKEN: lease.token },
 			cwd: root,
 			jsonMode: false,
 			launchGate: {
@@ -324,11 +385,47 @@ const root = mkdtempSync(path.join(tmpdir(), "ypi_launch_gate."));
 			`code=${result.code} stderr=${result.stderr}`,
 		);
 	} finally {
+		await lease.release();
 		if (priorPi === undefined) delete process.env.YPI_PI_BIN;
 		else process.env.YPI_PI_BIN = priorPi;
 		if (priorNode === undefined) delete process.env.YPI_NODE_BIN;
 		else process.env.YPI_NODE_BIN = priorNode;
 	}
+}
+
+{
+	const pidFile = path.join(root, "revoked.pid");
+	const readyFile = path.join(root, "revoked.ready");
+	const marker = path.join(root, "revoked.marker");
+	const lease = await acquireConcurrencySlot();
+	const child = spawn(node, [
+		launcher,
+		"--pid-file",
+		pidFile,
+		"--ready-file",
+		readyFile,
+		"--owner-pid",
+		String(process.pid),
+		"--owner-process-identity",
+		currentProcessStartIdentity(),
+		"--",
+		"/bin/sh",
+		"-c",
+		`printf 'unsafe\\n' > '${marker}'`,
+	], {
+		env: { ...process.env, RLM_ACTIVE_SLOT_TOKEN: lease.token },
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	const exit = waitForExit(child);
+	atomicCreateFile(pidFile, `${child.pid}\n`, { mode: 0o600 });
+	await terminateRootTreeCoordinator("launch-gate-revocation-test");
+	atomicCreateFile(readyFile, `${child.pid}\n`, { mode: 0o600 });
+	const result = await exit;
+	record(
+		result.code === 130 && !existsSync(marker),
+		"terminal root authority revokes the final launch gate before child exec",
+		`code=${result.code} ${result.diagnostics}`,
+	);
 }
 
 rmSync(root, { recursive: true, force: true });

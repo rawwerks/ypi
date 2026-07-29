@@ -14,6 +14,10 @@ import { registerNativeRlmQueryTool } from "./ypi/native-tool.ts";
 import { createRootPromptLease } from "./ypi/internal/root-prompt.ts";
 import { registerRootImplementerBatchPolicy } from "./ypi/internal/root-batch-policy.ts";
 import { registerImplementWriteScope } from "./ypi/internal/write-scope.ts";
+import {
+	beginRootTreeCoordinator,
+	terminateRootTreeCoordinator,
+} from "./ypi/internal/tree-coordinator.ts";
 import { patchSystemPrompt } from "./ypi/prompt.ts";
 import { debug, resolveRuntime } from "./ypi/runtime.ts";
 import { updateStatus } from "./ypi/status.ts";
@@ -51,11 +55,15 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", (event, ctx) => {
 		rootPrompt.capture(event.prompt);
 		ensureEnvironment(runtime, ctx, pi);
+		if ((process.env.RLM_DEPTH || "0") === "0") {
+			beginRootTreeCoordinator("root-turn-replaced");
+		}
 		debug("__YPI_EXTENSION_PROMPT_PATCHED__");
 		return { systemPrompt: patchSystemPrompt(runtime, event) };
 	});
 
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", async () => {
+		await terminateRootTreeCoordinator("root-session-shutdown");
 		rootPrompt.cleanup();
 		if (registry[ACTIVE_EXTENSION]?.token === token) delete registry[ACTIVE_EXTENSION];
 	});

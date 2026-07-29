@@ -3,6 +3,7 @@ import { constants as osConstants } from "node:os";
 import type { CostSummary } from "../guardrails.ts";
 import { atomicCreateFile } from "./atomic-file.ts";
 import { withPrivateUmask } from "./private-path.ts";
+import { currentProcessStartIdentity } from "./process-identity.ts";
 import {
 	createBoundedCapture,
 	createJsonDecoder,
@@ -28,8 +29,8 @@ export interface ChildProcessOptions {
 	quiesceProcessGroup?: boolean;
 	launchGate?: {
 		launcherPath: string;
-		pidFile: string;
-		readyFile: string;
+		pidFile?: string;
+		readyFile?: string;
 	};
 }
 
@@ -48,22 +49,28 @@ function signalledExitCode(signal: NodeJS.Signals | null): number {
 
 export function runChildProcess(options: ChildProcessOptions): Promise<ChildProcessResult> {
 	return new Promise((resolve, reject) => {
-		const piExecutable = process.env.YPI_PI_BIN || "pi";
-		const executable = options.launchGate ? process.env.YPI_NODE_BIN || process.execPath : piExecutable;
-		const args = options.launchGate
-			? [
-				options.launchGate.launcherPath,
-				"--pid-file",
-				options.launchGate.pidFile,
-				"--ready-file",
-				options.launchGate.readyFile,
-				"--owner-pid",
-				String(process.pid),
-				"--",
-				piExecutable,
-				...options.args,
-			]
-			: options.args;
+			const piExecutable = process.env.YPI_PI_BIN || "pi";
+			const executable = options.launchGate ? process.env.YPI_NODE_BIN || process.execPath : piExecutable;
+			const args: string[] = options.launchGate
+				? [
+					options.launchGate.launcherPath,
+					...(options.launchGate.pidFile && options.launchGate.readyFile
+						? [
+							"--pid-file",
+							options.launchGate.pidFile,
+							"--ready-file",
+							options.launchGate.readyFile,
+						]
+						: []),
+					"--owner-pid",
+					String(process.pid),
+					"--owner-process-identity",
+					currentProcessStartIdentity(),
+					"--",
+					piExecutable,
+					...options.args,
+				]
+				: options.args;
 		const child = withPrivateUmask(() => spawn(executable, args, {
 			cwd: options.cwd,
 			env: options.env,
@@ -202,12 +209,15 @@ export function runChildProcess(options: ChildProcessOptions): Promise<ChildProc
 		});
 		if (child.pid) {
 			try {
-					options.onSpawn?.(child.pid);
-					if (options.launchGate) {
-						atomicCreateFile(options.launchGate.pidFile, `${child.pid}\n`, { mode: 0o600 });
-						atomicCreateFile(options.launchGate.readyFile, `${child.pid}\n`, { mode: 0o600 });
-						options.onLaunchReady?.();
-					}
+				options.onSpawn?.(child.pid);
+				if (
+					options.launchGate?.pidFile
+					&& options.launchGate.readyFile
+				) {
+					atomicCreateFile(options.launchGate.pidFile, `${child.pid}\n`, { mode: 0o600 });
+					atomicCreateFile(options.launchGate.readyFile, `${child.pid}\n`, { mode: 0o600 });
+					options.onLaunchReady?.();
+				}
 			} catch (error) {
 				launchRegistrationError = error instanceof Error
 					? error

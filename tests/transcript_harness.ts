@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	closeSync,
+	existsSync,
 	linkSync,
 	lstatSync,
 	mkdirSync,
@@ -16,6 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { acquireChildResources } from "../extensions/ypi/internal/child-resources.ts";
 import {
 	closeTranscriptProof,
 	finalizeTranscriptProof,
@@ -129,10 +131,11 @@ try {
 			const trace = path.join(root, "positive-trace.log");
 			writeFileSync(
 				trace,
-				[
-					"[2026-07-28 00:00:00] depth=0→1 PID=1 call=1 trace=positive caller=tool mode=review",
-					"[2026-07-28T00:00:01.000Z] depth=0 child_depth=1 COMPLETED exit=0 elapsed=1s caller=tool call=1 trace=positive transcript=verified",
-					"",
+					[
+						"[2026-07-28 00:00:00] depth=0→1 PID=1 call=1 trace=positive caller=tool mode=review",
+						"[2026-07-28T00:00:01.000Z] depth=0 child_depth=1 COMPLETED exit=0 elapsed=1s caller=tool call=1 trace=positive transcript=verified",
+						"[2026-07-28T00:00:02.000Z] depth=0 child_depth=1 LIFECYCLE_TERMINAL exit=0 call=1 trace=positive transcript=verified cleanup=verified",
+						"",
 				].join("\n"),
 				{ mode: 0o600 },
 			);
@@ -149,18 +152,76 @@ try {
 				{ encoding: "utf8" },
 			);
 			record(
-				validation.status === 0
-					&& validation.stdout.includes("TRANSCRIPT_VALIDATION=PASS calls=1"),
-				"trace validator requires a matching terminal receipt",
-				validation.stderr || validation.stdout,
-			);
+					validation.status === 0
+						&& validation.stdout.includes("TRANSCRIPT_VALIDATION=PASS calls=1"),
+					"trace validator requires matching completion, lifecycle, and receipt evidence",
+					validation.stderr || validation.stdout,
+				);
 
-			writeFileSync(
-				trace,
-				[
-					"[2026-07-28 00:00:00] depth=0→1 PID=1 call=1 trace=positive caller=tool mode=review",
-					"[2026-07-28T00:00:01.000Z] depth=0 child_depth=1 COMPLETED exit=0 elapsed=1s caller=tool call=1 trace=positive transcript=failed",
-					"",
+				writeFileSync(
+					trace,
+					[
+						"[2026-07-28 00:00:00] depth=0→1 PID=1 call=1 trace=positive caller=tool mode=review",
+						"[2026-07-28T00:00:01.000Z] depth=0 child_depth=1 COMPLETED exit=0 elapsed=1s caller=tool call=1 trace=positive transcript=verified",
+						"",
+					].join("\n"),
+					{ mode: 0o600 },
+				);
+				const missingLifecycle = spawnSync(
+					process.execPath,
+					[
+						"--experimental-strip-types",
+						path.join(import.meta.dir, "..", "scripts", "validate-recursion-transcripts.ts"),
+						"--trace",
+						trace,
+						"--session-dir",
+						directory,
+					],
+					{ encoding: "utf8" },
+				);
+				record(
+					missingLifecycle.status !== 0
+						&& missingLifecycle.stderr.includes("no verified lifecycle terminal"),
+					"a completion and receipt cannot prove post-cleanup terminality",
+					missingLifecycle.stderr || missingLifecycle.stdout,
+				);
+
+				writeFileSync(
+					trace,
+					[
+						"[2026-07-28 00:00:00] depth=0→1 PID=1 call=1 trace=positive caller=tool mode=review",
+						"[2026-07-28T00:00:01.000Z] depth=0 child_depth=1 COMPLETED exit=0 elapsed=1s caller=tool call=1 trace=positive transcript=verified",
+						"[2026-07-28T00:00:02.000Z] depth=0 child_depth=1 CLEANUP_FAILED call=1 errors=1 detail=injected",
+						"",
+					].join("\n"),
+					{ mode: 0o600 },
+				);
+				const cleanupFailure = spawnSync(
+					process.execPath,
+					[
+						"--experimental-strip-types",
+						path.join(import.meta.dir, "..", "scripts", "validate-recursion-transcripts.ts"),
+						"--trace",
+						trace,
+						"--session-dir",
+						directory,
+					],
+					{ encoding: "utf8" },
+				);
+				record(
+					cleanupFailure.status !== 0
+						&& cleanupFailure.stderr.includes("lifecycle cleanup failure"),
+					"an explicit cleanup failure invalidates otherwise complete transcript evidence",
+					cleanupFailure.stderr || cleanupFailure.stdout,
+				);
+
+				writeFileSync(
+					trace,
+					[
+						"[2026-07-28 00:00:00] depth=0→1 PID=1 call=1 trace=positive caller=tool mode=review",
+						"[2026-07-28T00:00:01.000Z] depth=0 child_depth=1 COMPLETED exit=0 elapsed=1s caller=tool call=1 trace=positive transcript=failed",
+						"[2026-07-28T00:00:02.000Z] depth=0 child_depth=1 LIFECYCLE_TERMINAL exit=0 call=1 trace=positive transcript=failed cleanup=verified",
+						"",
 				].join("\n"),
 				{ mode: 0o600 },
 			);
@@ -184,10 +245,11 @@ try {
 			);
 			writeFileSync(
 				trace,
-				[
-					"[2026-07-28 00:00:00] depth=0→1 PID=1 call=1 trace=positive caller=tool mode=review",
-					"[2026-07-28T00:00:01.000Z] depth=0 child_depth=1 COMPLETED exit=0 elapsed=1s caller=tool call=1 trace=positive transcript=verified",
-					"",
+					[
+						"[2026-07-28 00:00:00] depth=0→1 PID=1 call=1 trace=positive caller=tool mode=review",
+						"[2026-07-28T00:00:01.000Z] depth=0 child_depth=1 COMPLETED exit=0 elapsed=1s caller=tool call=1 trace=positive transcript=verified",
+						"[2026-07-28T00:00:02.000Z] depth=0 child_depth=1 LIFECYCLE_TERMINAL exit=0 call=1 trace=positive transcript=verified cleanup=verified",
+						"",
 				].join("\n"),
 				{ mode: 0o600 },
 			);
@@ -222,10 +284,60 @@ try {
 		} finally {
 			closeQuietly(lease);
 		}
-	}
+		}
 
-	{
-		const directory = sessionDirectory(root, "no-append");
+		{
+			const directory = sessionDirectory(root, "rejected-admission");
+			const nonGitCheckout = path.join(root, "not-a-git-checkout");
+			mkdirSync(nonGitCheckout, { mode: 0o700 });
+			const previousSharedSessions = process.env.RLM_SHARED_SESSIONS;
+			const previousSessionDir = process.env.RLM_SESSION_DIR;
+			const previousTraceId = process.env.RLM_TRACE_ID;
+			process.env.RLM_SHARED_SESSIONS = "1";
+			process.env.RLM_SESSION_DIR = directory;
+			process.env.RLM_TRACE_ID = "rejected-admission";
+			let rejected = false;
+			try {
+				acquireChildResources({
+					prompt: "test rejected writable admission",
+					cwd: nonGitCheckout,
+					childDepth: 1,
+					callCount: 1,
+					mode: "implement",
+					scope: ["edit.txt"],
+				});
+			} catch {
+				rejected = true;
+			} finally {
+				if (previousSharedSessions === undefined) {
+					delete process.env.RLM_SHARED_SESSIONS;
+				} else {
+					process.env.RLM_SHARED_SESSIONS = previousSharedSessions;
+				}
+				if (previousSessionDir === undefined) {
+					delete process.env.RLM_SESSION_DIR;
+				} else {
+					process.env.RLM_SESSION_DIR = previousSessionDir;
+				}
+				if (previousTraceId === undefined) {
+					delete process.env.RLM_TRACE_ID;
+				} else {
+					process.env.RLM_TRACE_ID = previousTraceId;
+				}
+			}
+			const transcript = path.join(
+				directory,
+				"rejected-admission_d1_c1.jsonl",
+			);
+			record(rejected, "invalid writable workspace admission is rejected");
+			record(
+				!existsSync(transcript) && !existsSync(`${transcript}.receipt.json`),
+				"rejected admission retires its exact unstarted transcript",
+			);
+		}
+
+		{
+			const directory = sessionDirectory(root, "no-append");
 		const transcript = childPath(directory, "no_append_d1_c1");
 		const lease = prepareTranscriptProof({ childSession: transcript });
 		try {

@@ -5,6 +5,7 @@ import { ensureEnvironment } from "./env.ts";
 import { remainingTimeoutSeconds } from "./guardrails.ts";
 import { cancelAsyncJob, createAsyncJob, discardAsyncJob, finishAsyncJob, launchAsyncWorker, markAsyncJobAdmitted, markAsyncJobChildPid, readAsyncJob, waitForAsyncAdmission, waitForAsyncTerminal } from "./internal/cli-async.ts";
 import { resolveContextSource, type ContextSource } from "./internal/cli-input.ts";
+import { terminateRootTreeCoordinator } from "./internal/tree-coordinator.ts";
 import { formatRecursiveResultForTool, RecursiveChildError, runRecursiveChild } from "./runtime-core.ts";
 import { resolveRuntime, type YpiRuntime } from "./runtime.ts";
 
@@ -149,30 +150,34 @@ async function runWorker(jobPath: string): Promise<void> {
 	const onTerminate = () => { requestedExitCode = 143; controller.abort(); };
 	process.once("SIGINT", onInterrupt);
 	process.once("SIGTERM", onTerminate);
-	const job = readAsyncJob(jobPath);
-	const runtime = activeRuntime();
-	ensureEnvironment(runtime);
-	if (job.parentSessionSnapshot) process.env.RLM_SESSION_FILE = job.parentSessionSnapshot;
-	if (job.rootPromptSnapshot) process.env.RLM_ROOT_PROMPT_FILE = job.rootPromptSnapshot;
-	let code = 0;
-	let output = "";
 	try {
-		const result = await executeRequest(runtime, { prompt: job.prompt, fork: job.fork }, { contextPath: job.contextPath }, {
-			cwd: job.cwd,
-			extensionPath: job.extensionPath,
-			treeStartTimeSeconds: job.treeStartTimeSeconds,
-			onAdmitted: () => markAsyncJobAdmitted(job),
-			onChildSpawn: (pid) => markAsyncJobChildPid(job, pid),
-			signal: controller.signal,
-		});
-		output = formatRecursiveResultForTool(result);
-	} catch (error) {
-		code = requestedExitCode ?? errorExitCode(error);
-		output = `${cliErrorText(error)}\n`;
+		const job = readAsyncJob(jobPath);
+		const runtime = activeRuntime();
+		ensureEnvironment(runtime);
+		if (job.parentSessionSnapshot) process.env.RLM_SESSION_FILE = job.parentSessionSnapshot;
+		if (job.rootPromptSnapshot) process.env.RLM_ROOT_PROMPT_FILE = job.rootPromptSnapshot;
+		let code = 0;
+		let output = "";
+		try {
+			const result = await executeRequest(runtime, { prompt: job.prompt, fork: job.fork }, { contextPath: job.contextPath }, {
+				cwd: job.cwd,
+				extensionPath: job.extensionPath,
+				treeStartTimeSeconds: job.treeStartTimeSeconds,
+				onAdmitted: () => markAsyncJobAdmitted(job),
+				onChildSpawn: (pid) => markAsyncJobChildPid(job, pid),
+				signal: controller.signal,
+			});
+			output = formatRecursiveResultForTool(result);
+		} catch (error) {
+			code = requestedExitCode ?? errorExitCode(error);
+			output = `${cliErrorText(error)}\n`;
+		}
+		finishAsyncJob(job, code, output);
+	} finally {
+		await terminateRootTreeCoordinator("async-root-complete");
+		process.removeListener("SIGINT", onInterrupt);
+		process.removeListener("SIGTERM", onTerminate);
 	}
-	finishAsyncJob(job, code, output);
-	process.removeListener("SIGINT", onInterrupt);
-	process.removeListener("SIGTERM", onTerminate);
 }
 
 async function cancelAsyncJobToTerminal(
@@ -206,8 +211,16 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 		else stdoutFailure = error;
 		controller.abort();
 	};
-	const onInterrupt = () => { signalExitCode = 130; controller.abort(); };
-	const onTerminate = () => { signalExitCode = 143; controller.abort(); };
+	const onInterrupt = () => {
+		signalExitCode = 130;
+		void terminateRootTreeCoordinator("root-cli-interrupt");
+		controller.abort();
+	};
+	const onTerminate = () => {
+		signalExitCode = 143;
+		void terminateRootTreeCoordinator("root-cli-terminate");
+		controller.abort();
+	};
 	process.once("SIGINT", onInterrupt);
 	process.once("SIGTERM", onTerminate);
 	process.stdout.on("error", onStdoutError);
@@ -296,6 +309,9 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 		if (!controller.signal.aborted) console.error(cliErrorText(error));
 		return controller.signal.aborted ? signalExitCode : errorExitCode(error);
 	} finally {
+		if ((process.env.RLM_DEPTH || "0") === "0") {
+			await terminateRootTreeCoordinator("root-cli-complete");
+		}
 		process.removeListener("SIGINT", onInterrupt);
 		process.removeListener("SIGTERM", onTerminate);
 		process.stdout.removeListener("error", onStdoutError);

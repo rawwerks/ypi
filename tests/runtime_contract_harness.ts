@@ -185,8 +185,14 @@ function parseObservation(): Observation {
 	return result;
 }
 
-async function invokeNative(env: Record<string, string>, prompt: string, explicitContext?: string): Promise<{ observation?: Observation; error?: string }> {
-	applyNativeEnv(env);
+async function invokeNative(
+	env: Record<string, string>,
+	prompt: string,
+	explicitContext?: string,
+	inheritedDepth?: string,
+): Promise<{ observation?: Observation; error?: string }> {
+	applyNativeEnv(inheritedDepth ? { ...env, RLM_DEPTH: "0" } : env);
+	if (inheritedDepth) process.env.RLM_DEPTH = inheritedDepth;
 	try {
 		if (!nativeTool) throw new Error("native rlm_query tool not registered");
 		await nativeTool.execute("contract-call", { prompt, context: explicitContext }, undefined, undefined, extensionContext());
@@ -196,9 +202,23 @@ async function invokeNative(env: Record<string, string>, prompt: string, explici
 	}
 }
 
-async function invokeCli(env: Record<string, string>, prompt: string): Promise<{ observation?: Observation; error?: string; code: number }> {
+async function invokeCli(
+	env: Record<string, string>,
+	prompt: string,
+	inheritedDepth?: string,
+): Promise<{ observation?: Observation; error?: string; code: number }> {
 	writeFileSync(logFile, "");
-	const child = Bun.spawn([path.join(projectRoot, "rlm_query"), prompt], {
+	const command = inheritedDepth
+		? [
+			process.execPath,
+			path.join(projectRoot, "tests", "tree_authority_runner.ts"),
+			inheritedDepth,
+			"--",
+			path.join(projectRoot, "rlm_query"),
+			prompt,
+		]
+		: [path.join(projectRoot, "rlm_query"), prompt];
+	const child = Bun.spawn(command, {
 		cwd: projectRoot,
 		env,
 		stdin: "ignore",
@@ -291,7 +311,13 @@ async function run(): Promise<void> {
 		"REQUIRED_TRANSCRIPT_PROMPT",
 	);
 	const cliTranscriptRequired = await invokeCli(
-		transcriptRequiredEnv,
+		{
+			...transcriptRequiredEnv,
+			RLM_CALL_COUNTER_FILE: path.join(
+				scratch,
+				"required-transcripts-cli.counter",
+			),
+		},
 		"REQUIRED_TRANSCRIPT_PROMPT",
 	);
 	contains(
@@ -339,8 +365,13 @@ async function run(): Promise<void> {
 		RLM_CHILD_PROVIDERS: "first-provider,second-provider",
 		RLM_CHILD_THINKING_LEVELS: "low,high",
 	};
-	const routedNative = await invokeNative(routedNativeEnv, prompt, "CONTRACT_CONTEXT");
-	const routedCli = await invokeCli(routedCliEnv, prompt);
+	const routedNative = await invokeNative(
+		routedNativeEnv,
+		prompt,
+		"CONTRACT_CONTEXT",
+		"1",
+	);
+	const routedCli = await invokeCli(routedCliEnv, prompt, "1");
 	if (routedNative.observation && routedCli.observation) {
 		for (const key of ["RLM_DEPTH", "RLM_PROVIDER", "RLM_MODEL", "RLM_THINKING_LEVEL"]) {
 			equal(`depth-routed ${key}`, routedNative.observation[key], routedCli.observation[key]);
@@ -349,7 +380,11 @@ async function run(): Promise<void> {
 		equal("second-depth provider selected", routedNative.observation.RLM_PROVIDER, "second-provider");
 		equal("second-depth thinking selected", routedNative.observation.RLM_THINKING_LEVEL, "high");
 	} else {
-		record(false, "both adapters emitted routed observations");
+		record(
+			false,
+			"both adapters emitted routed observations",
+			`native=${JSON.stringify(routedNative.error)} cli=${JSON.stringify(routedCli.error)} code=${routedCli.code}`,
+		);
 	}
 
 	const malformedNative = await invokeNative({ ...baseEnv("native-malformed"), RLM_DEPTH: "0junk" }, prompt);
@@ -447,7 +482,10 @@ async function run(): Promise<void> {
 	record(Boolean(capturedRootPrompt && existsSync(capturedRootPrompt)), "root prompt is captured before agent start");
 	equal("extension context binds the current root session for shell --fork", process.env.RLM_SESSION_FILE, path.join(sessionDir, "parent.jsonl"));
 	if (capturedRootPrompt) equal("captured root prompt is exact", readFileSync(capturedRootPrompt, "utf8"), "ROOT HUMAN CHARTER");
-	handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" }, lifecycleContext);
+	await handlers.get("session_shutdown")?.(
+		{ type: "session_shutdown", reason: "quit" },
+		lifecycleContext,
+	);
 	record(!capturedRootPrompt || !existsSync(capturedRootPrompt), "root prompt lease is removed at session shutdown");
 
 	console.log(`\nResults: ${pass} passed, ${fail} failed, ${known} known divergences`);

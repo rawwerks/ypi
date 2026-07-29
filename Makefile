@@ -48,6 +48,10 @@ test-child-process:
 	@echo "Running child process terminality tests..."
 	@bun tests/child_process_harness.ts
 
+test-cross-depth-cancellation:
+	@echo "Running cross-depth writable cancellation tests..."
+	@bun tests/cross_depth_cancellation_harness.ts
+
 test-transcripts:
 	@echo "Running required transcript proof tests..."
 	@bun tests/transcript_harness.ts
@@ -140,7 +144,7 @@ test-doctor:
 	@bash tests/test_doctor.sh
 
 # All fast tests (no LLM calls)
-test-fast: typecheck-runtime check-runtime-cli test-unit test-guardrails test-timeout-range test-native test-runtime-contract test-eval-contracts test-concurrency test-atomic-file test-cli-async test-cost-ledger test-child-process test-transcripts test-session-tools test-private-path-ownership test-implementer-registry-generation test-workspace-retirement-generation test-workspace-policy test-parallel-workspace test-implementer-recovery test-workspace-crash test-workspace-concurrent-crash test-write-scope test-publication-policy test-config-surface test-provider-allowlist test-doctor
+test-fast: typecheck-runtime check-runtime-cli test-unit test-guardrails test-timeout-range test-native test-runtime-contract test-eval-contracts test-concurrency test-atomic-file test-cli-async test-cost-ledger test-child-process test-cross-depth-cancellation test-transcripts test-session-tools test-private-path-ownership test-implementer-registry-generation test-workspace-retirement-generation test-workspace-policy test-parallel-workspace test-implementer-recovery test-workspace-crash test-workspace-concurrent-crash test-write-scope test-publication-policy test-config-surface test-provider-allowlist test-doctor
 
 # Extension compatibility — requires real pi installed
 test-extensions:

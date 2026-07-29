@@ -16,6 +16,11 @@ interface ExpectedTranscript {
 	exitCode?: number;
 }
 
+interface TraceResult {
+	exitCode: number;
+	transcriptStatus: string;
+}
+
 interface ValidatorArguments {
 	traceFile: string;
 	sessionDir: string;
@@ -55,13 +60,18 @@ function callKey(value: ExpectedTranscript): string {
 
 function expectedTranscripts(traceFile: string): ExpectedTranscript[] {
 	const starts = new Map<string, ExpectedTranscript>();
-	const completions = new Map<string, {
-		exitCode: number;
-		transcriptStatus: string;
-	}>();
+	const completions = new Map<string, TraceResult>();
+	const terminals = new Map<string, TraceResult>();
+	const cleanupFailedCalls = new Set<number>();
 	const start = /\bdepth=(\d+)→(\d+)\b.*\bcall=(\d+)\s+trace=([^\s]+)/;
 	const completion = /\bdepth=(\d+)\s+child_depth=(\d+)\s+COMPLETED\s+exit=(\d+)\b.*\bcall=(\d+)\b.*\btrace=([^\s]+)\s+.*\btranscript=(verified|failed|not-required)\b/;
+	const terminal = /\bdepth=(\d+)\s+child_depth=(\d+)\s+LIFECYCLE_TERMINAL\s+exit=(\d+)\b.*\bcall=(\d+)\b.*\btrace=([^\s]+)\s+.*\btranscript=(verified|failed|not-required)\b.*\bcleanup=verified\b/;
+	const cleanupFailed = /\bCLEANUP_FAILED\b.*\bcall=(\d+)\b/;
 	for (const line of readFileSync(traceFile, "utf8").split(/\r?\n/)) {
+		const cleanupFailedMatch = cleanupFailed.exec(line);
+		if (cleanupFailedMatch) {
+			cleanupFailedCalls.add(Number(cleanupFailedMatch[1]));
+		}
 		const startMatch = start.exec(line);
 		if (startMatch) {
 			const value: ExpectedTranscript = {
@@ -76,24 +86,50 @@ function expectedTranscripts(traceFile: string): ExpectedTranscript[] {
 			continue;
 		}
 		const completionMatch = completion.exec(line);
-		if (!completionMatch) continue;
-		const completedIdentity: ExpectedTranscript = {
-			traceId: safeTraceId(completionMatch[5]),
-			parentDepth: Number(completionMatch[1]),
-			childDepth: Number(completionMatch[2]),
-			callCount: Number(completionMatch[4]),
+		if (completionMatch) {
+			const completedIdentity: ExpectedTranscript = {
+				traceId: safeTraceId(completionMatch[5]),
+				parentDepth: Number(completionMatch[1]),
+				childDepth: Number(completionMatch[2]),
+				callCount: Number(completionMatch[4]),
+			};
+			const key = callKey(completedIdentity);
+			const matching = starts.get(key);
+			if (!matching) {
+				throw new Error(`trace contains completion without a matching start: call ${completionMatch[4]}`);
+			}
+			if (completions.has(key)) {
+				throw new Error(`trace contains duplicate child completion: call ${matching.callCount}`);
+			}
+			completions.set(key, {
+				exitCode: Number(completionMatch[3]),
+				transcriptStatus: completionMatch[6],
+			});
+			continue;
+		}
+		const terminalMatch = terminal.exec(line);
+		if (!terminalMatch) continue;
+		const terminalIdentity: ExpectedTranscript = {
+			traceId: safeTraceId(terminalMatch[5]),
+			parentDepth: Number(terminalMatch[1]),
+			childDepth: Number(terminalMatch[2]),
+			callCount: Number(terminalMatch[4]),
 		};
-		const key = callKey(completedIdentity);
+		const key = callKey(terminalIdentity);
 		const matching = starts.get(key);
 		if (!matching) {
-			throw new Error(`trace contains completion without a matching start: call ${completionMatch[4]}`);
+			throw new Error(
+				`trace contains lifecycle terminal without a matching start: call ${terminalMatch[4]}`,
+			);
 		}
-		if (completions.has(key)) {
-			throw new Error(`trace contains duplicate child completion: call ${matching.callCount}`);
+		if (terminals.has(key)) {
+			throw new Error(
+				`trace contains duplicate lifecycle terminal: call ${matching.callCount}`,
+			);
 		}
-		completions.set(key, {
-			exitCode: Number(completionMatch[3]),
-			transcriptStatus: completionMatch[6],
+		terminals.set(key, {
+			exitCode: Number(terminalMatch[3]),
+			transcriptStatus: terminalMatch[6],
 		});
 	}
 	if (starts.size === 0) {
@@ -104,12 +140,39 @@ function expectedTranscripts(traceFile: string): ExpectedTranscript[] {
 		if (!completionValue) {
 			throw new Error(`trace child has no terminal completion: call ${value.callCount}`);
 		}
+		if (cleanupFailedCalls.has(value.callCount)) {
+			throw new Error(
+				`trace child reported lifecycle cleanup failure: call ${value.callCount}`,
+			);
+		}
+		const terminalValue = terminals.get(key);
+		if (!terminalValue) {
+			throw new Error(
+				`trace child has no verified lifecycle terminal: call ${value.callCount}`,
+			);
+		}
+		if (
+			terminalValue.exitCode !== completionValue.exitCode
+			|| terminalValue.transcriptStatus !== completionValue.transcriptStatus
+		) {
+			throw new Error(
+				`trace lifecycle terminal does not match completion: call ${value.callCount}`,
+			);
+		}
 		if (completionValue.transcriptStatus !== "verified") {
 			throw new Error(
 				`trace child transcript was not verified: call ${value.callCount} status=${completionValue.transcriptStatus}`,
 			);
 		}
 		value.exitCode = completionValue.exitCode;
+	}
+	for (const [key, terminalValue] of terminals) {
+		if (!completions.has(key)) {
+			const matching = starts.get(key);
+			throw new Error(
+				`trace lifecycle terminal has no matching completion: call ${matching?.callCount ?? "unknown"} exit=${terminalValue.exitCode}`,
+			);
+		}
 	}
 	return [...starts.values()];
 }

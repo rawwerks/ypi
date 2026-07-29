@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
@@ -112,10 +113,18 @@ try {
 		rlmQueryPath: "rlm_query",
 		extensionPath: "extensions/ypi.ts",
 	} as never);
+	const stateLabel = createHash("sha256")
+		.update(mapped)
+		.digest("hex")
+		.slice(0, 8);
 	record(
 		process.env.RLM_TRACE_ID === mapped
-			&& Boolean(process.env.RLM_CALL_COUNTER_FILE?.includes(mapped)),
-		"public environment initialization uses the shared bounded identity",
+			&& Boolean(
+				process.env.RLM_CALL_COUNTER_FILE?.includes(
+					`ypi_runtime_${stateLabel}_`,
+				),
+			),
+		"environment keeps the bounded trace identity and short private state label",
 	);
 } finally {
 	rmSync(root, { recursive: true, force: true });

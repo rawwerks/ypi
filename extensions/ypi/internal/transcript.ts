@@ -423,6 +423,43 @@ export function finalizeTranscriptProof(
 	return receipt;
 }
 
+export function abandonUnstartedTranscriptProof(
+	lease: TranscriptProofLease | undefined,
+): void {
+	if (!lease) return;
+	fsyncSync(lease.descriptor);
+	const finalBytes = assertTranscriptIdentity(lease);
+	if (finalBytes !== lease.baselineBytes) {
+		throw proofError(
+			"Unstarted child transcript content changed; preserving uncertain evidence.",
+		);
+	}
+	if (
+		digestRegion(lease.descriptor, 0, finalBytes)
+		!== lease.baselineSha256
+	) {
+		throw proofError(
+			"Unstarted child transcript baseline changed; preserving uncertain evidence.",
+		);
+	}
+	try {
+		lstatSync(lease.receiptPath);
+		throw proofError(
+			"Unstarted child transcript has a receipt; preserving uncertain evidence.",
+		);
+	} catch (error) {
+		if (
+			!(error instanceof Error)
+			|| (error as NodeJS.ErrnoException).code !== "ENOENT"
+		) {
+			throw error;
+		}
+	}
+	unlinkSync(lease.childSession);
+	fsyncSync(lease.directory.descriptor);
+	assertDirectoryIdentity(lease.directory);
+}
+
 export function closeTranscriptProof(lease: TranscriptProofLease | undefined): void {
 	if (!lease) return;
 	let firstError: unknown;

@@ -17,6 +17,7 @@ import {
 } from "./private-path.ts";
 import { renderActiveTaskFilesSection } from "./task-files.ts";
 import {
+	abandonUnstartedTranscriptProof,
 	closeTranscriptProof,
 	prepareTranscriptProof,
 	type TranscriptProofLease,
@@ -318,6 +319,9 @@ export function acquireChildResources(input: ChildResourceInput): ChildResourceL
 			},
 		};
 	} catch (error) {
+		const transcriptRetirementFailures = cleanupErrors([
+			() => abandonUnstartedTranscriptProof(transcriptProof),
+		]);
 		const failures = cleanupChildResources({
 			workspace,
 			transcriptProof,
@@ -326,6 +330,9 @@ export function acquireChildResources(input: ChildResourceInput): ChildResourceL
 			standaloneSystemPromptTree: standaloneSystemPromptArtifact?.tree,
 			isolatedPiTree,
 		});
-		throw errorWithCleanupFailures(error, failures);
+		throw errorWithCleanupFailures(
+			error,
+			[...transcriptRetirementFailures, ...failures],
+		);
 	}
 }

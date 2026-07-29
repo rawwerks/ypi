@@ -9,6 +9,7 @@ import {
 	ensurePrivateAppendFile,
 	withPrivateUmask,
 } from "./internal/private-path.ts";
+import { ensureRootTreeCoordinator } from "./internal/tree-coordinator.ts";
 import type { YpiRuntime } from "./runtime.ts";
 import { debug } from "./runtime.ts";
 
@@ -96,9 +97,13 @@ function ensureRuntimeStatePaths(): void {
 	].some((variable) => !process.env[variable]);
 	if (!missing) return;
 
+	const stateLabel = createHash("sha256")
+		.update(process.env.RLM_TRACE_ID || "ypi")
+		.digest("hex")
+		.slice(0, 8);
 	const stateRoot = createPrivateTempDirectory(path.join(
 		tmpdir(),
-		`ypi_runtime_${process.env.RLM_TRACE_ID}_`,
+		`ypi_runtime_${stateLabel}_`,
 	));
 	process.env.RLM_CALL_COUNTER_FILE ||= path.join(stateRoot, "calls.counter");
 	process.env.RLM_CONCURRENCY_DIR ||= path.join(stateRoot, "concurrency");
@@ -147,6 +152,7 @@ export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext, p
 	ensureRuntimeStatePaths();
 	ensurePrivateTelemetryFile("PI_TRACE_FILE");
 	ensurePrivateTelemetryFile("RLM_COST_FILE");
+	ensureRootTreeCoordinator();
 
 	if (shouldExposeRecursion() && shellHelperEnabled(runtime)) {
 		prependPath(runtime.root);

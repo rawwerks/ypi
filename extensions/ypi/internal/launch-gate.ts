@@ -8,12 +8,14 @@ import {
 	readFileSync,
 } from "node:fs";
 import path from "node:path";
-import { processIsAlive } from "./process-liveness.ts";
+import { processMatchesStartIdentity } from "./process-identity.ts";
+import { registerCoordinatedLaunch } from "./tree-coordinator.ts";
 
 export interface LaunchGateRequest {
 	pidFile: string;
 	readyFile: string;
 	ownerPid: number;
+	ownerProcessIdentity: string;
 	command: string[];
 }
 
@@ -42,6 +44,7 @@ export function parseLaunchGateArguments(args: string[]): LaunchGateRequest {
 	let pidFile: string | undefined;
 	let readyFile: string | undefined;
 	let ownerPid: number | undefined;
+	let ownerProcessIdentity: string | undefined;
 	let command: string[] | undefined;
 	for (let index = 0; index < args.length; index++) {
 		const argument = args[index];
@@ -68,15 +71,34 @@ export function parseLaunchGateArguments(args: string[]): LaunchGateRequest {
 			index++;
 			continue;
 		}
+		if (argument === "--owner-process-identity") {
+			ownerProcessIdentity = requireValue(args, index, argument);
+			index++;
+			continue;
+		}
 		throw new LaunchGateError(`unknown launch-gate argument: ${argument}`, 2);
 	}
-	if (!pidFile || !readyFile || ownerPid === undefined || !Number.isSafeInteger(ownerPid) || ownerPid <= 0) {
-		throw new LaunchGateError("--pid-file, --ready-file, and a positive --owner-pid are required", 2);
+	if ((pidFile === undefined) !== (readyFile === undefined)) {
+		throw new LaunchGateError("--pid-file and --ready-file must be provided together", 2);
+	}
+	if (
+		ownerPid === undefined
+		|| !Number.isSafeInteger(ownerPid)
+		|| ownerPid <= 0
+		|| !ownerProcessIdentity
+	) {
+		throw new LaunchGateError("a positive --owner-pid and --owner-process-identity are required", 2);
 	}
 	if (!command?.length) {
 		throw new LaunchGateError("a child command is required after --", 2);
 	}
-	return { pidFile, readyFile, ownerPid, command };
+	return {
+		pidFile: pidFile || "",
+		readyFile: readyFile || "",
+		ownerPid,
+		ownerProcessIdentity,
+		command,
+	};
 }
 
 function wait(milliseconds: number): void {
@@ -138,20 +160,29 @@ function resolveExecutable(command: string, environment: NodeJS.ProcessEnv): str
 	throw new LaunchGateError(`ENOENT: executable not found on PATH: ${command}`, 127);
 }
 
-export function runRecursiveChildLaunchGate(request: LaunchGateRequest): never | number {
-	while (!existsSync(request.pidFile)) {
-		if (!processIsAlive(request.ownerPid)) return 125;
-		wait(10);
-	}
-	if (readReadyPid(request.pidFile) !== process.pid) {
-		throw new LaunchGateError("recursive child registered PID does not match this process", 126);
-	}
-	while (!existsSync(request.readyFile)) {
-		if (!processIsAlive(request.ownerPid)) return 125;
-		wait(10);
-	}
-	if (readReadyPid(request.readyFile) !== process.pid) {
-		throw new LaunchGateError("recursive child launch gate PID does not match this process", 126);
+function immediateOwnerAlive(request: LaunchGateRequest): boolean {
+	return processMatchesStartIdentity(
+		request.ownerPid,
+		request.ownerProcessIdentity,
+	);
+}
+
+export async function runRecursiveChildLaunchGate(request: LaunchGateRequest): Promise<never | number> {
+	if (request.pidFile) {
+		while (!existsSync(request.pidFile)) {
+			if (!immediateOwnerAlive(request)) return 125;
+			wait(10);
+		}
+		if (readReadyPid(request.pidFile) !== process.pid) {
+			throw new LaunchGateError("recursive child registered PID does not match this process", 126);
+		}
+		while (!existsSync(request.readyFile)) {
+			if (!immediateOwnerAlive(request)) return 125;
+			wait(10);
+		}
+		if (readReadyPid(request.readyFile) !== process.pid) {
+			throw new LaunchGateError("recursive child launch gate PID does not match this process", 126);
+		}
 	}
 	const execve = process.execve;
 	if (!execve) {
@@ -159,6 +190,23 @@ export function runRecursiveChildLaunchGate(request: LaunchGateRequest): never |
 	}
 	const executable = resolveExecutable(request.command[0], process.env);
 	const envExecutable = resolveExecutable(EXEC_STATUS_SHIM, process.env);
+	if (!immediateOwnerAlive(request)) return 125;
+	const slotToken = process.env.RLM_ACTIVE_SLOT_TOKEN;
+	if (!slotToken) {
+		throw new LaunchGateError(
+			"recursive child launch has no coordinated slot token",
+			126,
+		);
+	}
+	try {
+		await registerCoordinatedLaunch(slotToken);
+	} catch (error) {
+		throw new LaunchGateError(
+			`recursive child launch authority was revoked: ${error instanceof Error ? error.message : String(error)}`,
+			(error as Error & { exitCode?: number }).exitCode || 125,
+		);
+	}
+	if (!immediateOwnerAlive(request)) return 125;
 	try {
 		// Node treats a failed process.execve as fatal rather than catchable on
 		// supported releases. `env` performs the target exec in the already
@@ -171,9 +219,9 @@ export function runRecursiveChildLaunchGate(request: LaunchGateRequest): never |
 	}
 }
 
-export function runRecursiveChildLaunchGateCli(args: string[]): number {
+export async function runRecursiveChildLaunchGateCli(args: string[]): Promise<number> {
 	try {
-		return runRecursiveChildLaunchGate(parseLaunchGateArguments(args));
+		return await runRecursiveChildLaunchGate(parseLaunchGateArguments(args));
 	} catch (error) {
 		const failure = error instanceof LaunchGateError
 			? error
