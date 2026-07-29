@@ -411,8 +411,8 @@ OUTPUT=$(
 AFTER=$(find "$TMPDIR" -maxdepth 1 -type d -name 'ypi_ctx_*' 2>/dev/null | wc -l)
 assert_eq "G10: temp cleaned after error" "$BEFORE" "$AFTER"
 
-# G10b: explicit cleanup recognizes canonical and retained private async job
-# directories, remains dry-run by default, and ignores lookalikes without owned entries.
+# G10b: age is not authority to destroy generic runtime state. Both dry-run and
+# forced cleanup preserve untyped paths and leave the real repository untouched.
 CLEANUP_CWD="$TEST_TMP/cleanup-cwd"
 mkdir "$CLEANUP_CWD"
 CLEANUP_REAL_STATUS_BEFORE=$(git -C "$PROJECT_DIR" status --porcelain=v2 --untracked-files=all)
@@ -426,20 +426,18 @@ printf '%s\n' done > "$ASYNC_OWNED/output.txt"
 printf '%s\n' keep > "$ASYNC_LOOKALIKE/unrelated.txt"
 touch -d '3 hours ago' "$ASYNC_OWNED" "$ASYNC_LOOKALIKE" "$STALE_COUNTER_LOCK"
 CLEANUP_DRY=$(cd "$CLEANUP_CWD" && TMPDIR="$TMPDIR" "$PROJECT_DIR/rlm_cleanup" --age 60)
-assert_contains "G10b: cleanup dry-run discovers owned async directory" "Async job dirs older than 60m: 1" "$CLEANUP_DRY"
-assert_contains "G10b: cleanup dry-run discovers stale counter lock" "Call-counter locks older than 60m: 1" "$CLEANUP_DRY"
-if [ -d "$ASYNC_OWNED" ] && [ -d "$STALE_COUNTER_LOCK" ]; then pass "G10b: cleanup is dry-run by default"; else fail "G10b: cleanup is dry-run by default" "owned directory removed"; fi
-(cd "$CLEANUP_CWD" && TMPDIR="$TMPDIR" "$PROJECT_DIR/rlm_cleanup" --age 60 --force >/dev/null)
-if [ ! -e "$ASYNC_OWNED" ]; then pass "G10b: forced cleanup removes owned async directory"; else fail "G10b: forced cleanup removes owned async directory" "directory remains"; fi
-if [ ! -e "$STALE_COUNTER_LOCK" ]; then pass "G10b: forced cleanup removes stale counter lock"; else fail "G10b: forced cleanup removes stale counter lock" "lock remains"; fi
-if [ -d "$ASYNC_LOOKALIKE" ]; then pass "G10b: cleanup preserves unrelated lookalike"; else fail "G10b: cleanup preserves unrelated lookalike" "lookalike removed"; fi
+assert_contains "G10b: cleanup publishes conservative authority policy" "Generic temp, call-counter, async, and legacy workspace paths: preserved (age is not deletion authority)" "$CLEANUP_DRY"
+if [ -d "$ASYNC_OWNED" ] && [ -d "$ASYNC_LOOKALIKE" ] && [ -d "$STALE_COUNTER_LOCK" ]; then pass "G10b: cleanup dry-run preserves untyped runtime state"; else fail "G10b: cleanup dry-run preserves untyped runtime state" "runtime state removed"; fi
+CLEANUP_FORCED=$(cd "$CLEANUP_CWD" && TMPDIR="$TMPDIR" "$PROJECT_DIR/rlm_cleanup" --age 60 --force)
+assert_contains "G10b: forced cleanup retains conservative authority policy" "Generic temp, call-counter, async, and legacy workspace paths: preserved (age is not deletion authority)" "$CLEANUP_FORCED"
+if [ -d "$ASYNC_OWNED" ] && [ -d "$ASYNC_LOOKALIKE" ] && [ -d "$STALE_COUNTER_LOCK" ]; then pass "G10b: forced cleanup preserves untyped runtime state"; else fail "G10b: forced cleanup preserves untyped runtime state" "runtime state removed"; fi
 CLEANUP_REAL_STATUS_AFTER=$(git -C "$PROJECT_DIR" status --porcelain=v2 --untracked-files=all)
 CLEANUP_REAL_WORKTREES_AFTER=$(git -C "$PROJECT_DIR" worktree list --porcelain)
 CLEANUP_REAL_REFS_AFTER=$(git -C "$PROJECT_DIR" for-each-ref --format='%(refname) %(objectname)' refs/ypi/)
 assert_eq "G10b: cleanup leaves the real checkout status unchanged" "$CLEANUP_REAL_STATUS_BEFORE" "$CLEANUP_REAL_STATUS_AFTER"
 assert_eq "G10b: cleanup leaves the real worktree registry unchanged" "$CLEANUP_REAL_WORKTREES_BEFORE" "$CLEANUP_REAL_WORKTREES_AFTER"
 assert_eq "G10b: cleanup leaves real ypi refs unchanged" "$CLEANUP_REAL_REFS_BEFORE" "$CLEANUP_REAL_REFS_AFTER"
-rm -rf "$ASYNC_LOOKALIKE"
+rm -rf "$ASYNC_OWNED" "$ASYNC_LOOKALIKE" "$STALE_COUNTER_LOCK"
 
 # Restore normal mock
 cat > "$MOCK_BIN/pi" << 'MOCK_PI'

@@ -161,16 +161,17 @@ export async function waitForAsyncTerminal(job: AsyncJob, timeoutMilliseconds = 
 }
 
 export function discardAsyncJob(job: AsyncJob, workerPid = 0): void {
-	if (workerPid > 0 && !existsSync(job.admissionPath) && !existsSync(job.sentinelPath)) {
-		const target = process.platform === "win32" ? workerPid : -workerPid;
-		try { process.kill(target, "SIGTERM"); } catch { /* worker already exited */ }
+	if (workerPid > 0 && !existsSync(job.sentinelPath)) {
+		throw new Error(
+			`Refusing to discard non-terminal async job state: ${path.dirname(job.jobPath)}`,
+		);
 	}
 	rmSync(path.dirname(job.jobPath), { recursive: true, force: true });
 }
 
-export async function waitForAsyncAdmission(job: AsyncJob, timeoutMilliseconds = 30_000, signal?: AbortSignal): Promise<void> {
-	const deadline = Date.now() + timeoutMilliseconds;
-	while (Date.now() < deadline) {
+export async function waitForAsyncAdmission(job: AsyncJob, timeoutMilliseconds?: number, signal?: AbortSignal): Promise<void> {
+	const deadline = timeoutMilliseconds === undefined ? undefined : Date.now() + timeoutMilliseconds;
+	while (true) {
 		if (signal?.aborted) throw new AsyncAdmissionError("Async recursion admission cancelled", 130);
 		if (existsSync(job.admissionPath)) return;
 		if (existsSync(job.sentinelPath)) {
@@ -178,10 +179,11 @@ export async function waitForAsyncAdmission(job: AsyncJob, timeoutMilliseconds =
 			if (code === 0) return;
 			throw new AsyncAdmissionError(readFileSync(job.outputPath, "utf8").trim() || `Async recursion request rejected with exit ${code}`, code);
 		}
+		if (deadline !== undefined && Date.now() >= deadline) {
+			throw new Error(`Async recursion admission timed out after ${timeoutMilliseconds}ms`);
+		}
 		await new Promise((resolve) => setTimeout(resolve, 10));
 	}
-	if (signal?.aborted) throw new AsyncAdmissionError("Async recursion admission cancelled", 130);
-	throw new Error(`Async recursion admission timed out after ${timeoutMilliseconds}ms`);
 }
 
 export function finishAsyncJob(job: AsyncJob, code: number, output: string): void {

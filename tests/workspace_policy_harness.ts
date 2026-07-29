@@ -136,21 +136,22 @@ const cleanupDry = spawnSync(cleanupScript, ["--repo", cleanRoot, "--attempt-age
 });
 record(
 	cleanupDry.status === 0
-		&& cleanupDry.stdout.includes("Attempt refs older than 0m: 1")
-		&& git(cleanRoot, "rev-parse", report.attemptRef!) === report.attemptCommit,
-	"attempt-ref cleanup remains dry-run by default",
+			&& cleanupDry.stdout.includes("Attempt refs older than 0m: 1 (preserved)")
+			&& git(cleanRoot, "rev-parse", report.attemptRef!) === report.attemptCommit,
+		"attempt-ref inspection remains dry-run by default",
 	cleanupDry.stderr,
 );
 const cleanupForced = spawnSync(cleanupScript, ["--repo", cleanRoot, "--attempt-age", "0", "--force"], {
 	encoding: "utf8",
 	env: { ...gitEnvironment(), TMPDIR: cleanupTmp },
 });
-const removedAttempt = spawnSync("git", ["rev-parse", "--verify", report.attemptRef!], {
-	cwd: cleanRoot,
-	encoding: "utf8",
-	env: gitEnvironment(),
-});
-record(cleanupForced.status === 0 && removedAttempt.status !== 0, "forced cleanup expires only the selected aged attempt ref", cleanupForced.stderr);
+record(
+	cleanupForced.status === 0
+		&& cleanupForced.stdout.includes("Attempt refs older than 0m: 1 (preserved)")
+		&& git(cleanRoot, "rev-parse", report.attemptRef!) === report.attemptCommit,
+	"forced cleanup preserves attempt refs because age is not deletion authority",
+	cleanupForced.stderr,
+);
 rmSync(cleanupTmp, { recursive: true, force: true });
 
 const dirtyRoot = fixture();

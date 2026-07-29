@@ -175,6 +175,16 @@ async function runWorker(jobPath: string): Promise<void> {
 	process.removeListener("SIGTERM", onTerminate);
 }
 
+async function cancelAsyncJobToTerminal(
+	job: ReturnType<typeof createAsyncJob>,
+	workerPid: number,
+): Promise<boolean> {
+	cancelAsyncJob(job, workerPid);
+	if (await waitForAsyncTerminal(job)) return true;
+	cancelAsyncJob(job, workerPid, "SIGKILL");
+	return waitForAsyncTerminal(job, 1_000);
+}
+
 export async function main(args = process.argv.slice(2)): Promise<number> {
 	if (args[0] === "--ypi-async-worker") {
 		if (!args[1]) usage();
@@ -225,7 +235,12 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 					treeStartTimeSeconds: invocationStartedAt,
 				});
 				pid = launchAsyncWorker(job, fileURLToPath(import.meta.url));
-				await waitForAsyncAdmission(job, 30_000, controller.signal);
+				const admissionRemaining = remainingTimeoutSeconds();
+				await waitForAsyncAdmission(
+					job,
+					admissionRemaining === undefined ? undefined : Math.max(0, admissionRemaining * 1000),
+					controller.signal,
+				);
 				if (controller.signal.aborted) throw new Error("Async recursion acknowledgement cancelled");
 				await writeStdout(`${JSON.stringify({
 					job_id: path.basename(path.dirname(job.jobPath)),
@@ -236,15 +251,22 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 				return 0;
 			} catch (error) {
 				if (job && controller.signal.aborted) {
-					cancelAsyncJob(job, pid);
-					if (!await waitForAsyncTerminal(job)) {
-						cancelAsyncJob(job, pid, "SIGKILL");
-						await waitForAsyncTerminal(job, 1_000);
+					const terminal = pid <= 0 || await cancelAsyncJobToTerminal(job, pid);
+					if (terminal) {
+						discardAsyncJob(job, pid);
+					} else {
+						console.error(`Async job did not publish terminal state; preserved at ${path.dirname(job.jobPath)}`);
 					}
-					discardAsyncJob(job);
 					return brokenPipe ? 0 : signalExitCode;
 				}
-				if (job) discardAsyncJob(job, pid);
+				if (job) {
+					const terminal = pid <= 0 || existsSync(job.sentinelPath) || await cancelAsyncJobToTerminal(job, pid);
+					if (terminal) {
+						discardAsyncJob(job, pid);
+					} else {
+						console.error(`Async job did not publish terminal state; preserved at ${path.dirname(job.jobPath)}`);
+					}
+				}
 				console.error(cliErrorText(error));
 				return errorExitCode(error);
 			}
