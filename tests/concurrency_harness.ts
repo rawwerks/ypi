@@ -157,6 +157,22 @@ async function adoptedCounterOwner(): Promise<void> {
 	}
 }
 
+async function longSocketPathOwner(): Promise<void> {
+	ensureRootTreeCoordinator();
+	const socketPath = process.env.YPI_TREE_COORDINATOR_SOCKET;
+	if (!socketPath) throw new Error("coordinator socket path is unavailable");
+	const socketOwner = path.dirname(socketPath);
+	await assertTreeCoordinatorActive();
+	const existedWhileActive = existsSync(socketPath);
+	await terminateRootTreeCoordinator("long-socket-owner-complete");
+	console.log(JSON.stringify({
+		socketPath,
+		existedWhileActive,
+		existsAfterTermination: existsSync(socketPath),
+		ownerExistsAfterTermination: existsSync(socketOwner),
+	}));
+}
+
 if (process.argv[2] === "--worker") {
 	try {
 		await worker();
@@ -179,6 +195,10 @@ if (process.argv[2] === "--abrupt-root-owner") {
 }
 if (process.argv[2] === "--adopted-counter-owner") {
 	await adoptedCounterOwner();
+	process.exit(0);
+}
+if (process.argv[2] === "--long-socket-path-owner") {
+	await longSocketPathOwner();
 	process.exit(0);
 }
 
@@ -359,6 +379,61 @@ try {
 			&& readFileSync(mismatchedCounter, "utf8") === "7\n",
 		"a fresh root rejects and preserves a continuation counter with a mismatched seed",
 		`exit=${mismatchedExit}`,
+	);
+	const longSocketDirectory = path.join(
+		scratch,
+		"a".repeat(80),
+		"b".repeat(80),
+	);
+	mkdirSync(longSocketDirectory, { recursive: true, mode: 0o700 });
+	const longSocketOwner = spawn(
+		process.execPath,
+		[import.meta.path, "--long-socket-path-owner"],
+		{
+			env: {
+				...process.env,
+				RLM_DEPTH: "0",
+				RLM_CONCURRENCY_DIR: longSocketDirectory,
+				RLM_CALL_COUNTER_FILE: path.join(scratch, "long-socket.counter"),
+				RLM_CALL_COUNT: "0",
+			},
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	);
+	let longSocketOutput = "";
+	let longSocketError = "";
+	longSocketOwner.stdout.setEncoding("utf8");
+	longSocketOwner.stderr.setEncoding("utf8");
+	longSocketOwner.stdout.on("data", (chunk: string) => {
+		longSocketOutput += chunk;
+	});
+	longSocketOwner.stderr.on("data", (chunk: string) => {
+		longSocketError += chunk;
+	});
+	const longSocketExit = await new Promise<number | null>((resolve, reject) => {
+		longSocketOwner.once("error", reject);
+		longSocketOwner.once("close", resolve);
+	});
+	const longSocketResult = longSocketExit === 0
+		? JSON.parse(longSocketOutput) as {
+			socketPath: string;
+			existedWhileActive: boolean;
+			existsAfterTermination: boolean;
+			ownerExistsAfterTermination: boolean;
+		}
+		: undefined;
+	record(
+		longSocketExit === 0
+			&& longSocketResult?.existedWhileActive === true
+			&& longSocketResult.existsAfterTermination === false
+			&& longSocketResult.ownerExistsAfterTermination === false
+			&& Buffer.byteLength(longSocketResult.socketPath) <= 100,
+		"a long evidence path uses and retires a private bounded socket path",
+		JSON.stringify({
+			longSocketExit,
+			longSocketResult,
+			longSocketError,
+		}),
 	);
 	beginRootTreeCoordinator("concurrency-root-turn-transfer");
 	await assertTreeCoordinatorActive();

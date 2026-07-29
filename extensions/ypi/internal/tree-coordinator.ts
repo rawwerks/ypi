@@ -18,8 +18,12 @@ import {
 import {
 	appendOwnedPrivateFile,
 	capturePrivateFileIdentity,
+	createOwnedPrivateTempDirectory,
 	ensurePrivateDirectory,
 	parsePrivateFileIdentity,
+	retireOwnedPrivateTree,
+	sealOwnedPrivateDirectory,
+	type OwnedPrivateDirectory,
 	type PrivatePathIdentity,
 	readOwnedPrivateFile,
 } from "./private-path.ts";
@@ -38,6 +42,7 @@ const GENERATION_TOKEN = /^[0-9a-f]{32}$/;
 const SECRET_TOKEN = /^[0-9a-f]{64}$/;
 const TERMINATION_GRACE_MILLISECONDS = 1_500;
 const MAX_COUNTER_BYTES = 32;
+const MAX_UNIX_SOCKET_PATH_BYTES = 100;
 
 export interface CoordinatorWaitOptions {
 	deadlineMilliseconds?: number;
@@ -113,6 +118,8 @@ interface LocalCoordinator {
 	server: Server;
 	ready: Promise<void>;
 	status: "starting" | "active" | "terminal";
+	socketOwner?: OwnedPrivateDirectory;
+	socketRetirement?: Promise<void>;
 	activeSlots: Map<string, ActiveSlot>;
 	suspendedSlots: Map<string, ActiveSlot>;
 	queue: QueuedSlot[];
@@ -211,7 +218,7 @@ function response(
 ): void {
 	if (socket.destroyed) return;
 	const payload = `${JSON.stringify({ schemaVersion: PROTOCOL_VERSION, ...value })}\n`;
-	if (end) socket.end(payload);
+	if (end) socket.end(payload, () => socket.destroy());
 	else socket.write(payload);
 }
 
@@ -845,6 +852,66 @@ function coordinatorDirectory(): string {
 	return directory;
 }
 
+function coordinatorSocketLocation(
+	directory: string,
+	generation: string,
+): {
+	socketPath: string;
+	socketOwner?: OwnedPrivateDirectory;
+} {
+	const preferred = path.join(
+		directory,
+		`coordinator-${generation.slice(0, 16)}.sock`,
+	);
+	if (
+		process.platform === "win32"
+		|| Buffer.byteLength(preferred) <= MAX_UNIX_SOCKET_PATH_BYTES
+	) {
+		return { socketPath: preferred };
+	}
+	const socketOwner = createOwnedPrivateTempDirectory(
+		path.join("/tmp", "ypi-coordinator."),
+	);
+	return {
+		socketPath: path.join(socketOwner.path, "coordinator.sock"),
+		socketOwner,
+	};
+}
+
+function retireUnusedSocketOwner(owner: OwnedPrivateDirectory | undefined): void {
+	if (!owner) return;
+	retireOwnedPrivateTree(sealOwnedPrivateDirectory(owner, []));
+}
+
+function closeCoordinatorServer(state: LocalCoordinator): Promise<void> {
+	if (state.socketRetirement) return state.socketRetirement;
+	state.socketRetirement = new Promise<void>((resolve, reject) => {
+		const finish = () => {
+			try {
+				retireUnusedSocketOwner(state.socketOwner);
+				state.socketOwner = undefined;
+				resolve();
+			} catch (error) {
+				reject(error);
+			}
+		};
+		try {
+			state.server.close(finish);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ERR_SERVER_NOT_RUNNING") {
+				finish();
+				return;
+			}
+			reject(error);
+		}
+	});
+	// Root-turn replacement is synchronous and cannot await the old generation.
+	// Keep the original promise rejectable for explicit termination callers while
+	// preventing an unhandled rejection in replacement and startup-failure paths.
+	void state.socketRetirement.catch(() => {});
+	return state.socketRetirement;
+}
+
 function startLocalCoordinator(previous?: LocalCoordinator): LocalCoordinator {
 	const directory = coordinatorDirectory();
 	const previousCounter = previous
@@ -860,7 +927,10 @@ function startLocalCoordinator(previous?: LocalCoordinator): LocalCoordinator {
 	const generation = randomBytes(16).toString("hex");
 	const secret = randomBytes(32).toString("hex");
 	const rootProcessIdentity = currentProcessStartIdentity();
-	const socketPath = path.join(directory, `coordinator-${generation.slice(0, 16)}.sock`);
+	const { socketPath, socketOwner } = coordinatorSocketLocation(
+		directory,
+		generation,
+	);
 	const manifestPath = path.join(directory, `authority-${generation}.json`);
 	const manifest: AuthorityManifest = {
 		schemaVersion: PROTOCOL_VERSION,
@@ -872,11 +942,24 @@ function startLocalCoordinator(previous?: LocalCoordinator): LocalCoordinator {
 		createdAtEpochMilliseconds: Date.now(),
 	};
 	const manifestRaw = manifestText(manifest);
-	const manifestAtomicIdentity = atomicCreateFile(
-		manifestPath,
-		manifestRaw,
-		{ mode: 0o600 },
-	);
+	let manifestAtomicIdentity: AtomicFileIdentity;
+	try {
+		manifestAtomicIdentity = atomicCreateFile(
+			manifestPath,
+			manifestRaw,
+			{ mode: 0o600 },
+		);
+	} catch (error) {
+		try {
+			retireUnusedSocketOwner(socketOwner);
+		} catch (cleanupError) {
+			throw new AggregateError(
+				[error, cleanupError],
+				"Tree coordinator manifest creation and socket-directory cleanup failed.",
+			);
+		}
+		throw error;
+	}
 	const manifestIdentity = capturePrivateFileIdentity(manifestPath);
 	const server = createServer();
 	const state: LocalCoordinator = {
@@ -890,6 +973,7 @@ function startLocalCoordinator(previous?: LocalCoordinator): LocalCoordinator {
 		manifest,
 		server,
 		status: "starting" as const,
+		socketOwner,
 		activeSlots: new Map<string, ActiveSlot>(),
 		suspendedSlots: new Map<string, ActiveSlot>(),
 		queue: [],
@@ -920,11 +1004,7 @@ function startLocalCoordinator(previous?: LocalCoordinator): LocalCoordinator {
 					// or was replaced concurrently.
 				}
 			}
-			try {
-				server.close();
-			} catch {
-				// The server may not have reached its listening state.
-			}
+			void closeCoordinatorServer(state);
 			reject(failure);
 		};
 		server.on("error", (error) => {
@@ -950,6 +1030,7 @@ function startLocalCoordinator(previous?: LocalCoordinator): LocalCoordinator {
 					new TreeCoordinatorError("Recursive tree authority failed.", 130),
 				);
 			}
+			void closeCoordinatorServer(state);
 		});
 		try {
 			server.listen(socketPath, () => {
@@ -1012,11 +1093,7 @@ function markLocalCoordinatorTerminal(
 			new TreeCoordinatorError("Recursive tree authority became terminal.", 130),
 		);
 	}
-	try {
-		state.server.close();
-	} catch {
-		// A coordinator terminalized during startup may not be listening yet.
-	}
+	void closeCoordinatorServer(state);
 	const groups = new Map<number, string>();
 	for (const slot of controlledSlots(state)) {
 		if (
@@ -1077,7 +1154,7 @@ export function terminateRootTreeCoordinator(reason: string): Promise<void> {
 		return state?.termination || Promise.resolve();
 	}
 	const groups = markLocalCoordinatorTerminal(state, reason);
-	state.termination = new Promise<void>((resolve) => {
+	const processTermination = new Promise<void>((resolve) => {
 			if (groups.length === 0) {
 			resolve();
 			return;
@@ -1101,8 +1178,12 @@ export function terminateRootTreeCoordinator(reason: string): Promise<void> {
 				}
 			}
 			resolve();
-		}, TERMINATION_GRACE_MILLISECONDS);
+			}, TERMINATION_GRACE_MILLISECONDS);
 	});
+	state.termination = Promise.all([
+		processTermination,
+		closeCoordinatorServer(state),
+	]).then(() => undefined);
 	return state.termination;
 }
 
