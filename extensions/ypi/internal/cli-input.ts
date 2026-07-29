@@ -106,7 +106,7 @@ export async function resolveContextSource(options: ContextSourceOptions = {}): 
 	const shouldReadStdin = explicitStdin || !process.stdin.isTTY;
 	if (shouldReadStdin) {
 		const spooled = await spoolStdin(options);
-		if (spooled.bytes > 0 || explicitStdin) return { contextPath: spooled.path, cleanup: spooled.cleanup };
+		if (spooled.bytes > 0) return { contextPath: spooled.path, cleanup: spooled.cleanup };
 		spooled.cleanup();
 	}
 	if (process.env.CONTEXT && existsSync(process.env.CONTEXT)) {

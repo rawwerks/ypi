@@ -2,15 +2,15 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [extensionPath, fakePi] = process.argv.slice(2);
+const [extensionPath, fakePi, mode] = process.argv.slice(2);
 if (!extensionPath || !fakePi || !existsSync(extensionPath) || !existsSync(fakePi)) {
-	throw new Error("usage: installed_extension_harness.ts EXTENSION_PATH FAKE_PI");
+	throw new Error("usage: installed_extension_harness.ts EXTENSION_PATH FAKE_PI [--discover-local]");
 }
 
 for (const key of Object.keys(process.env)) {
 	if (key.startsWith("RLM_") || key.startsWith("YPI_") || key === "CONTEXT") delete process.env[key];
 }
-process.env.YPI_PI_BIN = fakePi;
+if (mode !== "--discover-local") process.env.YPI_PI_BIN = fakePi;
 process.env.RLM_DEPTH = "0";
 process.env.RLM_MAX_DEPTH = "2";
 process.env.RLM_JSON = "0";
@@ -28,6 +28,11 @@ const pi = {
 const extension = await import(pathToFileURL(extensionPath).href);
 extension.default(pi);
 if (!registeredTool) throw new Error("installed extension did not register rlm_query");
+if (mode === "--discover-local" && process.env.YPI_PI_BIN !== fakePi) {
+	throw new Error(
+		`direct extension did not resolve its package-local Pi: ${process.env.YPI_PI_BIN}`,
+	);
+}
 
 const context = {
 	cwd: path.dirname(fakePi),

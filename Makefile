@@ -22,6 +22,7 @@ test-native:
 test-runtime-contract:
 	@echo "Running recursion runtime contract tests..."
 	@bash tests/test_runtime_contract.sh
+	@bun tests/direct_extension_resolution_harness.ts
 
 test-eval-contracts:
 	@echo "Running evaluation contract tests..."
@@ -106,6 +107,7 @@ test-publication-policy:
 test-config-surface:
 	@echo "Running runtime configuration surface tests..."
 	@bash tests/test_config_surface.sh
+	@bun tests/config_projection_harness.ts
 
 typecheck-runtime:
 	@bunx --bun tsc -p tsconfig.runtime.json

@@ -1,35 +1,70 @@
 #!/usr/bin/env bash
-# rlm_cost — Report cumulative cost for the current recursive tree.
+# rlm_cost — Report observational cost for the current recursive tree.
 # Usage:
-#   rlm_cost          # prints "$0.042381"
-#   rlm_cost --json   # prints {"cost": 0.042381, "tokens": 12450, "calls": 3}
+#   rlm_cost          # prints "$0.042381" (and an incomplete qualifier if needed)
+#   rlm_cost --json   # prints cost, tokens, completed calls, and incompleteness
 
-if [ -z "${RLM_COST_FILE:-}" ] || [ ! -f "${RLM_COST_FILE:-}" ]; then
-    if [ "${1:-}" = "--json" ]; then
-        echo '{"cost": 0, "tokens": 0, "calls": 0}'
+set -euo pipefail
+
+MODE="${1:-}"
+if [ -z "${RLM_COST_FILE:-}" ] || [ ! -f "$RLM_COST_FILE" ]; then
+    if [ "$MODE" = "--json" ]; then
+        echo '{"cost": 0, "tokens": 0, "calls": 0, "incomplete": false, "incomplete_markers": 0}'
     else
-        echo "\$0.000000"
+        echo '$0.000000'
     fi
     exit 0
 fi
 
-python3 -c "
-import json, sys
+# The ledger pathname is argv data, never executable Python source.
+python3 - "$RLM_COST_FILE" "$MODE" <<'PY'
+import json
+import sys
+
+ledger = sys.argv[1]
+json_mode = len(sys.argv) > 2 and sys.argv[2] == "--json"
 total_cost = 0.0
 total_tokens = 0
-calls = 0
-with open('${RLM_COST_FILE}') as f:
-    for line in f:
+completed_calls = 0
+incomplete_markers = 0
+with open(ledger, encoding="utf-8") as stream:
+    for line in stream:
         line = line.strip()
-        if not line: continue
+        if not line:
+            continue
         try:
-            obj = json.loads(line)
-            total_cost += obj.get('cost', 0)
-            total_tokens += obj.get('tokens', 0)
-            calls += 1
-        except: pass
-if '--json' in sys.argv:
-    print(json.dumps({'cost': round(total_cost, 6), 'tokens': total_tokens, 'calls': calls}))
+            record = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(record, dict):
+            continue
+        if record.get("incomplete") is True:
+            incomplete_markers += 1
+            continue
+        if "cost" not in record and "tokens" not in record:
+            continue
+        try:
+            total_cost += float(record.get("cost", 0) or 0)
+            total_tokens += int(record.get("tokens", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            incomplete_markers += 1
+            continue
+        completed_calls += 1
+
+incomplete = incomplete_markers > 0
+if json_mode:
+    print(json.dumps({
+        "cost": round(total_cost, 6),
+        "tokens": total_tokens,
+        "calls": completed_calls,
+        "incomplete": incomplete,
+        "incomplete_markers": incomplete_markers,
+    }))
 else:
-    print(f'\${total_cost:.6f}')
-" "$@"
+    suffix = (
+        f" (incomplete telemetry; {incomplete_markers} incomplete marker"
+        f"{'s' if incomplete_markers != 1 else ''})"
+        if incomplete else ""
+    )
+    print(f"${total_cost:.6f}{suffix}")
+PY

@@ -6,20 +6,20 @@ import { fileURLToPath as fileURLToPath2, pathToFileURL } from "node:url";
 
 // extensions/ypi/env.ts
 import { createHash, randomBytes as randomBytes3 } from "node:crypto";
-import { existsSync as existsSync3, mkdirSync as mkdirSync3 } from "node:fs";
+import { accessSync, constants as constants3, existsSync as existsSync3, mkdirSync as mkdirSync3 } from "node:fs";
 import { tmpdir } from "node:os";
 import path5 from "node:path";
 
 // extensions/ypi/internal/concurrency.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
 import {
-  chmodSync as chmodSync2,
-  lstatSync,
+  chmodSync,
+  lstatSync as lstatSync2,
   mkdirSync,
-  readFileSync,
+  readFileSync as readFileSync2,
   readdirSync,
-  renameSync as renameSync2,
-  rmSync as rmSync2,
+  renameSync,
+  rmSync,
   statSync
 } from "node:fs";
 import path2 from "node:path";
@@ -27,100 +27,324 @@ import path2 from "node:path";
 // extensions/ypi/internal/atomic-file.ts
 import { randomBytes } from "node:crypto";
 import {
-  chmodSync,
   closeSync,
   constants,
-  copyFileSync,
   fchmodSync,
+  fstatSync,
+  ftruncateSync,
   fsyncSync,
   linkSync,
+  lstatSync,
   openSync,
-  renameSync,
-  rmSync,
-  writeFileSync
+  readFileSync,
+  readSync,
+  unlinkSync,
+  writeSync
 } from "node:fs";
 import path from "node:path";
-function syncDirectory(directory) {
-  const descriptor = openSync(directory, constants.O_RDONLY);
+var lifecycleHookForTests;
+function currentUid() {
+  return process.getuid?.();
+}
+function identityOf(metadata) {
+  return {
+    device: metadata.dev.toString(),
+    inode: metadata.ino.toString(),
+    mode: metadata.mode & 511,
+    links: metadata.nlink.toString(),
+    owner: currentUid() === undefined ? undefined : metadata.uid
+  };
+}
+function sameIdentity(left, right, includeLinks = true) {
+  return left.device === right.device && left.inode === right.inode && left.mode === right.mode && left.owner === right.owner && (!includeLinks || left.links === right.links);
+}
+function privateFileIdentity(metadata, mode, label) {
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error(`${label} is not a regular file`);
+  }
+  const uid = currentUid();
+  if (uid !== undefined && metadata.uid !== uid) {
+    throw new Error(`${label} is not owned by the current user`);
+  }
+  if (process.platform !== "win32" && (metadata.mode & 511) !== mode) {
+    throw new Error(`${label} must use mode ${mode.toString(8).padStart(4, "0")}`);
+  }
+  return identityOf(metadata);
+}
+function openHeldDirectory(directory) {
+  const descriptor = openSync(directory, constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0));
   try {
-    fsyncSync(descriptor);
-  } finally {
+    const metadata = fstatSync(descriptor, { bigint: true });
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new Error(`Atomic publication parent is not a directory: ${directory}`);
+    }
+    return {
+      descriptor,
+      path: directory,
+      device: metadata.dev,
+      inode: metadata.ino
+    };
+  } catch (error) {
     closeSync(descriptor);
+    throw error;
   }
 }
-function writeDurableTemporary(target, content, mode) {
+function assertHeldDirectory(directory) {
+  const held = fstatSync(directory.descriptor, { bigint: true });
+  const current = lstatSync(directory.path, { bigint: true });
+  if (!held.isDirectory() || !current.isDirectory() || current.isSymbolicLink() || held.dev !== directory.device || held.ino !== directory.inode || current.dev !== directory.device || current.ino !== directory.inode) {
+    throw new Error(`Atomic publication parent identity changed: ${directory.path}`);
+  }
+}
+function syncHeldDirectory(directory) {
+  assertHeldDirectory(directory);
+  fsyncSync(directory.descriptor);
+  assertHeldDirectory(directory);
+}
+function writeAll(descriptor, content) {
+  const bytes = typeof content === "string" ? Buffer.from(content) : Buffer.from(content);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = writeSync(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (written <= 0)
+      throw new Error("Atomic file write made no progress");
+    offset += written;
+  }
+}
+function assertPathNamesIdentity(candidate, expected, expectedLinks, mode) {
+  const metadata = lstatSync(candidate);
+  const observed = privateFileIdentity(metadata, mode, `Atomic file ${candidate}`);
+  if (!sameIdentity(observed, expected, false) || metadata.nlink !== expectedLinks) {
+    throw new Error(`Atomic file pathname identity changed: ${candidate}`);
+  }
+}
+function prepareTemporary(target, content, mode) {
   const directory = path.dirname(target);
-  const temporary = path.join(directory, `.${path.basename(target)}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`);
+  const temporaryPath = path.join(directory, `.${path.basename(target)}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
   let descriptor;
+  let temporary;
   try {
-    descriptor = openSync(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, mode);
-    fchmodSync(descriptor, mode);
-    writeFileSync(descriptor, content);
-    fsyncSync(descriptor);
-    try {
-      closeSync(descriptor);
-    } finally {
-      descriptor = undefined;
+    descriptor = openSync(temporaryPath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW || 0), mode);
+    const createdMetadata = fstatSync(descriptor);
+    temporary = {
+      descriptor,
+      path: temporaryPath,
+      identity: identityOf(createdMetadata)
+    };
+    if (!createdMetadata.isFile() || createdMetadata.isSymbolicLink() || createdMetadata.nlink !== 1 || currentUid() !== undefined && createdMetadata.uid !== currentUid()) {
+      throw new Error("New atomic temporary is not an owned regular one-link file");
     }
+    fchmodSync(descriptor, mode);
+    const metadata = fstatSync(descriptor);
+    const identity = privateFileIdentity(metadata, mode, "Atomic temporary");
+    temporary.identity = identity;
+    if (metadata.nlink !== 1) {
+      throw new Error("Atomic temporary has an unexpected hard-link count");
+    }
+    writeAll(descriptor, content);
+    fsyncSync(descriptor);
+    assertPathNamesIdentity(temporaryPath, identity, 1, mode);
     return temporary;
   } catch (error) {
-    if (descriptor !== undefined) {
+    if (temporary) {
       try {
-        closeSync(descriptor);
-      } catch {}
+        retireTemporaryAfterIdentityCheck(temporary, temporary.identity.mode, 1);
+      } catch (cleanupError) {
+        if (descriptor !== undefined)
+          closeSync(descriptor);
+        throw combineFailure(error, cleanupError, "Atomic temporary preparation failed and checked pathname retirement was unsafe");
+      }
     }
-    rmSync(temporary, { force: true });
+    if (descriptor !== undefined)
+      closeSync(descriptor);
     throw error;
   }
 }
-function atomicWriteFile(target, content, options = {}) {
-  const directory = path.dirname(target);
-  const temporary = writeDurableTemporary(target, content, options.mode ?? 384);
+function retireTemporaryAfterIdentityCheck(temporary, mode, expectedLinks) {
+  const held = privateFileIdentity(fstatSync(temporary.descriptor), mode, "Held atomic temporary");
+  if (!sameIdentity(held, temporary.identity, false) || held.links !== String(expectedLinks)) {
+    throw new Error(`Atomic temporary inode changed; preserving ${temporary.path}`);
+  }
+  assertPathNamesIdentity(temporary.path, temporary.identity, expectedLinks, mode);
+  unlinkSync(temporary.path);
+}
+function combineFailure(primary, cleanup, label) {
+  const first = primary instanceof Error ? primary : new Error(String(primary));
+  const second = cleanup instanceof Error ? cleanup : new Error(String(cleanup));
+  return new AggregateError([first, second], label, { cause: first });
+}
+function publishPreparedTemporary(target, temporary, directory, mode) {
+  let published = false;
   try {
-    renameSync(temporary, target);
-    syncDirectory(directory);
+    lifecycleHookForTests?.({
+      stage: "temporary-ready",
+      target,
+      temporary: temporary.path,
+      identity: temporary.identity
+    });
+    assertHeldDirectory(directory);
+    assertPathNamesIdentity(temporary.path, temporary.identity, 1, mode);
+    lifecycleHookForTests?.({
+      stage: "before-publish",
+      target,
+      temporary: temporary.path,
+      identity: temporary.identity
+    });
+    assertHeldDirectory(directory);
+    assertPathNamesIdentity(temporary.path, temporary.identity, 1, mode);
+    linkSync(temporary.path, target);
+    published = true;
+    lifecycleHookForTests?.({
+      stage: "after-publish",
+      target,
+      temporary: temporary.path,
+      identity: temporary.identity
+    });
+    assertPathNamesIdentity(temporary.path, temporary.identity, 2, mode);
+    assertPathNamesIdentity(target, temporary.identity, 2, mode);
+    syncHeldDirectory(directory);
+    lifecycleHookForTests?.({
+      stage: "before-temporary-retire",
+      target,
+      temporary: temporary.path,
+      identity: temporary.identity
+    });
+    assertPathNamesIdentity(target, temporary.identity, 2, mode);
+    retireTemporaryAfterIdentityCheck(temporary, mode, 2);
+    assertPathNamesIdentity(target, temporary.identity, 1, mode);
+    syncHeldDirectory(directory);
+    return { ...temporary.identity, links: "1" };
   } catch (error) {
-    rmSync(temporary, { force: true });
+    if (published) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}. Atomic publication may be visible; no further pathname was deleted, and every still-represented target/temporary artifact must be inspected.`, { cause: error });
+    }
+    try {
+      retireTemporaryAfterIdentityCheck(temporary, mode, 1);
+      syncHeldDirectory(directory);
+    } catch (cleanupError) {
+      throw combineFailure(error, cleanupError, "Atomic publication failed and checked temporary retirement was unsafe");
+    }
     throw error;
   }
+}
+function createTemporaryWithContent(target, content, mode) {
+  return prepareTemporary(target, content, mode);
 }
 function atomicCreateFile(target, content, options = {}) {
-  const directory = path.dirname(target);
-  const temporary = writeDurableTemporary(target, content, options.mode ?? 384);
+  const mode = options.mode ?? 384;
+  const directory = openHeldDirectory(path.dirname(target));
+  let temporary;
   try {
-    linkSync(temporary, target);
-    rmSync(temporary);
-    syncDirectory(directory);
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
+    temporary = createTemporaryWithContent(target, content, mode);
+    return publishPreparedTemporary(target, temporary, directory, mode);
+  } finally {
+    if (temporary)
+      closeSync(temporary.descriptor);
+    closeSync(directory.descriptor);
   }
 }
 function atomicCopyFile(source, target, options = {}) {
-  const directory = path.dirname(target);
-  const temporary = path.join(directory, `.${path.basename(target)}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`);
+  if (options.expectedContent !== undefined || options.truncateBeforeWrite !== undefined) {
+    throw new Error("Atomic copy supports only fresh no-clobber destinations");
+  }
+  return atomicCreateFile(target, readFileSync(source), {
+    mode: options.mode ?? 384
+  });
+}
+function readDescriptorFromStart(descriptor) {
+  const size = fstatSync(descriptor).size;
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new Error("Atomic file size exceeds the supported range");
+  }
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < size) {
+    const count = readSync(descriptor, bytes, offset, size - offset, offset);
+    if (count <= 0)
+      throw new Error("Atomic file became shorter during verification");
+    offset += count;
+  }
+  return bytes;
+}
+function bytesEqual(left, right) {
+  return Buffer.from(left).equals(typeof right === "string" ? Buffer.from(right) : Buffer.from(right));
+}
+function atomicConditionalReplaceFile(target, expected, content, options = {}) {
+  const mode = options.mode ?? 384;
+  const directory = openHeldDirectory(path.dirname(target));
   let descriptor;
   try {
-    copyFileSync(source, temporary, constants.COPYFILE_EXCL);
-    chmodSync(temporary, options.mode ?? 384);
-    descriptor = openSync(temporary, constants.O_RDONLY);
-    fsyncSync(descriptor);
-    closeSync(descriptor);
-    descriptor = undefined;
-    renameSync(temporary, target);
-    syncDirectory(directory);
-  } catch (error) {
-    if (descriptor !== undefined) {
-      try {
-        closeSync(descriptor);
-      } catch {}
+    descriptor = openSync(target, constants.O_RDWR | (constants.O_NOFOLLOW || 0));
+    const openedMetadata = fstatSync(descriptor);
+    const opened = privateFileIdentity(openedMetadata, mode, "Atomic replacement target");
+    if (openedMetadata.nlink !== 1 || !sameIdentity(opened, expected)) {
+      throw new Error(`Atomic replacement target identity changed: ${target}`);
     }
-    rmSync(temporary, { force: true });
-    throw error;
+    assertPathNamesIdentity(target, expected, 1, mode);
+    if (options.expectedContent !== undefined && !bytesEqual(readDescriptorFromStart(descriptor), options.expectedContent)) {
+      throw new Error(`Atomic replacement target contents changed: ${target}`);
+    }
+    lifecycleHookForTests?.({
+      stage: "before-existing-commit",
+      target,
+      identity: expected
+    });
+    assertHeldDirectory(directory);
+    assertPathNamesIdentity(target, expected, 1, mode);
+    const heldBefore = privateFileIdentity(fstatSync(descriptor), mode, "Held atomic replacement target");
+    if (!sameIdentity(heldBefore, expected)) {
+      throw new Error(`Held atomic replacement target changed: ${target}`);
+    }
+    if (options.expectedContent !== undefined && !bytesEqual(readDescriptorFromStart(descriptor), options.expectedContent)) {
+      throw new Error(`Atomic replacement target contents changed before commit: ${target}`);
+    }
+    const contentBytes = typeof content === "string" ? Buffer.from(content) : Buffer.from(content);
+    if (options.truncateBeforeWrite !== false)
+      ftruncateSync(descriptor, 0);
+    writeAll(descriptor, contentBytes);
+    ftruncateSync(descriptor, contentBytes.length);
+    fsyncSync(descriptor);
+    lifecycleHookForTests?.({
+      stage: "after-existing-commit",
+      target,
+      identity: expected
+    });
+    assertPathNamesIdentity(target, expected, 1, mode);
+    const heldAfter = privateFileIdentity(fstatSync(descriptor), mode, "Committed atomic replacement target");
+    if (!sameIdentity(heldAfter, expected)) {
+      throw new Error(`Atomic replacement target changed during commit: ${target}`);
+    }
+    if (!bytesEqual(readDescriptorFromStart(descriptor), content)) {
+      throw new Error(`Atomic replacement target verification failed: ${target}`);
+    }
+    syncHeldDirectory(directory);
+    return heldAfter;
+  } finally {
+    if (descriptor !== undefined)
+      closeSync(descriptor);
+    closeSync(directory.descriptor);
   }
 }
+function atomicWriteFile(target, content, options = {}) {
+  let metadata;
+  try {
+    metadata = lstatSync(target);
+  } catch (error) {
+    if (error.code !== "ENOENT")
+      throw error;
+    if (options.expectedContent !== undefined) {
+      throw new Error(`Atomic exact-existing target disappeared: ${target}`);
+    }
+    return atomicCreateFile(target, content, options);
+  }
+  const expected = privateFileIdentity(metadata, options.mode ?? 384, "Atomic write target");
+  if (metadata.nlink !== 1) {
+    throw new Error(`Atomic write target has an unexpected hard-link count: ${target}`);
+  }
+  return atomicConditionalReplaceFile(target, expected, content, options);
+}
 function atomicWriteJson(target, value) {
-  atomicWriteFile(target, `${JSON.stringify(value, null, 2)}
+  return atomicWriteFile(target, `${JSON.stringify(value, null, 2)}
 `);
 }
 
@@ -176,7 +400,7 @@ function registryRoot() {
 }
 function pathExistsWithoutFollowing(candidate) {
   try {
-    lstatSync(candidate);
+    lstatSync2(candidate);
     return true;
   } catch (error) {
     if (error.code === "ENOENT")
@@ -185,7 +409,7 @@ function pathExistsWithoutFollowing(candidate) {
   }
 }
 function assertOwnedDirectory(candidate) {
-  const metadata = lstatSync(candidate);
+  const metadata = lstatSync2(candidate);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw controlError(`Recursive concurrency path is not an owned directory: ${candidate}`);
   }
@@ -208,10 +432,10 @@ function ensureOwnedDirectory(candidate) {
   }
   assertOwnedDirectory(candidate);
   if (created)
-    chmodSync2(candidate, 448);
+    chmodSync(candidate, 448);
 }
 function readRegularJson(candidate) {
-  const metadata = lstatSync(candidate);
+  const metadata = lstatSync2(candidate);
   if (!metadata.isFile() || metadata.isSymbolicLink()) {
     throw controlError(`Recursive concurrency metadata is not a regular file: ${candidate}`);
   }
@@ -225,7 +449,7 @@ function readRegularJson(candidate) {
   if (process.platform !== "win32" && (metadata.mode & 511) !== PRIVATE_FILE_MODE) {
     throw controlError(`Recursive concurrency metadata must use mode 0600: ${candidate}`);
   }
-  return JSON.parse(readFileSync(candidate, "utf8"));
+  return JSON.parse(readFileSync2(candidate, "utf8"));
 }
 function parseSlotRecord(value, expectedToken) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -275,7 +499,7 @@ function removeSlotDirectory(root, token) {
   if (record.token !== token) {
     throw controlError(`Recursive concurrency slot ownership changed at ${directory}.`);
   }
-  rmSync2(directory, { recursive: true });
+  rmSync(directory, { recursive: true });
 }
 function lockOwnerAlive(lockPath) {
   const ownerPath = path2.join(lockPath, "owner.json");
@@ -298,7 +522,7 @@ function recoverStaleLock(lockPath) {
   const age = Date.now() - statSync(lockPath).mtimeMs;
   if (age < OWNERLESS_LOCK_GRACE_MILLISECONDS)
     return false;
-  rmSync2(lockPath, { recursive: true });
+  rmSync(lockPath, { recursive: true });
   return true;
 }
 function assertWaitAllowed(options, subject) {
@@ -332,7 +556,7 @@ async function acquireRegistryLock(root, options) {
     try {
       mkdirSync(lockPath, { mode: 448 });
       created = true;
-      chmodSync2(lockPath, 448);
+      chmodSync(lockPath, 448);
       const token = randomBytes2(16).toString("hex");
       atomicWriteJson(path2.join(lockPath, "owner.json"), {
         schemaVersion: 1,
@@ -345,13 +569,13 @@ async function acquireRegistryLock(root, options) {
           try {
             const owner = readRegularJson(path2.join(lockPath, "owner.json"));
             if (owner.token === token)
-              rmSync2(lockPath, { recursive: true });
+              rmSync(lockPath, { recursive: true });
           } catch {}
         }
       };
     } catch (error) {
       if (created) {
-        rmSync2(lockPath, { recursive: true, force: true });
+        rmSync(lockPath, { recursive: true, force: true });
         throw error;
       }
       if (error.code !== "EEXIST")
@@ -385,7 +609,7 @@ function scanLiveSlots(root) {
       if (processIsAlive(Number(staged[2]))) {
         throw controlError(`Recursive concurrency registry contains live incomplete state: ${candidate}`);
       }
-      rmSync2(candidate, { recursive: true });
+      rmSync(candidate, { recursive: true });
       continue;
     }
     const match = SLOT_DIRECTORY.exec(entry.name);
@@ -408,7 +632,7 @@ function createSlot(root, token, childPid) {
   }
   const staging = path2.join(root, `.slot-${token}-${process.pid}-${randomBytes2(4).toString("hex")}.tmp`);
   mkdirSync(staging, { mode: 448 });
-  chmodSync2(staging, 448);
+  chmodSync(staging, 448);
   const record = {
     schemaVersion: 1,
     token,
@@ -418,9 +642,9 @@ function createSlot(root, token, childPid) {
   };
   try {
     atomicWriteJson(path2.join(staging, "lease.json"), record);
-    renameSync2(staging, directory);
+    renameSync(staging, directory);
   } catch (error) {
-    rmSync2(staging, { recursive: true, force: true });
+    rmSync(staging, { recursive: true, force: true });
     throw error;
   }
   let releasePromise;
@@ -540,18 +764,18 @@ import {
   closeSync as closeSync2,
   constants as constants2,
   fchmodSync as fchmodSync2,
-  fstatSync,
-  ftruncateSync,
+  fstatSync as fstatSync2,
+  ftruncateSync as ftruncateSync2,
   fsyncSync as fsyncSync2,
-  lstatSync as lstatSync2,
+  lstatSync as lstatSync3,
   mkdirSync as mkdirSync2,
   mkdtempSync,
   openSync as openSync2,
-  readFileSync as readFileSync2,
+  readFileSync as readFileSync3,
   readdirSync as readdirSync2,
   rmdirSync,
-  unlinkSync,
-  writeFileSync as writeFileSync2
+  unlinkSync as unlinkSync2,
+  writeFileSync
 } from "node:fs";
 import path3 from "node:path";
 var PRIVATE_DIRECTORY_MODE2 = 448;
@@ -578,7 +802,7 @@ function parsePrivateFileIdentity(raw) {
 function controlError2(message) {
   return new Error(message);
 }
-function identityOf(metadata) {
+function identityOf2(metadata) {
   const kind = metadata.isDirectory() ? "directory" : metadata.isFile() ? "file" : undefined;
   if (!kind || metadata.isSymbolicLink()) {
     throw controlError2("Private runtime path is not a regular file or directory");
@@ -591,7 +815,7 @@ function identityOf(metadata) {
     links: metadata.nlink.toString()
   };
 }
-function sameIdentity(left, right) {
+function sameIdentity2(left, right) {
   return left.device === right.device && left.inode === right.inode && left.kind === right.kind && left.mode === right.mode && (left.kind === "directory" || left.links === right.links);
 }
 function assertCurrentUser(metadata, candidate) {
@@ -601,9 +825,9 @@ function assertCurrentUser(metadata, candidate) {
   }
 }
 function inspectPrivatePath(candidate) {
-  const metadata = lstatSync2(candidate, { bigint: true });
+  const metadata = lstatSync3(candidate, { bigint: true });
   assertCurrentUser(metadata, candidate);
-  const identity = identityOf(metadata);
+  const identity = identityOf2(metadata);
   const expectedMode = identity.kind === "directory" ? PRIVATE_DIRECTORY_MODE2 : PRIVATE_FILE_MODE2;
   if (process.platform !== "win32" && identity.mode !== expectedMode) {
     throw controlError2(`Private runtime ${identity.kind} must use mode ${expectedMode.toString(8)}: ${candidate}`);
@@ -615,7 +839,7 @@ function inspectPrivatePath(candidate) {
 }
 function assertPrivatePathIdentity(candidate, expected) {
   const observed = inspectPrivatePath(candidate);
-  if (!sameIdentity(observed, expected)) {
+  if (!sameIdentity2(observed, expected)) {
     throw controlError2(`Private runtime path identity changed: ${candidate}`);
   }
   return observed;
@@ -647,11 +871,11 @@ function readOwnedPrivateFileBytes(candidate, expected) {
   assertPrivatePathIdentity(candidate, expected);
   const descriptor = openSync2(candidate, constants2.O_RDONLY | (constants2.O_NOFOLLOW || 0));
   try {
-    const opened = identityOf(fstatSync(descriptor, { bigint: true }));
-    if (!sameIdentity(opened, expected)) {
+    const opened = identityOf2(fstatSync2(descriptor, { bigint: true }));
+    if (!sameIdentity2(opened, expected)) {
       throw controlError2(`Private runtime read target identity changed: ${candidate}`);
     }
-    const value = readFileSync2(descriptor);
+    const value = readFileSync3(descriptor);
     assertPrivatePathIdentity(candidate, expected);
     return value;
   } finally {
@@ -665,14 +889,14 @@ function appendOwnedPrivateFile(candidate, expected, content) {
   assertPrivatePathIdentity(candidate, expected);
   const descriptor = openSync2(candidate, constants2.O_WRONLY | constants2.O_APPEND | (constants2.O_NOFOLLOW || 0));
   try {
-    const opened = identityOf(fstatSync(descriptor, { bigint: true }));
-    if (!sameIdentity(opened, expected)) {
+    const opened = identityOf2(fstatSync2(descriptor, { bigint: true }));
+    if (!sameIdentity2(opened, expected)) {
       throw controlError2(`Private runtime append target identity changed: ${candidate}`);
     }
-    writeFileSync2(descriptor, content);
+    writeFileSync(descriptor, content);
     fsyncSync2(descriptor);
-    const written = identityOf(fstatSync(descriptor, { bigint: true }));
-    if (!sameIdentity(written, expected)) {
+    const written = identityOf2(fstatSync2(descriptor, { bigint: true }));
+    if (!sameIdentity2(written, expected)) {
       throw controlError2(`Private runtime append target changed during write: ${candidate}`);
     }
     assertPrivatePathIdentity(candidate, expected);
@@ -681,7 +905,7 @@ function appendOwnedPrivateFile(candidate, expected, content) {
   }
 }
 function assertPrivateDirectory(candidate) {
-  const metadata = lstatSync2(candidate);
+  const metadata = lstatSync3(candidate);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw controlError2(`Private runtime path is not an owned directory: ${candidate}`);
   }
@@ -696,7 +920,7 @@ function assertPrivateDirectory(candidate) {
 function secureCreatedDirectory(candidate) {
   const descriptor = openSync2(candidate, constants2.O_RDONLY | (constants2.O_DIRECTORY || 0) | (constants2.O_NOFOLLOW || 0));
   try {
-    const before = fstatSync(descriptor, { bigint: true });
+    const before = fstatSync2(descriptor, { bigint: true });
     if (!before.isDirectory()) {
       throw controlError2(`New private runtime path is not a directory: ${candidate}`);
     }
@@ -705,8 +929,8 @@ function secureCreatedDirectory(candidate) {
       throw controlError2(`New private runtime directory is owned by another user: ${candidate}`);
     }
     fchmodSync2(descriptor, PRIVATE_DIRECTORY_MODE2);
-    const held = fstatSync(descriptor, { bigint: true });
-    const current = lstatSync2(candidate, { bigint: true });
+    const held = fstatSync2(descriptor, { bigint: true });
+    const current = lstatSync3(candidate, { bigint: true });
     if (current.isSymbolicLink() || !current.isDirectory() || current.dev !== held.dev || current.ino !== held.ino) {
       throw controlError2(`Private runtime directory identity changed during creation: ${candidate}`);
     }
@@ -750,14 +974,14 @@ function createOwnedPrivateFile(candidate, content) {
   try {
     descriptor = withPrivateUmask(() => openSync2(candidate, constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | (constants2.O_NOFOLLOW || 0), PRIVATE_FILE_MODE2));
     fchmodSync2(descriptor, PRIVATE_FILE_MODE2);
-    writeFileSync2(descriptor, content);
+    writeFileSync(descriptor, content);
     fsyncSync2(descriptor);
-    const held = fstatSync(descriptor, { bigint: true });
+    const held = fstatSync2(descriptor, { bigint: true });
     const uid = process.getuid?.();
     if (!held.isFile() || held.nlink !== 1n || uid !== undefined && Number(held.uid) !== uid) {
       throw controlError2(`New private runtime path is not an owned regular file: ${candidate}`);
     }
-    const current = lstatSync2(candidate, { bigint: true });
+    const current = lstatSync3(candidate, { bigint: true });
     if (current.isSymbolicLink() || !current.isFile() || current.dev !== held.dev || current.ino !== held.ino) {
       throw controlError2(`Private runtime file identity changed during creation: ${candidate}`);
     }
@@ -814,7 +1038,7 @@ function assertOwnedPrivateTree(tree) {
   }
   for (const [relativePath, expected] of tree.entries) {
     const current = observed.get(relativePath);
-    if (!current || !sameIdentity(current, expected)) {
+    if (!current || !sameIdentity2(current, expected)) {
       throw controlError2(`Private runtime tree entry changed: ${path3.join(tree.path, relativePath)}`);
     }
   }
@@ -838,7 +1062,7 @@ function retireOwnedPrivateTree(tree, options = {}) {
     if (expected.kind === "directory")
       rmdirSync(candidate);
     else
-      unlinkSync(candidate);
+      unlinkSync2(candidate);
   }
   assertPrivatePathIdentity(tree.path, tree.identity);
   rmdirSync(tree.path);
@@ -851,15 +1075,15 @@ function writeOwnedPrivateFile(candidate, expected, content, options = {}) {
   options.beforeOpen?.();
   const descriptor = openSync2(candidate, constants2.O_WRONLY | (constants2.O_NOFOLLOW || 0));
   try {
-    const opened = identityOf(fstatSync(descriptor, { bigint: true }));
-    if (!sameIdentity(opened, expected)) {
+    const opened = identityOf2(fstatSync2(descriptor, { bigint: true }));
+    if (!sameIdentity2(opened, expected)) {
       throw controlError2(`Private runtime write target identity changed: ${candidate}`);
     }
-    ftruncateSync(descriptor, 0);
-    writeFileSync2(descriptor, content);
+    ftruncateSync2(descriptor, 0);
+    writeFileSync(descriptor, content);
     fsyncSync2(descriptor);
-    const afterWrite = identityOf(fstatSync(descriptor, { bigint: true }));
-    if (!sameIdentity(afterWrite, expected)) {
+    const afterWrite = identityOf2(fstatSync2(descriptor, { bigint: true }));
+    if (!sameIdentity2(afterWrite, expected)) {
       throw controlError2(`Private runtime write target changed during write: ${candidate}`);
     }
     assertPrivatePathIdentity(candidate, expected);
@@ -875,29 +1099,29 @@ function appendOwnedPrivateFileTransaction(candidate, expected, observedBytes, c
   options.beforeOpen?.();
   const descriptor = openSync2(candidate, constants2.O_RDWR | constants2.O_APPEND | (constants2.O_NOFOLLOW || 0));
   try {
-    const openedMetadata = fstatSync(descriptor, { bigint: true });
-    const opened = identityOf(openedMetadata);
-    if (!sameIdentity(opened, expected)) {
+    const openedMetadata = fstatSync2(descriptor, { bigint: true });
+    const opened = identityOf2(openedMetadata);
+    if (!sameIdentity2(opened, expected)) {
       throw controlError2(`Private runtime journal identity changed: ${candidate}`);
     }
     if (openedMetadata.size !== BigInt(observedBytes)) {
       throw controlError2(`Private runtime journal size changed: ${candidate}`);
     }
     if (committedBytes < observedBytes) {
-      ftruncateSync(descriptor, committedBytes);
+      ftruncateSync2(descriptor, committedBytes);
       fsyncSync2(descriptor);
       options.afterTailTrim?.();
     }
-    writeFileSync2(descriptor, payload);
+    writeFileSync(descriptor, payload);
     fsyncSync2(descriptor);
     options.afterPayloadSync?.();
-    writeFileSync2(descriptor, commit);
+    writeFileSync(descriptor, commit);
     options.afterCommitWrite?.();
     fsyncSync2(descriptor);
-    const writtenMetadata = fstatSync(descriptor, { bigint: true });
-    const written = identityOf(writtenMetadata);
+    const writtenMetadata = fstatSync2(descriptor, { bigint: true });
+    const written = identityOf2(writtenMetadata);
     const expectedSize = BigInt(committedBytes + Buffer.byteLength(payload) + Buffer.byteLength(commit));
-    if (!sameIdentity(written, expected) || writtenMetadata.size !== expectedSize) {
+    if (!sameIdentity2(written, expected) || writtenMetadata.size !== expectedSize) {
       throw controlError2(`Private runtime journal changed during append: ${candidate}`);
     }
     assertPrivatePathIdentity(candidate, expected);
@@ -918,26 +1142,26 @@ function ensurePrivateAppendFile(candidate) {
         throw error;
       descriptor = openSync2(candidate, constants2.O_APPEND | constants2.O_WRONLY | (constants2.O_NOFOLLOW || 0));
     }
-    const before = fstatSync(descriptor, { bigint: true });
+    const before = fstatSync2(descriptor, { bigint: true });
     const uid = process.getuid?.();
     if (!before.isFile() || before.nlink !== 1n || uid !== undefined && Number(before.uid) !== uid) {
       throw controlError2(`Private append path is not an owned regular file: ${candidate}`);
     }
-    const currentBeforeMode = lstatSync2(candidate, { bigint: true });
+    const currentBeforeMode = lstatSync3(candidate, { bigint: true });
     if (currentBeforeMode.isSymbolicLink() || !currentBeforeMode.isFile() || currentBeforeMode.dev !== before.dev || currentBeforeMode.ino !== before.ino) {
       throw controlError2(`Private append-file identity changed during validation: ${candidate}`);
     }
     if (created)
       fchmodSync2(descriptor, PRIVATE_FILE_MODE2);
-    const held = fstatSync(descriptor, { bigint: true });
-    const current = lstatSync2(candidate, { bigint: true });
+    const held = fstatSync2(descriptor, { bigint: true });
+    const current = lstatSync3(candidate, { bigint: true });
     if (current.isSymbolicLink() || !current.isFile() || current.dev !== held.dev || current.ino !== held.ino) {
       throw controlError2(`Private append-file identity changed during validation: ${candidate}`);
     }
     if (process.platform !== "win32" && (Number(held.mode & 0o777n) !== PRIVATE_FILE_MODE2 || Number(current.mode & 0o777n) !== PRIVATE_FILE_MODE2)) {
       throw controlError2(`Private append file must use mode 0600: ${candidate}`);
     }
-    identity = identityOf(held);
+    identity = identityOf2(held);
   } finally {
     if (descriptor !== undefined)
       closeSync2(descriptor);
@@ -1047,10 +1271,19 @@ function shellHelperEnabled(runtime) {
 }
 function safeTraceId(traceId) {
   const sanitized = traceId.replace(/[^a-zA-Z0-9._-]/g, "_");
-  if (sanitized.length <= 64)
-    return sanitized;
-  const digest = createHash("sha256").update(sanitized).digest("hex").slice(0, 32);
-  return `${sanitized.slice(0, 31)}-${digest}`;
+  if (sanitized === traceId && traceId.length <= 64)
+    return traceId;
+  const digest = createHash("sha256").update(traceId).digest("hex").slice(0, 32);
+  return `${sanitized.slice(0, 31).padEnd(31, "_")}-${digest}`;
+}
+function ensurePiExecutable(runtime) {
+  if (process.env.YPI_PI_BIN)
+    return;
+  const candidate = path5.join(runtime.root, "node_modules", ".bin", "pi");
+  try {
+    accessSync(candidate, constants3.X_OK);
+    process.env.YPI_PI_BIN = candidate;
+  } catch {}
 }
 function ensureRuntimeStatePaths() {
   const missing = [
@@ -1081,6 +1314,7 @@ function ensurePrivateTelemetryFile(variable) {
 }
 function ensureEnvironment(runtime, ctx, pi) {
   process.env.YPI_NODE_BIN ||= process.execPath;
+  ensurePiExecutable(runtime);
   process.env.RLM_DEPTH = process.env.RLM_DEPTH || "0";
   process.env.RLM_MAX_DEPTH = process.env.RLM_MAX_DEPTH || String(DEFAULT_MAX_DEPTH);
   process.env.RLM_MAX_CALLS = process.env.RLM_MAX_CALLS || String(DEFAULT_MAX_CALLS);
@@ -1127,7 +1361,7 @@ function ensureEnvironment(runtime, ctx, pi) {
 }
 
 // extensions/ypi/guardrails.ts
-import { constants as constants3, existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync3, rmSync as rmSync3 } from "node:fs";
+import { constants as constants4, existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync4, rmSync as rmSync2 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import path6 from "node:path";
 var LOCK_RETRY_MS = 10;
@@ -1145,7 +1379,7 @@ function exactNonNegativeInteger2(name, value) {
   return parsed;
 }
 function readCounter(filePath) {
-  const raw = existsSync4(filePath) ? readFileSync3(filePath, "utf8").trim() || "0" : process.env.RLM_CALL_COUNT || "0";
+  const raw = existsSync4(filePath) ? readFileSync4(filePath, "utf8").trim() || "0" : process.env.RLM_CALL_COUNT || "0";
   return exactNonNegativeInteger2("RLM_CALL_COUNT/counter", raw);
 }
 async function allocateCallCount(deadlineMilliseconds) {
@@ -1170,7 +1404,7 @@ async function allocateCallCount(deadlineMilliseconds) {
         process.env.RLM_CALL_COUNT = String(next);
         return next;
       } finally {
-        rmSync3(lockDir, { recursive: true, force: true });
+        rmSync2(lockDir, { recursive: true, force: true });
       }
     } catch (error) {
       const code = error.code;
@@ -1232,7 +1466,7 @@ function appendIncompleteCostMarker(reason) {
 // extensions/ypi/internal/cli-async.ts
 import { spawn } from "node:child_process";
 import { randomBytes as randomBytes4 } from "node:crypto";
-import { existsSync as existsSync5, readFileSync as readFileSync4, rmSync as rmSync4 } from "node:fs";
+import { existsSync as existsSync5, readFileSync as readFileSync5, rmSync as rmSync3 } from "node:fs";
 import { tmpdir as tmpdir3 } from "node:os";
 import path7 from "node:path";
 class AsyncAdmissionError extends Error {
@@ -1297,7 +1531,7 @@ function createAsyncJob(input) {
       treeStartTimeSeconds: input.treeStartTimeSeconds
     };
   } catch (error) {
-    rmSync4(jobDir, { recursive: true, force: true });
+    rmSync3(jobDir, { recursive: true, force: true });
     throw error;
   }
 }
@@ -1314,7 +1548,7 @@ function launchAsyncWorker(job, cliPath) {
   return child.pid || 0;
 }
 function readAsyncJob(jobPath) {
-  const job = JSON.parse(readFileSync4(jobPath, "utf8"));
+  const job = JSON.parse(readFileSync5(jobPath, "utf8"));
   if (path7.resolve(job.jobPath) !== path7.resolve(jobPath))
     throw new Error("Async job identity mismatch");
   for (const candidate of [job.outputPath, job.sentinelPath, job.admissionPath, job.childPidPath, job.ownedContextPath, job.parentSessionSnapshot, job.rootPromptSnapshot]) {
@@ -1341,7 +1575,7 @@ function signalProcessGroup(pid, signal) {
 }
 function cancelAsyncJob(job, workerPid, signal = "SIGTERM") {
   if (existsSync5(job.childPidPath)) {
-    const childPid = Number(readFileSync4(job.childPidPath, "utf8").trim());
+    const childPid = Number(readFileSync5(job.childPidPath, "utf8").trim());
     if (Number.isSafeInteger(childPid) && childPid > 0)
       signalProcessGroup(childPid, signal);
   }
@@ -1363,7 +1597,7 @@ function discardAsyncJob(job, workerPid = 0) {
       process.kill(target, "SIGTERM");
     } catch {}
   }
-  rmSync4(path7.dirname(job.jobPath), { recursive: true, force: true });
+  rmSync3(path7.dirname(job.jobPath), { recursive: true, force: true });
 }
 async function waitForAsyncAdmission(job, timeoutMilliseconds = 30000, signal) {
   const deadline = Date.now() + timeoutMilliseconds;
@@ -1373,10 +1607,10 @@ async function waitForAsyncAdmission(job, timeoutMilliseconds = 30000, signal) {
     if (existsSync5(job.admissionPath))
       return;
     if (existsSync5(job.sentinelPath)) {
-      const code = Number(readFileSync4(job.sentinelPath, "utf8").trim() || "1");
+      const code = Number(readFileSync5(job.sentinelPath, "utf8").trim() || "1");
       if (code === 0)
         return;
-      throw new AsyncAdmissionError(readFileSync4(job.outputPath, "utf8").trim() || `Async recursion request rejected with exit ${code}`, code);
+      throw new AsyncAdmissionError(readFileSync5(job.outputPath, "utf8").trim() || `Async recursion request rejected with exit ${code}`, code);
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
@@ -1388,18 +1622,18 @@ function finishAsyncJob(job, code, output) {
   atomicWriteFile(job.outputPath, output);
   atomicCreateFile(job.sentinelPath, `${code}
 `);
-  rmSync4(job.jobPath, { force: true });
+  rmSync3(job.jobPath, { force: true });
   if (job.ownedContextPath)
-    rmSync4(job.ownedContextPath, { force: true });
+    rmSync3(job.ownedContextPath, { force: true });
   if (job.parentSessionSnapshot)
-    rmSync4(job.parentSessionSnapshot, { force: true });
+    rmSync3(job.parentSessionSnapshot, { force: true });
   if (job.rootPromptSnapshot)
-    rmSync4(job.rootPromptSnapshot, { force: true });
-  rmSync4(job.childPidPath, { force: true });
+    rmSync3(job.rootPromptSnapshot, { force: true });
+  rmSync3(job.childPidPath, { force: true });
 }
 
 // extensions/ypi/internal/cli-input.ts
-import { closeSync as closeSync3, existsSync as existsSync6, fchmodSync as fchmodSync3, openSync as openSync3, writeSync } from "node:fs";
+import { closeSync as closeSync3, existsSync as existsSync6, fchmodSync as fchmodSync3, openSync as openSync3, writeSync as writeSync2 } from "node:fs";
 import { tmpdir as tmpdir4 } from "node:os";
 import path8 from "node:path";
 class CliInputError extends Error {
@@ -1437,7 +1671,7 @@ async function spoolStdin(options) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       let offset = 0;
       while (offset < buffer.byteLength)
-        offset += writeSync(descriptor, buffer, offset);
+        offset += writeSync2(descriptor, buffer, offset);
       bytes += buffer.byteLength;
     }
     if (timedOut)
@@ -1483,7 +1717,7 @@ async function resolveContextSource(options = {}) {
   const shouldReadStdin = explicitStdin || !process.stdin.isTTY;
   if (shouldReadStdin) {
     const spooled = await spoolStdin(options);
-    if (spooled.bytes > 0 || explicitStdin)
+    if (spooled.bytes > 0)
       return { contextPath: spooled.path, cleanup: spooled.cleanup };
     spooled.cleanup();
   }
@@ -1542,6 +1776,32 @@ function removePathEntry(currentPath, entry) {
     return currentPath;
   return currentPath.split(path9.delimiter).filter((candidate) => candidate && candidate !== entry).join(path9.delimiter);
 }
+var CHILD_PLATFORM_ENV_KEYS = [
+  "HOME",
+  "PATH",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "SHELL",
+  "USER",
+  "LOGNAME"
+];
+var CHILD_PI_ENV_KEYS = [
+  "PI_CODING_AGENT_DIR",
+  "PI_CODING_AGENT_SESSION_DIR",
+  "PI_PACKAGE_DIR",
+  "PI_OFFLINE",
+  "PI_TELEMETRY",
+  "PI_SHARE_VIEWER_URL"
+];
+var CHILD_RUNTIME_WILDCARD_PREFIXES = ["RLM_", "YPI_"];
+var CHILD_RUNTIME_FIXED_KEYS = ["CONTEXT", "PI_TRACE_FILE"];
+var CHILD_RUNTIME_EXCLUDED_KEYS = [
+  "RLM_BUDGET",
+  "YPI_EXPLICIT_RELEASE_REQUEST",
+  "YPI_EXPLICIT_NON_OWNED_REMOTE",
+  "YPI_ALLOW_LOCAL_REMOTE_FOR_TESTS"
+];
 var PROVIDER_ENV_KEYS = {
   anthropic: ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"],
   "github-copilot": ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
@@ -1576,7 +1836,7 @@ var PROVIDER_ENV_KEYS = {
   "xiaomi-token-plan-cn": ["XIAOMI_TOKEN_PLAN_CN_API_KEY"],
   "xiaomi-token-plan-ams": ["XIAOMI_TOKEN_PLAN_AMS_API_KEY"],
   "xiaomi-token-plan-sgp": ["XIAOMI_TOKEN_PLAN_SGP_API_KEY"],
-  "amazon-bedrock": ["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_WEB_IDENTITY_TOKEN_FILE"],
+  "amazon-bedrock": ["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_WEB_IDENTITY_TOKEN_FILE"],
   ollama: ["OLLAMA_API_KEY"],
   portkey: ["PORTKEY_API_KEY"]
 };
@@ -1621,6 +1881,7 @@ var PROVIDER_ENV_ALLOWLIST = new Set([
   "AWS_PROFILE",
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
   "AWS_BEARER_TOKEN_BEDROCK",
   "AWS_REGION",
   "GOOGLE_CLOUD_API_KEY",
@@ -1653,11 +1914,11 @@ function retainSelectedProviderEnvironment(env, selectedProvider) {
 }
 function buildChildEnvironment(baseEnv, overrides, runtime, childDepth) {
   const env = {};
-  for (const key of ["HOME", "PATH", "TMPDIR", "TEMP", "TMP", "SHELL", "USER", "LOGNAME"]) {
+  for (const key of CHILD_PLATFORM_ENV_KEYS) {
     if (baseEnv[key])
       env[key] = baseEnv[key];
   }
-  for (const key of ["PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR", "PI_PACKAGE_DIR", "PI_OFFLINE", "PI_TELEMETRY", "PI_SHARE_VIEWER_URL"]) {
+  for (const key of CHILD_PI_ENV_KEYS) {
     if (baseEnv[key])
       env[key] = baseEnv[key];
   }
@@ -1666,9 +1927,9 @@ function buildChildEnvironment(baseEnv, overrides, runtime, childDepth) {
       env[key] = baseEnv[key];
   }
   for (const [key, value] of Object.entries(baseEnv)) {
-    if (key === "RLM_BUDGET" || key.startsWith("YPI_EXPLICIT_") || key === "YPI_ALLOW_LOCAL_REMOTE_FOR_TESTS")
+    if (CHILD_RUNTIME_EXCLUDED_KEYS.includes(key) || key.startsWith("YPI_EXPLICIT_"))
       continue;
-    if (key.startsWith("RLM_") || key.startsWith("YPI_") || key === "CONTEXT" || key === "PI_TRACE_FILE")
+    if (CHILD_RUNTIME_WILDCARD_PREFIXES.some((prefix) => key.startsWith(prefix)) || CHILD_RUNTIME_FIXED_KEYS.includes(key))
       env[key] = value;
   }
   Object.assign(env, overrides);
@@ -2057,7 +2318,7 @@ function runChildProcess(options) {
 import {
   existsSync as existsSync9,
   mkdirSync as mkdirSync5,
-  readFileSync as readFileSync8
+  readFileSync as readFileSync9
 } from "node:fs";
 import { homedir, tmpdir as tmpdir6 } from "node:os";
 import path23 from "node:path";
@@ -2094,17 +2355,17 @@ asks for it or the task context is absent or explicitly insufficient.
 import { randomBytes as randomBytes5 } from "node:crypto";
 import {
   closeSync as closeSync5,
-  constants as constants5,
+  constants as constants6,
   fchmodSync as fchmodSync4,
-  fstatSync as fstatSync3,
+  fstatSync as fstatSync4,
   fsyncSync as fsyncSync3,
   linkSync as linkSync2,
-  lstatSync as lstatSync4,
+  lstatSync as lstatSync5,
   openSync as openSync5,
-  readFileSync as readFileSync5,
-  readSync as readSync2,
-  unlinkSync as unlinkSync2,
-  writeSync as writeSync2
+  readFileSync as readFileSync6,
+  readSync as readSync3,
+  unlinkSync as unlinkSync3,
+  writeSync as writeSync3
 } from "node:fs";
 import path11 from "node:path";
 
@@ -2112,11 +2373,11 @@ import path11 from "node:path";
 import { createHash as createHash2 } from "node:crypto";
 import {
   closeSync as closeSync4,
-  constants as constants4,
-  fstatSync as fstatSync2,
-  lstatSync as lstatSync3,
+  constants as constants5,
+  fstatSync as fstatSync3,
+  lstatSync as lstatSync4,
   openSync as openSync4,
-  readSync,
+  readSync as readSync2,
   realpathSync as realpathSync2
 } from "node:fs";
 import path10 from "node:path";
@@ -2129,21 +2390,21 @@ function proofError(message) {
   error.exitCode = 1;
   return error;
 }
-function currentUid() {
+function currentUid2() {
   return typeof process.getuid === "function" ? process.getuid() : undefined;
 }
 function numericMode(mode) {
   return Number(mode & 0o777n);
 }
-function identityOf2(metadata) {
+function identityOf3(metadata) {
   return {
     device: metadata.dev.toString(),
     inode: metadata.ino.toString(),
-    owner: currentUid() === undefined ? undefined : Number(metadata.uid)
+    owner: currentUid2() === undefined ? undefined : Number(metadata.uid)
   };
 }
 function assertOwner(owner, label) {
-  const uid = currentUid();
+  const uid = currentUid2();
   if (uid !== undefined && Number(owner) !== uid) {
     throw proofError(`${label} is not owned by the current uid.`);
   }
@@ -2173,9 +2434,9 @@ function openSecureDirectory(directoryPath) {
   if (resolved !== normalized) {
     throw proofError(`RLM_REQUIRE_TRANSCRIPTS=1 rejects symlinked session-directory ancestry: ${normalized}`);
   }
-  const descriptor = openSync4(normalized, constants4.O_RDONLY | (constants4.O_DIRECTORY || 0) | (constants4.O_NOFOLLOW || 0));
+  const descriptor = openSync4(normalized, constants5.O_RDONLY | (constants5.O_DIRECTORY || 0) | (constants5.O_NOFOLLOW || 0));
   try {
-    const metadata = fstatSync2(descriptor, { bigint: true });
+    const metadata = fstatSync3(descriptor, { bigint: true });
     if (!metadata.isDirectory()) {
       throw proofError(`Required transcript session path is not a directory: ${normalized}`);
     }
@@ -2184,7 +2445,7 @@ function openSecureDirectory(directoryPath) {
       throw proofError(`RLM_REQUIRE_TRANSCRIPTS=1 requires session-directory mode 0700: ${normalized}`);
     }
     return {
-      ...identityOf2(metadata),
+      ...identityOf3(metadata),
       descriptor,
       path: normalized
     };
@@ -2194,8 +2455,8 @@ function openSecureDirectory(directoryPath) {
   }
 }
 function assertDirectoryIdentity(directory) {
-  const descriptorMetadata = fstatSync2(directory.descriptor, { bigint: true });
-  const pathMetadata = lstatSync3(directory.path, { bigint: true });
+  const descriptorMetadata = fstatSync3(directory.descriptor, { bigint: true });
+  const pathMetadata = lstatSync4(directory.path, { bigint: true });
   if (!descriptorMetadata.isDirectory() || !pathMetadata.isDirectory()) {
     throw proofError("Required transcript session directory stopped being a directory.");
   }
@@ -2219,7 +2480,7 @@ function digestRegion(descriptor, start, length) {
   let offset = 0;
   while (offset < length) {
     const requested = Math.min(buffer.length, length - offset);
-    const bytesRead = readSync(descriptor, buffer, 0, requested, start + offset);
+    const bytesRead = readSync2(descriptor, buffer, 0, requested, start + offset);
     if (bytesRead <= 0) {
       throw proofError("Required transcript became shorter during verification.");
     }
@@ -2265,7 +2526,7 @@ function validateJsonlRegion(descriptor, start, length, label, requireMessage, m
   try {
     while (offset < length) {
       const requested = Math.min(buffer.length, length - offset);
-      const bytesRead = readSync(descriptor, buffer, 0, requested, start + offset);
+      const bytesRead = readSync2(descriptor, buffer, 0, requested, start + offset);
       if (bytesRead <= 0) {
         throw proofError(`${label} became shorter during JSONL verification.`);
       }
@@ -2320,13 +2581,13 @@ function sameFileIdentity(left, right) {
   return left.dev === right.dev && left.ino === right.ino;
 }
 function retireHeldTemporary(temporary, descriptor, expectedLinks) {
-  const held = fstatSync3(descriptor, { bigint: true });
-  const current = lstatSync4(temporary, { bigint: true });
+  const held = fstatSync4(descriptor, { bigint: true });
+  const current = lstatSync5(temporary, { bigint: true });
   const uid = process.getuid?.();
   if (!held.isFile() || held.isSymbolicLink() || !current.isFile() || current.isSymbolicLink() || !sameFileIdentity(held, current) || held.nlink !== expectedLinks || current.nlink !== expectedLinks || uid !== undefined && (Number(held.uid) !== uid || Number(current.uid) !== uid) || process.platform !== "win32" && (Number(held.mode & 0o777n) !== PRIVATE_FILE_MODE3 || Number(current.mode & 0o777n) !== PRIVATE_FILE_MODE3)) {
     throw proofError("Required transcript temporary identity changed; preserving uncertain evidence.");
   }
-  unlinkSync2(temporary);
+  unlinkSync3(temporary);
 }
 function combinePublicationAndCleanupError(publicationError, cleanupError) {
   return new AggregateError([publicationError, cleanupError], "Required transcript publication failed and its temporary could not be retired safely.", { cause: publicationError });
@@ -2342,10 +2603,10 @@ function openSecureForkSource(sourcePath) {
   if (!path11.isAbsolute(sourcePath)) {
     throw proofError(`RLM_REQUIRE_TRANSCRIPTS=1 requires an absolute fork source path: ${sourcePath}`);
   }
-  const descriptor = openSync5(sourcePath, constants5.O_RDONLY | (constants5.O_NOFOLLOW || 0));
+  const descriptor = openSync5(sourcePath, constants6.O_RDONLY | (constants6.O_NOFOLLOW || 0));
   try {
-    const metadata = fstatSync3(descriptor, { bigint: true });
-    const pathMetadata = lstatSync4(sourcePath, { bigint: true });
+    const metadata = fstatSync4(descriptor, { bigint: true });
+    const pathMetadata = lstatSync5(sourcePath, { bigint: true });
     assertPrivateRegularFile(metadata, "Required fork source");
     if (pathMetadata.isSymbolicLink() || !pathMetadata.isFile() || pathMetadata.dev !== metadata.dev || pathMetadata.ino !== metadata.ino) {
       throw proofError("Required fork source identity changed during admission.");
@@ -2375,13 +2636,13 @@ function copyForkBaseline(source, targetDescriptor) {
   let offset = 0;
   while (offset < source.bytes) {
     const requested = Math.min(buffer.length, source.bytes - offset);
-    const bytesRead = readSync2(source.descriptor, buffer, 0, requested, offset);
+    const bytesRead = readSync3(source.descriptor, buffer, 0, requested, offset);
     if (bytesRead <= 0) {
       throw proofError("Required fork source changed while it was being copied.");
     }
     let written = 0;
     while (written < bytesRead) {
-      const bytesWritten = writeSync2(targetDescriptor, buffer, written, bytesRead - written, offset + written);
+      const bytesWritten = writeSync3(targetDescriptor, buffer, written, bytesRead - written, offset + written);
       if (bytesWritten <= 0) {
         throw proofError("Required fork transcript copy made no progress.");
       }
@@ -2406,7 +2667,7 @@ function createHeldTranscript(childSession, directory, baselineSource) {
   let descriptor;
   let temporaryRetired = false;
   try {
-    descriptor = openSync5(temporary, constants5.O_CREAT | constants5.O_EXCL | constants5.O_RDWR | (constants5.O_NOFOLLOW || 0), PRIVATE_FILE_MODE3);
+    descriptor = openSync5(temporary, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW || 0), PRIVATE_FILE_MODE3);
     fchmodSync4(descriptor, PRIVATE_FILE_MODE3);
     const baseline = copyForkBaseline(baselineSource, descriptor);
     fsyncSync3(descriptor);
@@ -2417,13 +2678,13 @@ function createHeldTranscript(childSession, directory, baselineSource) {
     temporaryRetired = true;
     transcriptLifecycleHookForTests?.("after-temporary-retire", temporary, childSession);
     fsyncSync3(directory.descriptor);
-    const metadata = fstatSync3(descriptor, { bigint: true });
-    const pathMetadata = lstatSync4(childSession, { bigint: true });
+    const metadata = fstatSync4(descriptor, { bigint: true });
+    const pathMetadata = lstatSync5(childSession, { bigint: true });
     assertPrivateRegularFile(metadata, "Required child transcript");
     if (pathMetadata.isSymbolicLink() || pathMetadata.dev !== metadata.dev || pathMetadata.ino !== metadata.ino) {
       throw proofError("Required child transcript identity changed during creation.");
     }
-    const identity = identityOf2(metadata);
+    const identity = identityOf3(metadata);
     return {
       ...identity,
       baselineBytes: baseline.bytes,
@@ -2481,8 +2742,8 @@ function prepareTranscriptProof(input) {
 }
 function assertTranscriptIdentity(lease) {
   assertDirectoryIdentity(lease.directory);
-  const descriptorMetadata = fstatSync3(lease.descriptor, { bigint: true });
-  const pathMetadata = lstatSync4(lease.childSession, { bigint: true });
+  const descriptorMetadata = fstatSync4(lease.descriptor, { bigint: true });
+  const pathMetadata = lstatSync5(lease.childSession, { bigint: true });
   assertPrivateRegularFile(descriptorMetadata, "Required child transcript");
   if (pathMetadata.isSymbolicLink() || !pathMetadata.isFile() || pathMetadata.dev !== descriptorMetadata.dev || pathMetadata.ino !== descriptorMetadata.ino || lease.device !== descriptorMetadata.dev.toString() || lease.inode !== descriptorMetadata.ino.toString()) {
     throw proofError("Required child transcript pathname no longer names the leased inode.");
@@ -2542,10 +2803,10 @@ function closeTranscriptProof(lease) {
 import { spawnSync } from "node:child_process";
 import {
   existsSync as existsSync8,
-  lstatSync as lstatSync7,
-  readFileSync as readFileSync7,
+  lstatSync as lstatSync8,
+  readFileSync as readFileSync8,
   readdirSync as readdirSync6,
-  rmSync as rmSync5
+  rmSync as rmSync4
 } from "node:fs";
 import { tmpdir as tmpdir5 } from "node:os";
 import path22 from "node:path";
@@ -2620,9 +2881,9 @@ function scopesOverlap(left, right) {
 import { randomBytes as randomBytes6 } from "node:crypto";
 import {
   existsSync as existsSync7,
-  lstatSync as lstatSync5,
+  lstatSync as lstatSync6,
   readdirSync as readdirSync4,
-  renameSync as renameSync3
+  renameSync as renameSync2
 } from "node:fs";
 import path18 from "node:path";
 
@@ -2722,7 +2983,7 @@ import path14 from "node:path";
 var fatalUtf8 = new TextDecoder("utf-8", { fatal: true });
 var commitPrefix = Buffer.from("commit\t");
 var commitPattern = /^commit\t(0|[1-9][0-9]*)\t(0|[1-9][0-9]*)\t([a-f0-9]{64})$/;
-function sameIdentity2(left, right) {
+function sameIdentity3(left, right) {
   return left.device === right.device && left.inode === right.inode && left.kind === right.kind && left.mode === right.mode && left.links === right.links;
 }
 function recordPayload(record) {
@@ -2737,7 +2998,7 @@ function commitRecord(record, payload) {
 `, "ascii");
 }
 function assertImmutableLeaseState(previous, current) {
-  if (!sameIdentity2(previous.leaseDirectoryIdentity, current.leaseDirectoryIdentity) || !sameIdentity2(previous.leaseFileIdentity, current.leaseFileIdentity) || previous.ownerPid !== current.ownerPid || previous.createdAtEpochSeconds !== current.createdAtEpochSeconds || previous.root !== current.root || previous.commonGitDir !== current.commonGitDir || previous.baselineHead !== current.baselineHead || previous.attemptRef !== current.attemptRef || previous.scope.join("\x00") !== current.scope.join("\x00")) {
+  if (!sameIdentity3(previous.leaseDirectoryIdentity, current.leaseDirectoryIdentity) || !sameIdentity3(previous.leaseFileIdentity, current.leaseFileIdentity) || previous.ownerPid !== current.ownerPid || previous.createdAtEpochSeconds !== current.createdAtEpochSeconds || previous.root !== current.root || previous.commonGitDir !== current.commonGitDir || previous.baselineHead !== current.baselineHead || previous.attemptRef !== current.attemptRef || previous.scope.join("\x00") !== current.scope.join("\x00")) {
     throw new Error(`Implementer lease ${current.token} changed immutable state`);
   }
 }
@@ -2801,7 +3062,7 @@ function readLeaseJournal(leaseDirectory, expectedToken, commonGitDir) {
     if (revision !== expectedRevision || current.revision !== revision) {
       throw new Error(`Implementer lease ${expectedToken} has a non-contiguous committed revision`);
     }
-    if (!sameIdentity2(observedIdentity, current.leaseFileIdentity)) {
+    if (!sameIdentity3(observedIdentity, current.leaseFileIdentity)) {
       throw new Error("implementer lease record identity changed");
     }
     if (record)
@@ -2885,11 +3146,11 @@ function directoryIdentity(value) {
   const identity = value;
   return identity.kind === "directory" && typeof identity.device === "string" && /^\d+$/.test(identity.device) && typeof identity.inode === "string" && /^\d+$/.test(identity.inode) && identity.mode === 448 && typeof identity.links === "string" && /^\d+$/.test(identity.links);
 }
-function sameIdentity3(left, right) {
+function sameIdentity4(left, right) {
   return left.device === right.device && left.inode === right.inode && left.kind === right.kind && left.mode === right.mode && left.links === right.links;
 }
 function sameOwner(left, right) {
-  return left.schemaVersion === right.schemaVersion && left.token === right.token && left.pid === right.pid && left.createdAtEpochSeconds === right.createdAtEpochSeconds && sameIdentity3(left.directoryIdentity, right.directoryIdentity) && sameIdentity3(left.ownerFileIdentity, right.ownerFileIdentity);
+  return left.schemaVersion === right.schemaVersion && left.token === right.token && left.pid === right.pid && left.createdAtEpochSeconds === right.createdAtEpochSeconds && sameIdentity4(left.directoryIdentity, right.directoryIdentity) && sameIdentity4(left.ownerFileIdentity, right.ownerFileIdentity);
 }
 function createImplementerMutex(lockPath, mutexToken, createdAtEpochSeconds = Math.floor(Date.now() / 1000)) {
   if (!token(mutexToken))
@@ -3001,7 +3262,7 @@ var MAX_PARALLEL_IMPLEMENTERS = 3;
 var DEFAULT_LOCK_TIMEOUT_MS = 5000;
 var WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(4));
 function assertRegistryDirectory(directory) {
-  const metadata = lstatSync5(directory);
+  const metadata = lstatSync6(directory);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error(`Implementer registry path ${directory} is not an owned directory. Inspect it before admitting writers.`);
   }
@@ -3131,7 +3392,7 @@ function removeImplementerLeaseRecord(commonGitDir, token2) {
   const record = readImplementerLeaseFile(active, token2, commonGitDir);
   ensureRegistryDirectory(paths.retired);
   const retired = path18.join(paths.retired, `.lease-${token2}-${process.pid}-${randomBytes6(4).toString("hex")}.done`);
-  renameSync3(active, retired);
+  renameSync2(active, retired);
   retireImplementerLeaseOwnedTree(record, retired);
 }
 function reserveImplementerLease(commonGitDir, root, baselineHead, scope, deadlineMilliseconds, onReserved, onStaged) {
@@ -3172,16 +3433,16 @@ function reserveImplementerLease(commonGitDir, root, baselineHead, scope, deadli
 // extensions/ypi/internal/workspace-container.ts
 import { randomBytes as randomBytes7 } from "node:crypto";
 import {
-  constants as constants6,
-  lstatSync as lstatSync6,
+  constants as constants7,
+  lstatSync as lstatSync7,
   openSync as openSync6,
   closeSync as closeSync6,
-  fstatSync as fstatSync4,
-  readFileSync as readFileSync6,
+  fstatSync as fstatSync5,
+  readFileSync as readFileSync7,
   readdirSync as readdirSync5,
-  renameSync as renameSync4,
+  renameSync as renameSync3,
   rmdirSync as rmdirSync2,
-  unlinkSync as unlinkSync3
+  unlinkSync as unlinkSync4
 } from "node:fs";
 import path19 from "node:path";
 function identity(metadata) {
@@ -3190,23 +3451,23 @@ function identity(metadata) {
     inode: metadata.ino.toString()
   };
 }
-function sameIdentity4(metadata, device, inode) {
+function sameIdentity5(metadata, device, inode) {
   return metadata.dev.toString() === device && metadata.ino.toString() === inode;
 }
 function lstatBigInt(candidate) {
-  return lstatSync6(candidate, { bigint: true });
+  return lstatSync7(candidate, { bigint: true });
 }
 function readOwnerMarker(candidate) {
   let descriptor;
   try {
-    descriptor = openSync6(candidate, constants6.O_RDONLY | constants6.O_NOFOLLOW);
-    const metadata = fstatSync4(descriptor, { bigint: true });
+    descriptor = openSync6(candidate, constants7.O_RDONLY | constants7.O_NOFOLLOW);
+    const metadata = fstatSync5(descriptor, { bigint: true });
     if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1n) {
       throw new Error("workspace ownership marker is not a singly linked regular file");
     }
     return {
       metadata,
-      value: Buffer.from(readFileSync6(descriptor))
+      value: Buffer.from(readFileSync7(descriptor))
     };
   } finally {
     if (descriptor !== undefined)
@@ -3273,11 +3534,11 @@ function verifyWorkspaceContainer(record, worktreeState) {
     throw new Error("workspace filesystem identity is unavailable; preserve it for explicit inspection");
   }
   const container = lstatBigInt(location.container);
-  if (!container.isDirectory() || container.isSymbolicLink() || !sameIdentity4(container, expected.containerDevice, expected.containerInode)) {
+  if (!container.isDirectory() || container.isSymbolicLink() || !sameIdentity5(container, expected.containerDevice, expected.containerInode)) {
     throw new Error("workspace container identity changed; preserve it for explicit inspection");
   }
   const owner = readOwnerMarker(path19.join(location.container, "owner"));
-  if (!expected.ownerDevice || !expected.ownerInode || !sameIdentity4(owner.metadata, expected.ownerDevice, expected.ownerInode) || !owner.value.equals(Buffer.from(`${record.token}
+  if (!expected.ownerDevice || !expected.ownerInode || !sameIdentity5(owner.metadata, expected.ownerDevice, expected.ownerInode) || !owner.value.equals(Buffer.from(`${record.token}
 `))) {
     throw new Error("workspace ownership marker identity changed; preserve it for explicit inspection");
   }
@@ -3295,7 +3556,7 @@ function verifyWorkspaceContainer(record, worktreeState) {
     throw new Error("recorded checkout still exists; preserve the workspace for explicit inspection");
   }
   if (worktree) {
-    if (!worktree.isDirectory() || worktree.isSymbolicLink() || worktreeState !== "capture" && (!expected.worktreeDevice || !expected.worktreeInode || !sameIdentity4(worktree, expected.worktreeDevice, expected.worktreeInode))) {
+    if (!worktree.isDirectory() || worktree.isSymbolicLink() || worktreeState !== "capture" && (!expected.worktreeDevice || !expected.worktreeInode || !sameIdentity5(worktree, expected.worktreeDevice, expected.worktreeInode))) {
       throw new Error("recorded checkout identity changed; preserve it for explicit inspection");
     }
   }
@@ -3309,7 +3570,7 @@ function retireEmptyWorkspaceContainer(record, options = {}) {
   }
   const assertExactContainer = () => {
     const metadata = lstatBigInt(container);
-    if (!metadata.isDirectory() || metadata.isSymbolicLink() || !sameIdentity4(metadata, expected.containerDevice, expected.containerInode)) {
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || !sameIdentity5(metadata, expected.containerDevice, expected.containerInode)) {
       throw new Error("workspace container identity changed; preserve it for explicit inspection");
     }
   };
@@ -3331,7 +3592,7 @@ function retireEmptyWorkspaceContainer(record, options = {}) {
     options.afterFinalVerification?.();
     const ownerPath = path19.join(container, "owner");
     retiredOwnerPath = path19.join(container, `.owner-retired-${randomBytes7(16).toString("hex")}`);
-    renameSync4(ownerPath, retiredOwnerPath);
+    renameSync3(ownerPath, retiredOwnerPath);
     options.afterQuarantine?.(retiredOwnerPath);
   } else if (entries.length === 1 && retiredNames.length === 1) {
     retiredOwnerPath = path19.join(container, retiredNames[0]);
@@ -3339,7 +3600,7 @@ function retireEmptyWorkspaceContainer(record, options = {}) {
     throw new Error("workspace container has unexpected content; preserve it for explicit inspection");
   }
   const retiredOwner = readOwnerMarker(retiredOwnerPath);
-  if (!expected.ownerDevice || !expected.ownerInode || !sameIdentity4(retiredOwner.metadata, expected.ownerDevice, expected.ownerInode) || !retiredOwner.value.equals(Buffer.from(`${record.token}
+  if (!expected.ownerDevice || !expected.ownerInode || !sameIdentity5(retiredOwner.metadata, expected.ownerDevice, expected.ownerInode) || !retiredOwner.value.equals(Buffer.from(`${record.token}
 `))) {
     throw new Error(`workspace ownership marker changed during retirement; preserve it at ${retiredOwnerPath}`);
   }
@@ -3348,7 +3609,7 @@ function retireEmptyWorkspaceContainer(record, options = {}) {
   if (remaining.length !== 1 || remaining[0] !== path19.basename(retiredOwnerPath)) {
     throw new Error(`workspace container changed during retirement; preserve it at ${container}`);
   }
-  unlinkSync3(retiredOwnerPath);
+  unlinkSync4(retiredOwnerPath);
   options.afterQuarantineUnlink?.();
   assertExactContainer();
   if (readdirSync5(container).length !== 0) {
@@ -3909,10 +4170,10 @@ function bestEffortDiscardSetupWorktree(root, record) {
       }
     }
     try {
-      const container = lstatSync7(record.worktreeContainer);
+      const container = lstatSync8(record.worktreeContainer);
       const markerPath = path22.join(record.worktreeContainer, "owner");
-      const marker = lstatSync7(markerPath);
-      if (!container.isDirectory() || container.isSymbolicLink() || path22.basename(record.worktreeContainer) !== `ypi_ws_${record.token}` || record.worktreeRoot !== path22.join(record.worktreeContainer, "checkout") || !marker.isFile() || marker.isSymbolicLink() || readFileSync7(markerPath, "utf8").trim() !== record.token) {
+      const marker = lstatSync8(markerPath);
+      if (!container.isDirectory() || container.isSymbolicLink() || path22.basename(record.worktreeContainer) !== `ypi_ws_${record.token}` || record.worktreeRoot !== path22.join(record.worktreeContainer, "checkout") || !marker.isFile() || marker.isSymbolicLink() || readFileSync8(markerPath, "utf8").trim() !== record.token) {
         throw new Error("workspace ownership marker does not prove setup-cleanup authority");
       }
     } catch {
@@ -3932,15 +4193,15 @@ function bestEffortDiscardSetupWorktree(root, record) {
         if (entries.length !== 1 || entries[0] !== "owner") {
           return "unmarked workspace container has unexpected content";
         }
-        const marker = lstatSync7(markerPath);
-        const actual = readFileSync7(markerPath);
+        const marker = lstatSync8(markerPath);
+        const actual = readFileSync8(markerPath);
         const expected = Buffer.from(`${record.token}
 `);
         if (!marker.isFile() || marker.isSymbolicLink() || actual.length > expected.length || !expected.subarray(0, actual.length).equals(actual)) {
           return "workspace ownership marker is invalid";
         }
-        rmSync5(markerPath);
-        rmSync5(record.worktreeContainer);
+        rmSync4(markerPath);
+        rmSync4(record.worktreeContainer);
         return;
       } catch {
         return "workspace ownership marker is unavailable";
@@ -4242,7 +4503,7 @@ function createStandaloneSystemPrompt(input, promptFile, contextFile) {
     promptPath: promptFile,
     rootPromptPath: input.rootPromptPath || promptFile
   });
-  atomicCreateFile(outputPath, `${readFileSync8(input.systemPromptPath, "utf8")}${section}`);
+  atomicCreateFile(outputPath, `${readFileSync9(input.systemPromptPath, "utf8")}${section}`);
   return {
     filePath: outputPath,
     tree: sealOwnedPrivateDirectory(owner, ["system-prompt.md"])
@@ -4328,7 +4589,7 @@ function projectSelectedProviderAuth(agentDir, selectedProvider) {
     return false;
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync8(sourceAuthPath, "utf8"));
+    parsed = JSON.parse(readFileSync9(sourceAuthPath, "utf8"));
   } catch {
     throw new Error("Full child isolation could not project selected provider authentication: parent auth.json is malformed");
   }

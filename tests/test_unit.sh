@@ -211,6 +211,19 @@ OUTPUT=$(
 )
 assert_contains "T4: parent context inherited" "dogs" "$OUTPUT"
 
+# T4b: an explicit marker controls whether stdin is read, not whether an empty
+# read suppresses the inherited context fallback.
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/parent_ctx.txt" \
+    RLM_STDIN=1 \
+    RLM_DEPTH=0 \
+    RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test-provider \
+    RLM_MODEL=test-model \
+    rlm_query "What animal?" </dev/null
+)
+assert_contains "T4b: explicit empty stdin falls back to parent context" "dogs" "$OUTPUT"
+
 # ─── Test Group: Depth Handling ───────────────────────────────────────────
 
 echo ""

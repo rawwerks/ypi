@@ -16,6 +16,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_CONFIG="$PROJECT_DIR/extensions/ypi/internal/child-config.ts"
 CLI_ADAPTER="$PROJECT_DIR/extensions/ypi/cli.ts"
 PI_MONO="$PROJECT_DIR/pi-mono"
+INSTALLED_PI_AI="$PROJECT_DIR/node_modules/@earendil-works/pi-ai/dist"
 
 PASS=0
 FAIL=0
@@ -80,6 +81,19 @@ NODE
     fi
 else
     echo "  - C1 skipped (pi-mono env-api-keys.ts not present)"
+fi
+
+# Bedrock's installed implementation consumes the temporary-credential session
+# token outside the older env-api-keys map.
+BEDROCK_SRC="$INSTALLED_PI_AI/api/bedrock-converse-stream.js"
+if [ -f "$BEDROCK_SRC" ] && grep -q '"AWS_SESSION_TOKEN"' "$BEDROCK_SRC"; then
+    if printf '%s\n' "$NATIVE_KEYS" | grep -qx AWS_SESSION_TOKEN; then
+        pass "C2: allowlist covers installed Bedrock temporary session credentials"
+    else
+        fail "C2: allowlist covers installed Bedrock temporary session credentials" "AWS_SESSION_TOKEN missing"
+    fi
+else
+    fail "C2: installed Bedrock credential source is inspectable" "missing AWS_SESSION_TOKEN consumer"
 fi
 
 echo ""

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -71,9 +71,20 @@ export function shellHelperEnabled(runtime: YpiRuntime): boolean {
 // could escape the intended directory before the value is used as a path component.
 export function safeTraceId(traceId: string): string {
 	const sanitized = traceId.replace(/[^a-zA-Z0-9._-]/g, "_");
-	if (sanitized.length <= 64) return sanitized;
-	const digest = createHash("sha256").update(sanitized).digest("hex").slice(0, 32);
-	return `${sanitized.slice(0, 31)}-${digest}`;
+	if (sanitized === traceId && traceId.length <= 64) return traceId;
+	const digest = createHash("sha256").update(traceId).digest("hex").slice(0, 32);
+	return `${sanitized.slice(0, 31).padEnd(31, "_")}-${digest}`;
+}
+
+function ensurePiExecutable(runtime: YpiRuntime): void {
+	if (process.env.YPI_PI_BIN) return;
+	const candidate = path.join(runtime.root, "node_modules", ".bin", "pi");
+	try {
+		accessSync(candidate, constants.X_OK);
+		process.env.YPI_PI_BIN = candidate;
+	} catch {
+		// Source distributions may intentionally rely on a compatible Pi on PATH.
+	}
 }
 
 function ensureRuntimeStatePaths(): void {
@@ -113,6 +124,7 @@ function ensurePrivateTelemetryFile(variable: "PI_TRACE_FILE" | "RLM_COST_FILE")
 
 export function ensureEnvironment(runtime: YpiRuntime, ctx?: ExtensionContext, pi?: ExtensionAPI): void {
 	process.env.YPI_NODE_BIN ||= process.execPath;
+	ensurePiExecutable(runtime);
 	process.env.RLM_DEPTH = process.env.RLM_DEPTH || "0";
 	process.env.RLM_MAX_DEPTH = process.env.RLM_MAX_DEPTH || String(DEFAULT_MAX_DEPTH);
 	process.env.RLM_MAX_CALLS = process.env.RLM_MAX_CALLS || String(DEFAULT_MAX_CALLS);

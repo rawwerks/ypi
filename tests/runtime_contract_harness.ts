@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ensureEnvironment } from "../extensions/ypi/env.ts";
+import { ensureEnvironment, safeTraceId } from "../extensions/ypi/env.ts";
 import recursiveExtension from "../extensions/recursive.ts";
 import { registerNativeRlmQueryTool } from "../extensions/ypi/native-tool.ts";
 import { buildYpiPrompt } from "../extensions/ypi/prompt.ts";
@@ -239,6 +239,19 @@ async function run(): Promise<void> {
 	clearRuntimeEnv();
 	ensureEnvironment(runtime, extensionContext(), pi);
 	equal("extension pins Node-backed adapters to the running executable", process.env.YPI_NODE_BIN, process.execPath);
+	equal(
+		"direct extension use resolves the repository-local Pi executable",
+		process.env.YPI_PI_BIN,
+		path.join(projectRoot, "node_modules", ".bin", "pi"),
+	);
+	const hostileTraceA = "short/hostile";
+	const hostileTraceB = "short?hostile";
+	record(
+		safeTraceId(hostileTraceA) !== safeTraceId(hostileTraceB)
+			&& safeTraceId(hostileTraceA).length === 64
+			&& safeTraceId("ordinary-safe.id") === "ordinary-safe.id",
+		"trace identity hashes raw hostile input while preserving short safe IDs",
+	);
 	equal("default max depth remains empirically bounded", process.env.RLM_MAX_DEPTH, "3");
 	equal("default total call backstop leaves long-tree headroom", process.env.RLM_MAX_CALLS, "65536");
 	equal("default active child concurrency is bounded", process.env.RLM_MAX_CONCURRENT_CALLS, "3");

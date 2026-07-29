@@ -1338,6 +1338,17 @@ OUTPUT=$(
 assert_contains "G46: rlm_cost json has cost" "0.3" "$OUTPUT"
 assert_contains "G46: rlm_cost json has tokens" "3000" "$OUTPUT"
 assert_contains "G46: rlm_cost json has calls" '"calls": 2' "$OUTPUT"
+
+HOSTILE_COST_FILE="$TEST_TMP/cost ledger 'quoted
+name.jsonl"
+printf '%s\n' \
+    '{"cost":0.25,"tokens":25}' \
+    '{"incomplete":true,"reason":"cancelled"}' \
+    > "$HOSTILE_COST_FILE"
+HOSTILE_COST_OUTPUT=$(RLM_COST_FILE="$HOSTILE_COST_FILE" "$PROJECT_DIR/rlm_cost" --json)
+assert_contains "G46a: hostile cost filename remains argv data" '"cost": 0.25' "$HOSTILE_COST_OUTPUT"
+assert_contains "G46a: incomplete records are not completed calls" '"calls": 1' "$HOSTILE_COST_OUTPUT"
+assert_contains "G46a: incomplete telemetry remains explicit" '"incomplete_markers": 1' "$HOSTILE_COST_OUTPUT"
 rm -f "$COST_FILE"
 
 # G46b: retained JSON parser emits one newline-delimited cost record per call.
@@ -1452,8 +1463,10 @@ TRACEPI
         RLM_TRACE_ID="../../etc/evil" \
         rlm_query "Sanitize trace?" 2>&1 || true
     )
+    SANITIZED_TRACE=$(printf '%s\n' "$OUTPUT" | sed -n 's/^RLM_TRACE_ID=//p' | head -1)
     assert_contains "G52: hostile trace id is sanitized for the child" "RLM_TRACE_ID=.._.._etc_evil" "$OUTPUT"
-    assert_contains "G52: session file uses the sanitized trace id" ".._.._etc_evil_d1_c1.jsonl" "$OUTPUT"
+    assert_eq "G52: hostile trace id uses the bounded identity mapping" "64" "${#SANITIZED_TRACE}"
+    assert_contains "G52: session file uses the exact mapped trace id" "${SANITIZED_TRACE}_d1_c1.jsonl" "$OUTPUT"
     assert_not_contains "G52: session file cannot traverse out of the dir" "/etc/evil_d1" "$OUTPUT"
 else
     skip "G52: trace id sanitization" "safe_trace_id not implemented yet"

@@ -1,6 +1,14 @@
 {
   "schema_version": 1,
   "owner": "config/runtime-env.json",
+  "child_environment_projection": {
+    "fixed_platform": ["HOME", "PATH", "TMPDIR", "TEMP", "TMP", "SHELL", "USER", "LOGNAME"],
+    "fixed_pi": ["PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR", "PI_PACKAGE_DIR", "PI_OFFLINE", "PI_TELEMETRY", "PI_SHARE_VIEWER_URL"],
+    "wildcard_prefixes": ["RLM_", "YPI_"],
+    "fixed_runtime": ["CONTEXT", "PI_TRACE_FILE"],
+    "excluded": ["RLM_BUDGET", "YPI_EXPLICIT_RELEASE_REQUEST", "YPI_EXPLICIT_NON_OWNED_REMOTE", "YPI_ALLOW_LOCAL_REMOTE_FOR_TESTS"],
+    "excluded_prefixes": ["YPI_EXPLICIT_"]
+  },
   "variables": [
     { "name": "CONTEXT", "visibility": "public" },
     { "name": "PI_TRACE_FILE", "visibility": "public" },
