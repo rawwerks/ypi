@@ -29,7 +29,10 @@ import {
 	readImplementerLeaseFile,
 } from "../extensions/ypi/internal/implementer-lease-file.ts";
 import { parseImplementerRecoveryArguments } from "../extensions/ypi/internal/implementer-recovery/cli.ts";
-import { createRecoveryGit } from "../extensions/ypi/internal/implementer-recovery/git.ts";
+import {
+	createRecoveryGit,
+	decodeNulPaths,
+} from "../extensions/ypi/internal/implementer-recovery/git.ts";
 import { leaseNeedsRecovery } from "../extensions/ypi/internal/implementer-recovery/service.ts";
 import { acquireWorkspace } from "../extensions/ypi/internal/workspace-policy.ts";
 
@@ -204,6 +207,65 @@ console.log("\n=== Implementer recovery module and CLI harness ===");
 				error instanceof Error ? error.message : String(error),
 			);
 		}
+	} finally {
+		if (originalPath === undefined) delete process.env.PATH;
+		else process.env.PATH = originalPath;
+		rmSync(root, { recursive: true, force: true });
+	}
+}
+
+{
+	const root = mkdtempSync(path.join(tmpdir(), "ypi_recovery_git_paths."));
+	const bin = path.join(root, "bin");
+	mkdirSync(bin);
+	const fakeGit = path.join(bin, "git");
+	writeFileSync(
+		fakeGit,
+		`#!${process.execPath}\n`
+		+ `const mode = process.argv.at(-1);\n`
+		+ `if (mode === "trailing-space") process.stdout.write("repo \\n");\n`
+		+ `else if (mode === "trailing-newline") process.stdout.write("repo\\n\\n");\n`
+		+ `else if (mode === "leading-space") process.stdout.write(" repo\\n");\n`
+		+ `else if (mode === "bom-path") process.stdout.write(Buffer.concat([Buffer.from([0xef,0xbb,0xbf]), Buffer.from("repo\\n")]));\n`
+		+ `else if (mode === "unterminated") process.stdout.write("repo ");\n`
+		+ `else if (mode === "invalid-utf8") process.stdout.write(Buffer.from([0xff,0x0a]));\n`,
+	);
+	chmodSync(fakeGit, 0o755);
+	const originalPath = process.env.PATH;
+	process.env.PATH = `${bin}${path.delimiter}${originalPath || ""}`;
+	try {
+		const recoveryGit = createRecoveryGit(5_000);
+		record(
+			recoveryGit.text(root, ["trailing-space"]) === "repo ",
+			"recovery Git text preserves a trailing path space",
+		);
+		record(
+			recoveryGit.optionalText(root, ["trailing-newline"]) === "repo\n",
+			"recovery Git optional text removes only the protocol LF",
+		);
+		record(
+			recoveryGit.text(root, ["leading-space"]) === " repo",
+			"recovery Git text preserves leading path whitespace",
+		);
+		record(
+			recoveryGit.text(root, ["bom-path"]) === "\uFEFFrepo",
+			"recovery Git decoding preserves a leading BOM as path data",
+		);
+		expectThrow(
+			"recovery Git rejects unterminated path output",
+			"unterminated",
+			() => recoveryGit.text(root, ["unterminated"]),
+		);
+		expectThrow(
+			"optional recovery lookup does not hide invalid UTF-8",
+			"not valid UTF-8",
+			() => recoveryGit.optionalText(root, ["invalid-utf8"]),
+		);
+		expectThrow(
+			"NUL path decoder rejects a truncated final record",
+			"unterminated NUL",
+			() => decodeNulPaths(Buffer.from("truncated")),
+		);
 	} finally {
 		if (originalPath === undefined) delete process.env.PATH;
 		else process.env.PATH = originalPath;

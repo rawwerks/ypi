@@ -264,12 +264,19 @@ export function acquireRecoveryMutex(
 	return token;
 }
 
-export function releaseRecoveryMutex(lockPath: string, token: string): void {
+export function releaseRecoveryMutex(
+	lockPath: string,
+	expected: string | MutexOwner,
+): void {
+	if (typeof expected !== "string") {
+		retireImplementerMutex(lockPath, expected);
+		return;
+	}
 	const owner = readMutexOwner(lockPath);
 	if (!owner && pathExistsWithoutFollowing(lockPath)) {
 		throw new Error("implementer mutex identity changed or its owner record is malformed");
 	}
-	if (owner && owner.token !== token) {
+	if (owner && owner.token !== expected) {
 		throw new Error("implementer mutex token changed");
 	}
 	if (owner) retireImplementerMutex(lockPath, owner);

@@ -14,6 +14,7 @@ import {
 	scanRetiredLeaseArtifacts,
 	validateRegistryDirectory,
 	type InvalidRegistryEntry,
+	type MutexOwner,
 	type RecoveryLease,
 } from "./registry.ts";
 import { recoverLeaseWorkspace } from "./workspace.ts";
@@ -36,6 +37,7 @@ export interface ImplementerRecoveryDependencies {
 	git: RecoveryGit;
 	nowEpochSeconds(): number;
 	processAlive(pid: number | undefined): boolean;
+	beforeStaleMutexRetirement?(): void;
 }
 
 function defaultDependencies(): ImplementerRecoveryDependencies {
@@ -95,19 +97,20 @@ function readRecoveryLeases(
 function lockIsStale(
 	lockPath: string,
 	cutoffEpochSeconds: number,
-	nowEpochSeconds: number,
 	alive: (pid: number | undefined) => boolean,
-): boolean {
-	if (!pathExistsWithoutFollowing(lockPath)) return false;
+): MutexOwner | undefined {
+	if (!pathExistsWithoutFollowing(lockPath)) return undefined;
 	const owner = readMutexOwner(lockPath);
-	if (!owner) return false;
+	if (!owner) return undefined;
 	const pid = Number.isSafeInteger(owner?.pid) ? Number(owner?.pid) : undefined;
 	const created = Number.isSafeInteger(owner?.createdAtEpochSeconds)
 		? Number(owner?.createdAtEpochSeconds)
 		: undefined;
 	return !alive(pid)
 		&& created !== undefined
-		&& created <= cutoffEpochSeconds;
+		&& created <= cutoffEpochSeconds
+		? owner
+		: undefined;
 }
 
 export function recoverImplementerWorkspaces(
@@ -153,26 +156,21 @@ export function recoverImplementerWorkspaces(
 
 	const now = dependencies.nowEpochSeconds();
 	const cutoff = now - options.ageMinutes * 60;
-	const staleLock = lockIsStale(
+	const staleLockOwner = lockIsStale(
 		paths.lock,
 		cutoff,
-		now,
 		dependencies.processAlive,
 	);
-	if (pathExistsWithoutFollowing(paths.lock) && !staleLock) {
+	if (pathExistsWithoutFollowing(paths.lock) && !staleLockOwner) {
 		stdout.push(`${label}: skipped (live or recent registry lock: ${paths.lock})`);
 		return { exitCode: 0, stdout, stderr };
 	}
-	if (staleLock && !options.force) {
+	if (staleLockOwner && !options.force) {
 		stdout.push(`Stale implementer registry lock: ${paths.lock} (use --force to recover)`);
 	}
-	if (staleLock && options.force) {
-		const owner = readMutexOwner(paths.lock);
-		if (!owner) {
-			stdout.push(`${label}: skipped (preserved incomplete or replaced registry lock: ${paths.lock})`);
-			return { exitCode: 0, stdout, stderr };
-		}
-		releaseRecoveryMutex(paths.lock, owner.token);
+	if (staleLockOwner && options.force) {
+		dependencies.beforeStaleMutexRetirement?.();
+		releaseRecoveryMutex(paths.lock, staleLockOwner);
 	}
 
 	const loaded = readRecoveryLeases(paths.leases, commonGitDir);

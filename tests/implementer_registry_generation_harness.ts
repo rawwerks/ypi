@@ -1189,6 +1189,53 @@ const root = mkdtempSync(path.join(tmpdir(), "ypi_registry_generation."));
 }
 
 {
+	const checkout = path.join(root, "mutex-aba-checkout");
+	const commonGitDir = path.join(root, "mutex-aba-common");
+	privateDirectory(checkout);
+	privateDirectory(commonGitDir);
+	const paths = implementerRegistryPaths(commonGitDir);
+	const staleToken = acquireRecoveryMutex(paths.lock, 1);
+	const displaced = path.join(root, "mutex-aba-stale");
+	let successorToken = "";
+	let failure = "";
+	try {
+		recoverImplementerWorkspaces(
+			{ repo: checkout, ageMinutes: 0, force: true },
+			{
+				git: {
+					run() {
+						throw new Error("unexpected Git operation");
+					},
+					text() {
+						throw new Error("unexpected Git operation");
+					},
+					optionalText(_cwd, args) {
+						return args.includes("--show-toplevel") ? checkout : commonGitDir;
+					},
+				},
+				nowEpochSeconds: () => 2_000_000_000,
+				processAlive: () => false,
+				beforeStaleMutexRetirement() {
+					renameSync(paths.lock, displaced);
+					successorToken = acquireRecoveryMutex(paths.lock, 1);
+				},
+			},
+		);
+	} catch (error) {
+		failure = error instanceof Error ? error.message : String(error);
+	}
+	record(
+		staleToken !== successorToken
+			&& failure.includes("identity changed")
+			&& existsSync(displaced)
+			&& existsSync(paths.lock),
+		"stale recovery classification cannot retire a successor mutex generation",
+		failure,
+	);
+	releaseRecoveryMutex(paths.lock, successorToken);
+}
+
+{
 	const checkout = path.join(root, "legacy-staged-checkout");
 	const commonGitDir = path.join(root, "legacy-staged-common");
 	privateDirectory(checkout);

@@ -1802,6 +1802,7 @@ var CHILD_RUNTIME_EXCLUDED_KEYS = [
   "YPI_EXPLICIT_NON_OWNED_REMOTE",
   "YPI_ALLOW_LOCAL_REMOTE_FOR_TESTS"
 ];
+var CHILD_RUNTIME_EXCLUDED_PREFIXES = ["YPI_EXPLICIT_"];
 var PROVIDER_ENV_KEYS = {
   anthropic: ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"],
   "github-copilot": ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
@@ -1927,7 +1928,7 @@ function buildChildEnvironment(baseEnv, overrides, runtime, childDepth) {
       env[key] = baseEnv[key];
   }
   for (const [key, value] of Object.entries(baseEnv)) {
-    if (CHILD_RUNTIME_EXCLUDED_KEYS.includes(key) || key.startsWith("YPI_EXPLICIT_"))
+    if (CHILD_RUNTIME_EXCLUDED_KEYS.includes(key) || CHILD_RUNTIME_EXCLUDED_PREFIXES.some((prefix) => key.startsWith(prefix)))
       continue;
     if (CHILD_RUNTIME_WILDCARD_PREFIXES.some((prefix) => key.startsWith(prefix)) || CHILD_RUNTIME_FIXED_KEYS.includes(key))
       env[key] = value;

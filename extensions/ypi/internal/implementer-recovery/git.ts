@@ -3,7 +3,10 @@ import { withPrivateUmask } from "../private-path.ts";
 
 const INTERNAL_GIT_CONFIG = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"];
 const DEFAULT_TIMEOUT_MILLISECONDS = 120_000;
-const PATH_DECODER = new TextDecoder("utf-8", { fatal: true });
+const PATH_DECODER = new TextDecoder("utf-8", {
+	fatal: true,
+	ignoreBOM: true,
+});
 
 export interface RecoveryGit {
 	run(cwd: string, args: string[], environment?: NodeJS.ProcessEnv): Buffer;
@@ -43,16 +46,30 @@ export function createRecoveryGit(
 	return {
 		run,
 		text(cwd, args, environment) {
-			return run(cwd, args, environment).toString("utf8").trim();
+			return decodeGitTextOutput(run(cwd, args, environment));
 		},
 		optionalText(cwd, args) {
+			let output: Buffer;
 			try {
-				return run(cwd, args).toString("utf8").trim();
-			} catch {
-				return undefined;
+				output = run(cwd, args);
+			} catch (error) {
+				if (error instanceof Error && /^git .* failed(?:$|:)/.test(error.message)) {
+					return undefined;
+				}
+				throw error;
 			}
+			return decodeGitTextOutput(output);
 		},
 	};
+}
+
+export function decodeGitTextOutput(value: Uint8Array): string {
+	const bytes = Buffer.from(value);
+	if (bytes.length === 0) return "";
+	if (bytes[bytes.length - 1] !== 0x0a) {
+		throw new Error("Git returned unterminated text/path output; recovery preserved the workspace for manual inspection");
+	}
+	return decodeGitPath(bytes.subarray(0, bytes.length - 1));
 }
 
 export function decodeGitPath(value: Uint8Array): string {
@@ -65,10 +82,13 @@ export function decodeGitPath(value: Uint8Array): string {
 
 export function decodeNulPaths(value: Uint8Array): string[] {
 	const buffer = Buffer.from(value);
+	if (buffer.length > 0 && buffer[buffer.length - 1] !== 0) {
+		throw new Error("Git returned an unterminated NUL path inventory; recovery preserved the workspace for manual inspection");
+	}
 	const paths: string[] = [];
 	let start = 0;
-	for (let index = 0; index <= buffer.length; index++) {
-		if (index !== buffer.length && buffer[index] !== 0) continue;
+	for (let index = 0; index < buffer.length; index++) {
+		if (buffer[index] !== 0) continue;
 		if (index > start) paths.push(decodeGitPath(buffer.subarray(start, index)));
 		start = index + 1;
 	}
