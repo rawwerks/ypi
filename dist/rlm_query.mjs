@@ -882,6 +882,7 @@ var SLOT_TOKEN = /^[0-9a-f]{32}$/;
 var GENERATION_TOKEN = /^[0-9a-f]{32}$/;
 var SECRET_TOKEN = /^[0-9a-f]{64}$/;
 var TERMINATION_GRACE_MILLISECONDS = 1500;
+var MAX_COUNTER_BYTES = 32;
 
 class TreeCoordinatorError extends Error {
   exitCode;
@@ -903,6 +904,15 @@ function exactPositiveInteger(name, value) {
   if (parsed < 1)
     throw new TreeCoordinatorError(`${name} must be positive.`);
   return parsed;
+}
+function atomicIdentityFromPrivate(identity) {
+  return {
+    device: identity.device,
+    inode: identity.inode,
+    mode: identity.mode,
+    links: identity.links,
+    owner: process.getuid?.()
+  };
 }
 function manifestText(manifest) {
   return `${JSON.stringify(manifest)}
@@ -1093,12 +1103,29 @@ function allocateCall(state, request) {
     throw new TreeCoordinatorError("RLM_CALL_COUNTER_FILE must be absolute for coordinated admission.");
   }
   if (state.maxCalls === undefined) {
+    let adoptedCounter;
+    if (!state.counterIdentity && existsSync(request.counterFile)) {
+      const identity = capturePrivateFileIdentity(request.counterFile);
+      const raw = readOwnedPrivateFile(request.counterFile, identity, "utf8", MAX_COUNTER_BYTES);
+      if (raw !== `${seed}
+`) {
+        throw new TreeCoordinatorError("Existing call-count projection does not match RLM_CALL_COUNT.");
+      }
+      adoptedCounter = {
+        identity: atomicIdentityFromPrivate(identity),
+        raw
+      };
+    }
     state.maxCalls = maximum;
     state.callCount = seed;
     if (state.counterFile !== undefined && state.counterFile !== request.counterFile) {
       throw new TreeCoordinatorError("Call-count projection path changed between root generations.");
     }
     state.counterFile = request.counterFile;
+    if (adoptedCounter) {
+      state.counterIdentity = adoptedCounter.identity;
+      state.counterRaw = adoptedCounter.raw;
+    }
   }
   if (state.maxCalls !== maximum || state.counterFile !== request.counterFile) {
     throw new TreeCoordinatorError("Call-count configuration changed within one recursion tree.");
@@ -1466,8 +1493,6 @@ function startLocalCoordinator(previous) {
   process.env.YPI_TREE_COORDINATOR_SOCKET = socketPath;
   process.env.YPI_TREE_GENERATION = generation;
   process.env.YPI_TREE_SECRET = secret;
-  process.env.YPI_TREE_ROOT_PID = String(process.pid);
-  process.env.YPI_TREE_ROOT_PROCESS_IDENTITY = rootProcessIdentity;
   appendCoordinatorTrace(`TREE_GENERATION_START generation=${generation} root_pid=${process.pid}`);
   return state;
 }

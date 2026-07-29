@@ -20,8 +20,8 @@ import {
 	capturePrivateFileIdentity,
 	ensurePrivateDirectory,
 	parsePrivateFileIdentity,
-	readOwnedPrivateFile,
 	type PrivatePathIdentity,
+	readOwnedPrivateFile,
 } from "./private-path.ts";
 import {
 	currentProcessStartIdentity,
@@ -37,6 +37,7 @@ const SLOT_TOKEN = /^[0-9a-f]{32}$/;
 const GENERATION_TOKEN = /^[0-9a-f]{32}$/;
 const SECRET_TOKEN = /^[0-9a-f]{64}$/;
 const TERMINATION_GRACE_MILLISECONDS = 1_500;
+const MAX_COUNTER_BYTES = 32;
 
 export interface CoordinatorWaitOptions {
 	deadlineMilliseconds?: number;
@@ -151,6 +152,18 @@ function exactPositiveInteger(name: string, value: unknown): number {
 	const parsed = exactNonNegativeInteger(name, value);
 	if (parsed < 1) throw new TreeCoordinatorError(`${name} must be positive.`);
 	return parsed;
+}
+
+function atomicIdentityFromPrivate(
+	identity: PrivatePathIdentity,
+): AtomicFileIdentity {
+	return {
+		device: identity.device,
+		inode: identity.inode,
+		mode: identity.mode,
+		links: identity.links,
+		owner: process.getuid?.(),
+	};
 }
 
 function manifestText(manifest: AuthorityManifest): string {
@@ -402,6 +415,30 @@ function allocateCall(
 		);
 	}
 	if (state.maxCalls === undefined) {
+		let adoptedCounter:
+			| {
+				identity: AtomicFileIdentity;
+				raw: string;
+			}
+			| undefined;
+		if (!state.counterIdentity && existsSync(request.counterFile)) {
+			const identity = capturePrivateFileIdentity(request.counterFile);
+			const raw = readOwnedPrivateFile(
+				request.counterFile,
+				identity,
+				"utf8",
+				MAX_COUNTER_BYTES,
+			);
+			if (raw !== `${seed}\n`) {
+				throw new TreeCoordinatorError(
+					"Existing call-count projection does not match RLM_CALL_COUNT.",
+				);
+			}
+			adoptedCounter = {
+				identity: atomicIdentityFromPrivate(identity),
+				raw,
+			};
+		}
 		state.maxCalls = maximum;
 		state.callCount = seed;
 		if (
@@ -413,6 +450,10 @@ function allocateCall(
 			);
 		}
 		state.counterFile = request.counterFile;
+		if (adoptedCounter) {
+			state.counterIdentity = adoptedCounter.identity;
+			state.counterRaw = adoptedCounter.raw;
+		}
 	}
 	if (state.maxCalls !== maximum || state.counterFile !== request.counterFile) {
 		throw new TreeCoordinatorError(
@@ -943,8 +984,6 @@ function startLocalCoordinator(previous?: LocalCoordinator): LocalCoordinator {
 	process.env.YPI_TREE_COORDINATOR_SOCKET = socketPath;
 	process.env.YPI_TREE_GENERATION = generation;
 	process.env.YPI_TREE_SECRET = secret;
-	process.env.YPI_TREE_ROOT_PID = String(process.pid);
-	process.env.YPI_TREE_ROOT_PROCESS_IDENTITY = rootProcessIdentity;
 	appendCoordinatorTrace(
 		`TREE_GENERATION_START generation=${generation} root_pid=${process.pid}`,
 	);

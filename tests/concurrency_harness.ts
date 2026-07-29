@@ -87,8 +87,16 @@ async function orphanProbe(): Promise<void> {
 		processIdentity: currentProcessStartIdentity(),
 		processGroupId: processGroupId(process.pid),
 	})}\n`);
-	const rootPid = Number(process.env.YPI_TREE_ROOT_PID);
-	const rootIdentity = process.env.YPI_TREE_ROOT_PROCESS_IDENTITY;
+	const authorityFile = process.env.YPI_TREE_AUTHORITY_FILE;
+	if (!authorityFile) throw new Error("orphan probe authority path is required");
+	const authority = JSON.parse(readFileSync(authorityFile, "utf8")) as {
+		rootPid?: unknown;
+		rootProcessIdentity?: unknown;
+	};
+	const rootPid = Number(authority.rootPid);
+	const rootIdentity = typeof authority.rootProcessIdentity === "string"
+		? authority.rootProcessIdentity
+		: undefined;
 	const deadline = Date.now() + 5_000;
 	while (processMatchesStartIdentity(rootPid, rootIdentity)) {
 		if (Date.now() >= deadline) {
@@ -138,6 +146,17 @@ async function abruptRootOwner(): Promise<never> {
 	throw new Error("unreachable");
 }
 
+async function adoptedCounterOwner(): Promise<void> {
+	ensureRootTreeCoordinator();
+	try {
+		await assertTreeCoordinatorActive();
+		const next = await allocateCallCount();
+		console.log(JSON.stringify({ next }));
+	} finally {
+		await terminateRootTreeCoordinator("adopted-counter-owner-complete");
+	}
+}
+
 if (process.argv[2] === "--worker") {
 	try {
 		await worker();
@@ -157,6 +176,10 @@ if (process.argv[2] === "--orphan-probe") {
 }
 if (process.argv[2] === "--abrupt-root-owner") {
 	await abruptRootOwner();
+}
+if (process.argv[2] === "--adopted-counter-owner") {
+	await adoptedCounterOwner();
+	process.exit(0);
 }
 
 let pass = 0;
@@ -267,6 +290,75 @@ try {
 			&& retriedCall === 2
 			&& readFileSync(counterFile, "utf8") === "2\n",
 		"failed exact-identity projection remains retryable without a count gap",
+	);
+	const continuationDirectory = path.join(scratch, "continuation");
+	const continuationCounter = path.join(continuationDirectory, "calls.counter");
+	mkdirSync(continuationDirectory, { mode: 0o700 });
+	atomicCreateFile(continuationCounter, "7\n", { mode: 0o600 });
+	const continuation = spawn(
+		process.execPath,
+		[import.meta.path, "--adopted-counter-owner"],
+		{
+			env: {
+				...process.env,
+				RLM_DEPTH: "0",
+				RLM_CONCURRENCY_DIR: path.join(continuationDirectory, "c"),
+				RLM_CALL_COUNTER_FILE: continuationCounter,
+				RLM_CALL_COUNT: "7",
+			},
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	);
+	let continuationOutput = "";
+	let continuationError = "";
+	continuation.stdout.setEncoding("utf8");
+	continuation.stderr.setEncoding("utf8");
+	continuation.stdout.on("data", (chunk: string) => {
+		continuationOutput += chunk;
+	});
+	continuation.stderr.on("data", (chunk: string) => {
+		continuationError += chunk;
+	});
+	const continuationExit = await new Promise<number | null>((resolve, reject) => {
+		continuation.once("error", reject);
+		continuation.once("close", resolve);
+	});
+	record(
+		continuationExit === 0
+			&& JSON.parse(continuationOutput).next === 8
+			&& readFileSync(continuationCounter, "utf8") === "8\n",
+		"a fresh root process adopts an exact private continuation counter",
+		JSON.stringify({
+			continuationExit,
+			continuationOutput,
+			continuationError,
+		}),
+	);
+	const mismatchedCounter = path.join(continuationDirectory, "mismatched.counter");
+	atomicCreateFile(mismatchedCounter, "7\n", { mode: 0o600 });
+	const mismatchedContinuation = spawn(
+		process.execPath,
+		[import.meta.path, "--adopted-counter-owner"],
+		{
+			env: {
+				...process.env,
+				RLM_DEPTH: "0",
+				RLM_CONCURRENCY_DIR: path.join(continuationDirectory, "mismatched-c"),
+				RLM_CALL_COUNTER_FILE: mismatchedCounter,
+				RLM_CALL_COUNT: "6",
+			},
+			stdio: "ignore",
+		},
+	);
+	const mismatchedExit = await new Promise<number | null>((resolve, reject) => {
+		mismatchedContinuation.once("error", reject);
+		mismatchedContinuation.once("close", resolve);
+	});
+	record(
+		mismatchedExit !== 0
+			&& readFileSync(mismatchedCounter, "utf8") === "7\n",
+		"a fresh root rejects and preserves a continuation counter with a mismatched seed",
+		`exit=${mismatchedExit}`,
 	);
 	beginRootTreeCoordinator("concurrency-root-turn-transfer");
 	await assertTreeCoordinatorActive();
