@@ -1,9 +1,0 @@
-creation_rules:
-  - path_regex: private/.*
-    age: age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf
-  - path_regex: \.prose/runs/.*
-    age: age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf
-  - path_regex: \.prose/agents/.*
-    age: age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf
-  - path_regex: experiments/.*
-    age: age1z28am8hy9n85h3e9u5as87x3ae04t65sk8zuszwydaqsjmye5sgsc9rqxf

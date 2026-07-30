@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-LANE="${1:?usage: run-lane.sh canonical-cli|legacy-cli|canonical-native|legacy-native [OUTPUT_ROOT]}"
-case "$LANE" in canonical-cli|legacy-cli|canonical-native|legacy-native) ;; *) echo "invalid lane: $LANE" >&2; exit 2;; esac
+LANE="${1:?usage: run-lane.sh canonical-cli|canonical-native [OUTPUT_ROOT]}"
+case "$LANE" in canonical-cli|canonical-native) ;; *) echo "invalid lane: $LANE" >&2; exit 2;; esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 ROOT="${2:-${YPI_EVAL_OUTPUT_ROOT:-$REPO/tmp/runtime-parity}}"
 OUT="$ROOT/$LANE"
 mkdir -p "$OUT"
 rm -f "$OUT"/{context.txt,counter,cost.jsonl,trace.log,output.txt,stderr.txt,time.txt,exit,meta.json}
-LEGACY=0
-[[ "$LANE" == legacy-* ]] && LEGACY=1
 RLM_QUERY_BIN="${YPI_RLM_QUERY_BIN:-$REPO/rlm_query}"
 MAKE_BIN="${YPI_MAKE_BIN:-make}"
 # Preserve provider credentials and normal host configuration while removing
@@ -43,23 +41,23 @@ PY
 START_NS="$(python3 -c 'import time; print(time.monotonic_ns())')"
 set +e
 if [[ "$LANE" == *-cli ]]; then
-  PROMPT="$(cat "$SCRIPT_DIR/prompt.txt")"
-  "${CLEAN_ENV[@]}" \
-    YPI_LEGACY_IMPL="$LEGACY" YPI_PI_BIN="${YPI_PI_BIN:-$(command -v pi)}" \
-    CONTEXT="$OUT/context.txt" RLM_PROVIDER="${PI_E2E_PROVIDER:-openai-codex}" \
-    RLM_MODEL="${PI_E2E_MODEL:-gpt-5.6-sol}" RLM_THINKING_LEVEL="${PI_E2E_THINKING:-max}" \
-    RLM_DEPTH=0 RLM_MAX_DEPTH=2 RLM_MAX_CALLS=2 RLM_JSON=1 RLM_JJ=0 RLM_SHARED_SESSIONS=0 \
+	  PROMPT="$(cat "$SCRIPT_DIR/prompt.txt")"
+	  "${CLEAN_ENV[@]}" \
+	    YPI_PI_BIN="${YPI_PI_BIN:-$(command -v pi)}" \
+	    CONTEXT="$OUT/context.txt" RLM_PROVIDER="${PI_E2E_PROVIDER:-openai-codex}" \
+	    RLM_MODEL="${PI_E2E_MODEL:-gpt-5.6-sol}" RLM_THINKING_LEVEL="${PI_E2E_THINKING:-max}" \
+	    RLM_DEPTH=0 RLM_MAX_DEPTH=2 RLM_MAX_CALLS=2 RLM_JSON=1 RLM_SHARED_SESSIONS=0 \
     RLM_CHILD_DISCOVERY=0 RLM_TRACE_ID="parity-$LANE" RLM_CALL_COUNTER_FILE="$OUT/counter" \
     RLM_COST_FILE="$OUT/cost.jsonl" PI_TRACE_FILE="$OUT/trace.log" \
     "${TIME_PREFIX[@]}" "$RLM_QUERY_BIN" "$PROMPT" \
     >"$OUT/output.txt" 2>"$OUT/stderr.txt"
   RC=$?
-else
-  "${CLEAN_ENV[@]}" \
-    YPI_LEGACY_IMPL="$LEGACY" YPI_PI_BIN="${YPI_PI_BIN:-$(command -v pi)}" \
-    RLM_PROVIDER="${PI_E2E_PROVIDER:-openai-codex}" RLM_MODEL="${PI_E2E_MODEL:-gpt-5.6-sol}" \
-    RLM_THINKING_LEVEL="${PI_E2E_THINKING:-max}" RLM_DEPTH=0 RLM_MAX_DEPTH=2 RLM_MAX_CALLS=4 \
-    RLM_JSON=1 RLM_JJ=0 RLM_SHARED_SESSIONS=0 \
+	else
+	  "${CLEAN_ENV[@]}" \
+	    YPI_PI_BIN="${YPI_PI_BIN:-$(command -v pi)}" \
+	    RLM_PROVIDER="${PI_E2E_PROVIDER:-openai-codex}" RLM_MODEL="${PI_E2E_MODEL:-gpt-5.6-sol}" \
+	    RLM_THINKING_LEVEL="${PI_E2E_THINKING:-max}" RLM_DEPTH=0 RLM_MAX_DEPTH=2 RLM_MAX_CALLS=4 \
+	    RLM_JSON=1 RLM_SHARED_SESSIONS=0 \
     RLM_CHILD_DISCOVERY=0 RLM_TRACE_ID="parity-$LANE" RLM_CALL_COUNTER_FILE="$OUT/counter" \
     "${TIME_PREFIX[@]}" "$MAKE_BIN" -C "$REPO" test-recursion-e2e \
     >"$OUT/output.txt" 2>"$OUT/stderr.txt"

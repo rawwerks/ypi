@@ -1,133 +1,125 @@
 #!/usr/bin/env bash
-# rlm_cleanup — Clean up stale rlm temp files and jj workspaces.
+# rlm_cleanup - Recover stale, registered implementer workspaces.
 #
 # Usage:
-#   rlm_cleanup              # dry-run: show what would be cleaned
-#   rlm_cleanup --force      # actually delete
-#   rlm_cleanup --age 60     # override age threshold (default: 120 min)
+#   rlm_cleanup              # inspect registered state
+#   rlm_cleanup --force      # recover eligible registered workspaces
+#   rlm_cleanup --age 60     # override lease age threshold (default: 120 min)
+#   rlm_cleanup --attempt-age 10080  # attempt-ref report threshold (default: 7 days)
+#   rlm_cleanup --repo PATH  # repository whose leases and refs should be inspected
 #
-# What it cleans:
-#   1. ${TMPDIR:-/tmp}/rlm_* temp files (context, prompts, cost, async output)
-#   2. ${TMPDIR:-/tmp}/rlm_calls_*.counter.lock stale call-counter locks
-#   3. ${TMPDIR:-/tmp}/rlm_async_* private job directories
-#   4. ${TMPDIR:-/tmp}/rlm_ws_* and ypi_ws_* workspace directories
-#   5. Stale jj workspaces named rlm-* in the current repo (if in a jj repo)
-#
-# Safe by default: dry-run unless --force is passed.
+# Generic rlm_* paths and attempt refs are evidence, not deletion authority.
+# This command only delegates destructive cleanup to the typed implementer
+# recovery service, which validates persisted leases before acting.
 
 set -euo pipefail
 
 FORCE=false
-AGE_MIN=120  # minutes
+AGE_MIN=120
+ATTEMPT_AGE_MIN=10080
+REPO_PATH="$PWD"
+REPO_EXPLICIT=false
 
-while [[ "${1:-}" == --* ]]; do
+require_value() {
+    local flag="$1"
+    local value="${2:-}"
+    if [ -z "$value" ] || [[ "$value" == --* ]]; then
+        echo "$flag requires a value" >&2
+        exit 2
+    fi
+}
+
+while [ "$#" -gt 0 ]; do
     case "$1" in
-        --force) FORCE=true; shift ;;
-        --age) AGE_MIN="$2"; shift 2 ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
+        --age)
+            require_value "$1" "${2:-}"
+            AGE_MIN="$2"
+            shift 2
+            ;;
+        --attempt-age)
+            require_value "$1" "${2:-}"
+            ATTEMPT_AGE_MIN="$2"
+            shift 2
+            ;;
+        --repo)
+            require_value "$1" "${2:-}"
+            REPO_PATH="$2"
+            REPO_EXPLICIT=true
+            shift 2
+            ;;
         --help|-h)
             sed -n '2,/^$/{ s/^# //; s/^#$//; p }' "$0"
             exit 0
             ;;
-        *) echo "Unknown flag: $1" >&2; exit 1 ;;
+        *)
+            echo "Unknown flag: $1" >&2
+            exit 1
+            ;;
     esac
 done
 
-echo "rlm_cleanup — age threshold: ${AGE_MIN}m, mode: $( $FORCE && echo 'FORCE' || echo 'dry-run' )"
-TMP_ROOT="${TMPDIR:-/tmp}"
-echo ""
+[[ "$AGE_MIN" =~ ^[0-9]+$ ]] || { echo "--age must be a non-negative integer" >&2; exit 2; }
+[[ "$ATTEMPT_AGE_MIN" =~ ^[0-9]+$ ]] || { echo "--attempt-age must be a non-negative integer" >&2; exit 2; }
 
-# --- 1. Temp files ---
-FILES=$(find "$TMP_ROOT" -maxdepth 1 -name 'rlm_*' ! -type d -mmin +"$AGE_MIN" 2>/dev/null || true)
-FILE_COUNT=0
-[ -n "$FILES" ] && FILE_COUNT=$(echo "$FILES" | wc -l)
-FILE_SIZE="0"
-[ -n "$FILES" ] && FILE_SIZE=$(echo "$FILES" | xargs du -ch 2>/dev/null | tail -1 | cut -f1 || echo "0")
-
-echo "Temp files older than ${AGE_MIN}m: $FILE_COUNT ($FILE_SIZE)"
-if [ "$FILE_COUNT" -gt 0 ]; then
-    if [ "$FORCE" = true ]; then
-        echo "$FILES" | xargs rm -f 2>/dev/null
-        echo "  ✓ deleted"
-    else
-        echo "  (use --force to delete)"
-    fi
-fi
-
-# --- 2. Stale call-counter lock directories ---
-LOCK_DIRS=$(find "$TMP_ROOT" -maxdepth 1 -name 'rlm_calls_*.counter.lock' -type d -mmin +"$AGE_MIN" 2>/dev/null || true)
-LOCK_COUNT=0
-[ -n "$LOCK_DIRS" ] && LOCK_COUNT=$(echo "$LOCK_DIRS" | wc -l)
-echo "Call-counter locks older than ${AGE_MIN}m: $LOCK_COUNT"
-if [ "$LOCK_COUNT" -gt 0 ]; then
-    if [ "$FORCE" = true ]; then
-        echo "$LOCK_DIRS" | xargs rm -rf 2>/dev/null
-        echo "  ✓ deleted"
-    else
-        echo "  (use --force to delete)"
-    fi
-fi
-
-# --- 3. Private async job directories ---
-ASYNC_DIRS=$(
-    find "$TMP_ROOT" -maxdepth 1 -name 'rlm_async_*' -type d -mmin +"$AGE_MIN" 2>/dev/null | while IFS= read -r candidate; do
-        name=$(basename "$candidate")
-        if [[ "$name" =~ ^rlm_async_.+[._][A-Za-z0-9]{6}$ ]] \
-            && { [ -e "$candidate/output.txt" ] || [ -e "$candidate/job.json" ] || [ -e "$candidate/done" ]; }; then
-            printf '%s\n' "$candidate"
-        fi
-    done
+clean_git() (
+    local key
+    while IFS= read -r key; do
+        unset "$key"
+    done < <(compgen -A variable GIT_ 2>/dev/null || true)
+    command git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"
 )
-ASYNC_COUNT=0
-[ -n "$ASYNC_DIRS" ] && ASYNC_COUNT=$(echo "$ASYNC_DIRS" | wc -l)
-ASYNC_SIZE="0"
-[ -n "$ASYNC_DIRS" ] && ASYNC_SIZE=$(echo "$ASYNC_DIRS" | xargs du -csh 2>/dev/null | tail -1 | cut -f1 || echo "0")
 
-echo "Async job dirs older than ${AGE_MIN}m: $ASYNC_COUNT ($ASYNC_SIZE)"
-if [ "$ASYNC_COUNT" -gt 0 ]; then
-    if [ "$FORCE" = true ]; then
-        echo "$ASYNC_DIRS" | xargs rm -rf 2>/dev/null
-        echo "  ✓ deleted"
-    else
-        echo "  (use --force to delete)"
-    fi
+echo "rlm_cleanup - age threshold: ${AGE_MIN}m, mode: $( "$FORCE" && echo 'FORCE' || echo 'dry-run' )"
+echo "Generic temp, call-counter, async, and legacy workspace paths: preserved (age is not deletion authority)"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+IMPLEMENTER_CLEANUP="$SCRIPT_DIR/scripts/cleanup-implementer-workspaces.ts"
+NODE_BIN="${YPI_NODE_BIN:-node}"
+if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+    echo "rlm_cleanup: Node.js >= 22.19 is required for implementer recovery" >&2
+    exit 127
 fi
 
-# --- 4. Workspace directories ---
-WS_DIRS=$(find "$TMP_ROOT" -maxdepth 1 \( -name 'rlm_ws_*' -o -name 'ypi_ws_*' \) -type d -mmin +"$AGE_MIN" 2>/dev/null || true)
-WS_COUNT=0
-[ -n "$WS_DIRS" ] && WS_COUNT=$(echo "$WS_DIRS" | wc -l)
-WS_SIZE="0"
-[ -n "$WS_DIRS" ] && WS_SIZE=$(echo "$WS_DIRS" | xargs du -csh 2>/dev/null | tail -1 | cut -f1 || echo "0")
-
-echo "Workspace dirs older than ${AGE_MIN}m: $WS_COUNT ($WS_SIZE)"
-if [ "$WS_COUNT" -gt 0 ]; then
-    if [ "$FORCE" = true ]; then
-        echo "$WS_DIRS" | xargs rm -rf 2>/dev/null
-        echo "  ✓ deleted"
-    else
-        echo "  (use --force to delete)"
-    fi
+REPO_ROOT=$(clean_git -C "$REPO_PATH" rev-parse --show-toplevel 2>/dev/null || true)
+if [ -z "$REPO_ROOT" ] && [ "$REPO_EXPLICIT" = true ]; then
+    echo "rlm_cleanup: --repo is not an existing Git checkout: $REPO_PATH" >&2
+    exit 2
 fi
 
-# --- 5. Stale jj workspaces (rlm-* pattern) ---
-if jj root &>/dev/null 2>&1; then
-    STALE_WS=$(jj workspace list 2>/dev/null | grep -E '^(rlm-|ypi-)' | awk '{print $1}' | sed 's/:$//' || true)
-    STALE_WS_COUNT=$(echo "$STALE_WS" | grep -c . 2>/dev/null || echo 0)
+IMPLEMENTER_ARGS=(--repo "$REPO_PATH" --age "$AGE_MIN")
+[ "$FORCE" = true ] && IMPLEMENTER_ARGS+=(--force)
+"$NODE_BIN" "$IMPLEMENTER_CLEANUP" "${IMPLEMENTER_ARGS[@]}"
 
-    echo "Stale jj workspaces (rlm-* / ypi-*): $STALE_WS_COUNT"
-    if [ "$STALE_WS_COUNT" -gt 0 ]; then
-        if [ "$FORCE" = true ]; then
-            echo "$STALE_WS" | while read -r ws; do
-                jj workspace forget "$ws" 2>/dev/null && echo "  ✓ forgot $ws" || echo "  ✗ failed: $ws"
-            done
-        else
-            echo "$STALE_WS" | while read -r ws; do echo "  $ws"; done
-            echo "  (use --force to forget)"
-        fi
-    fi
+if [ -z "$REPO_ROOT" ]; then
+    echo "Attempt refs older than ${ATTEMPT_AGE_MIN}m: no Git checkout"
 else
-    echo "Stale jj workspaces: (not in a jj repo, skipped)"
+    NOW=$(date +%s)
+    CUTOFF=$((NOW - ATTEMPT_AGE_MIN * 60))
+    ATTEMPT_REFS=$(
+        clean_git -C "$REPO_ROOT" for-each-ref \
+            --format='%(refname) %(objectname) %(committerdate:unix)' \
+            refs/ypi/ 2>/dev/null \
+        | while read -r ref oid committed_at; do
+            if [[ "$ref" == refs/ypi/attempt-* ]] \
+                && [[ "$oid" =~ ^[0-9a-f]+$ ]] \
+                && [[ "$committed_at" =~ ^[0-9]+$ ]] \
+                && [ "$committed_at" -le "$CUTOFF" ]; then
+                printf '%s %s\n' "$ref" "$oid"
+            fi
+        done
+    )
+    ATTEMPT_COUNT=0
+    [ -n "$ATTEMPT_REFS" ] && ATTEMPT_COUNT=$(printf '%s\n' "$ATTEMPT_REFS" | wc -l)
+    echo "Attempt refs older than ${ATTEMPT_AGE_MIN}m: $ATTEMPT_COUNT (preserved)"
+    if [ "$ATTEMPT_COUNT" -gt 0 ]; then
+        printf '%s\n' "$ATTEMPT_REFS" | while read -r ref _oid; do
+            printf '  %s\n' "$ref"
+        done
+    fi
 fi
 
-echo ""
 echo "Done."

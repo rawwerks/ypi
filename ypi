@@ -6,40 +6,16 @@
 #
 # Usage:
 #   ypi                              # interactive recursive pi
-#   ypi "What is in this repo?"      # one-shot with -p
-#   ypi --provider anthropic --model claude-sonnet-4-5-20250929 "question"
+#   ypi -p "What is in this repo?"   # one-shot
+#   ypi --provider anthropic --model claude-sonnet-4-5-20250929 -p "question"
 #
-# Environment overrides:
-#   RLM_PROVIDER       — LLM provider override for root + sub-calls (default: Pi active/default provider)
-#   RLM_MODEL          — LLM model override for root + sub-calls (default: Pi active/default model)
-#   RLM_THINKING_LEVEL — thinking-level override for sub-calls (default: Pi active/default thinking)
-#   RLM_MAX_DEPTH      — max recursion depth (default: 3)
-#   RLM_TIMEOUT        — wall-clock seconds for entire recursive tree (default: none)
-#   RLM_MAX_CALLS      — max total rlm_query invocations (default: 128)
-#   RLM_CHILD_MODEL    — model for all sub-calls at depth > 0 (default: same as root)
-#   RLM_CHILD_PROVIDER — provider for RLM_CHILD_MODEL (default: same as root)
-#   RLM_CHILD_THINKING_LEVEL — thinking level for all sub-calls at depth > 0
-#   RLM_CHILD_MODELS   — comma-separated child-depth model list (depth 1,2,...)
-#   RLM_CHILD_PROVIDERS — comma-separated child-depth provider list (depth 1,2,...)
-#   RLM_CHILD_THINKING_LEVELS — comma-separated child-depth thinking list (depth 1,2,...)
-#   RLM_JJ             — existing-jj detection policy (default: auto; never initializes a VCS)
-#   RLM_EXTENSIONS     — set to "0" to disable Pi extensions (default: 1)
-#   RLM_AMBIENT_EXTENSIONS — ambient extension policy for the root session:
-#                        "1" always allow, "0" always isolate, unset/"auto"
-#                        allow unless a conflicting recursion-extension copy is
-#                        detected (fail closed). Children remain canonical-only
-#                        unless explicitly set to "1".
-#   RLM_CHILD_EXTENSIONS — override extensions for depth > 0 (default: same as parent)
-#   RLM_CHILD_DISCOVERY — set to 0 to disable child non-extension skills/templates/themes/context discovery (default: enabled)
-#   RLM_COST_FILE      — append-only cost telemetry ledger (default: automatic private temp path)
-#   RLM_JSON           — set to "0" to disable JSON mode / cost tracking (default: 1)
-#   RLM_SHARED_SESSIONS — set to "0" to disable session log sharing (default: 1)
-#   PI_TRACE_FILE      — lifecycle trace path (default: automatic private temp path)
+# Runtime configuration is owned by config/runtime-env.json and documented in
+# README.md. Keep this launcher header free of a second variable table.
 
 set -euo pipefail
 
 # Resolve the directory where ypi lives (and where rlm_query + SYSTEM_PROMPT.md are)
-# Follow symlinks — npm install -g creates symlinks in .bin/ pointing to node_modules/ypi/
+# Follow symlinks so a source-checkout command link resolves its real root.
 resolve_script_dir() {
     local source="${BASH_SOURCE[0]}"
     local dir target
@@ -61,8 +37,8 @@ resolve_pi_bin() {
         return 0
     fi
     local candidate
-    # Prefer the package-local exact dependency. A stale global pi on PATH must
-    # not silently override the version ypi was installed and tested with.
+    # Prefer the repository dependency. A stale global pi on PATH must not
+    # silently override the version this checkout was tested with.
     for candidate in \
         "$SCRIPT_DIR/../.bin/pi" \
         "$SCRIPT_DIR/node_modules/.bin/pi" \
@@ -82,7 +58,7 @@ resolve_pi_bin() {
 
 SCRIPT_DIR="$(resolve_script_dir)"
 if ! PI_BIN="$(resolve_pi_bin)"; then
-    echo "ypi: could not find pi. Install @earendil-works/pi-coding-agent or set YPI_PI_BIN=/path/to/pi." >&2
+    echo "ypi: could not find pi. Run 'bun install --frozen-lockfile' in this checkout or set YPI_PI_BIN=/path/to/pi." >&2
     exit 127
 fi
 export YPI_PI_BIN="$PI_BIN"
@@ -99,7 +75,8 @@ export RLM_SYSTEM_PROMPT="$SCRIPT_DIR/SYSTEM_PROMPT.md"
 
 # Guardrails — preserve explicit values and seed bounded depth/call defaults.
 [ -n "${RLM_TIMEOUT:-}" ]        && export RLM_TIMEOUT
-export RLM_MAX_CALLS="${RLM_MAX_CALLS:-128}"
+export RLM_MAX_CALLS="${RLM_MAX_CALLS:-65536}"
+export RLM_MAX_CONCURRENT_CALLS="${RLM_MAX_CONCURRENT_CALLS:-3}"
 [ -n "${RLM_CHILD_MODEL:-}" ]    && export RLM_CHILD_MODEL
 [ -n "${RLM_CHILD_PROVIDER:-}" ] && export RLM_CHILD_PROVIDER
 [ -n "${RLM_CHILD_THINKING_LEVEL:-}" ] && export RLM_CHILD_THINKING_LEVEL
@@ -107,19 +84,18 @@ export RLM_MAX_CALLS="${RLM_MAX_CALLS:-128}"
 [ -n "${RLM_CHILD_PROVIDERS:-}" ] && export RLM_CHILD_PROVIDERS
 [ -n "${RLM_CHILD_THINKING_LEVELS:-}" ] && export RLM_CHILD_THINKING_LEVELS
 [ -n "${PI_TRACE_FILE:-}" ]      && export PI_TRACE_FILE
-export RLM_JJ="${RLM_JJ:-auto}"
 export RLM_EXTENSIONS="${RLM_EXTENSIONS:-1}"
 [ -n "${RLM_CHILD_EXTENSIONS:-}" ] && export RLM_CHILD_EXTENSIONS
 [ -n "${RLM_CHILD_DISCOVERY:-}" ]  && export RLM_CHILD_DISCOVERY
 unset RLM_BUDGET
 export RLM_JSON="${RLM_JSON:-1}"
+export RLM_REQUIRE_TRANSCRIPTS="${RLM_REQUIRE_TRANSCRIPTS:-0}"
 export RLM_SHARED_SESSIONS="${RLM_SHARED_SESSIONS:-1}"
 
 # Session tree tracing — generate a trace ID that links all recursive sessions
 export RLM_TRACE_ID="${RLM_TRACE_ID:-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 
-# Canonical ypi extension. Keep extensions/ypi.ts as a compatibility alias,
-# but load recursive.ts so the wrapper and direct-extension path share runtime.
+# Canonical ypi extension. The wrapper and direct-extension path share runtime.
 YPI_EXTENSION="$SCRIPT_DIR/extensions/recursive.ts"
 if [ ! -f "$YPI_EXTENSION" ]; then
     echo "ypi: missing extension: $YPI_EXTENSION" >&2
@@ -129,8 +105,9 @@ export YPI_EXTENSION_ROOT="$SCRIPT_DIR"
 export YPI_EXTENSION_PATH="$YPI_EXTENSION"
 
 # Wrapper mode opts into the shell-compatible rlm_query helper: its source is folded
-# into the system prompt and its directory is kept on PATH for the bash tool. A bare
-# `pi -e` / npm extension install leaves this unset and uses the native tool only.
+# into the system prompt and its directory is kept on PATH for the bash tool.
+# Direct `pi -e ./extensions/recursive.ts` use leaves this unset and exposes
+# only the native tool.
 export YPI_SHELL_HELPER=1
 
 # Parse only ypi-owned flags and provider/model routing. All Pi prompt flags are
@@ -141,9 +118,6 @@ HAS_MODEL=false
 SESSION_DIR_OVERRIDE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --quiet|-q)
-            shift
-            ;;
         --provider)
             HAS_PROVIDER=true
             PASS_ARGS+=("$1")

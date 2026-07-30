@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ensureEnvironment } from "../extensions/ypi/env.ts";
+import { ensureEnvironment, safeTraceId } from "../extensions/ypi/env.ts";
 import recursiveExtension from "../extensions/recursive.ts";
 import { registerNativeRlmQueryTool } from "../extensions/ypi/native-tool.ts";
 import { buildYpiPrompt } from "../extensions/ypi/prompt.ts";
@@ -152,11 +152,10 @@ function baseEnv(label: string): Record<string, string> {
 		YPI_FAKE_PI_LOG: logFile,
 		YPI_EXTENSION_ROOT: projectRoot,
 		YPI_EXTENSION_PATH: runtime.extensionPath,
-		RLM_DEPTH: "0",
-		RLM_MAX_DEPTH: "2",
-		RLM_JSON: "0",
-		RLM_JJ: "auto",
-		RLM_SHARED_SESSIONS: "0",
+			RLM_DEPTH: "0",
+			RLM_MAX_DEPTH: "2",
+			RLM_JSON: "0",
+			RLM_SHARED_SESSIONS: "0",
 		RLM_PROVIDER: "contract-provider",
 		RLM_MODEL: "contract-model",
 		RLM_THINKING_LEVEL: "contract-thinking",
@@ -186,8 +185,14 @@ function parseObservation(): Observation {
 	return result;
 }
 
-async function invokeNative(env: Record<string, string>, prompt: string, explicitContext?: string): Promise<{ observation?: Observation; error?: string }> {
-	applyNativeEnv(env);
+async function invokeNative(
+	env: Record<string, string>,
+	prompt: string,
+	explicitContext?: string,
+	inheritedDepth?: string,
+): Promise<{ observation?: Observation; error?: string }> {
+	applyNativeEnv(inheritedDepth ? { ...env, RLM_DEPTH: "0" } : env);
+	if (inheritedDepth) process.env.RLM_DEPTH = inheritedDepth;
 	try {
 		if (!nativeTool) throw new Error("native rlm_query tool not registered");
 		await nativeTool.execute("contract-call", { prompt, context: explicitContext }, undefined, undefined, extensionContext());
@@ -197,9 +202,23 @@ async function invokeNative(env: Record<string, string>, prompt: string, explici
 	}
 }
 
-async function invokeCli(env: Record<string, string>, prompt: string): Promise<{ observation?: Observation; error?: string; code: number }> {
+async function invokeCli(
+	env: Record<string, string>,
+	prompt: string,
+	inheritedDepth?: string,
+): Promise<{ observation?: Observation; error?: string; code: number }> {
 	writeFileSync(logFile, "");
-	const child = Bun.spawn([path.join(projectRoot, "rlm_query"), prompt], {
+	const command = inheritedDepth
+		? [
+			process.execPath,
+			path.join(projectRoot, "tests", "tree_authority_runner.ts"),
+			inheritedDepth,
+			"--",
+			path.join(projectRoot, "rlm_query"),
+			prompt,
+		]
+		: [path.join(projectRoot, "rlm_query"), prompt];
+	const child = Bun.spawn(command, {
 		cwd: projectRoot,
 		env,
 		stdin: "ignore",
@@ -239,8 +258,23 @@ async function run(): Promise<void> {
 	console.log("\n=== Recursion Runtime Contract Harness ===");
 	clearRuntimeEnv();
 	ensureEnvironment(runtime, extensionContext(), pi);
+	equal("extension pins Node-backed adapters to the running executable", process.env.YPI_NODE_BIN, process.execPath);
+	equal(
+		"direct extension use resolves the repository-local Pi executable",
+		process.env.YPI_PI_BIN,
+		path.join(projectRoot, "node_modules", ".bin", "pi"),
+	);
+	const hostileTraceA = "short/hostile";
+	const hostileTraceB = "short?hostile";
+	record(
+		safeTraceId(hostileTraceA) !== safeTraceId(hostileTraceB)
+			&& safeTraceId(hostileTraceA).length === 64
+			&& safeTraceId("ordinary-safe.id") === "ordinary-safe.id",
+		"trace identity hashes raw hostile input while preserving short safe IDs",
+	);
 	equal("default max depth remains empirically bounded", process.env.RLM_MAX_DEPTH, "3");
-	equal("default total call cap is bounded", process.env.RLM_MAX_CALLS, "128");
+	equal("default total call backstop leaves long-tree headroom", process.env.RLM_MAX_CALLS, "65536");
+	equal("default active child concurrency is bounded", process.env.RLM_MAX_CONCURRENT_CALLS, "3");
 	registerNativeRlmQueryTool(pi, runtime);
 	record(Boolean(nativeTool), "native adapter registered");
 	const nativeAdapterSource = readFileSync(path.join(projectRoot, "extensions/ypi/native-tool.ts"), "utf8");
@@ -258,7 +292,7 @@ async function run(): Promise<void> {
 	contains("wrapper prompt exposes runtime-core source", selfHostingPrompt, "export async function runRecursiveChild");
 	contains("wrapper prompt exposes internal runtime owners", selfHostingPrompt, "// child-process.ts");
 	contains("wrapper prompt exposes CLI adapter source", selfHostingPrompt, "export async function main");
-	record(!selfHostingPrompt.includes("# rlm_query — Recursive Language Model sub-call for Pi."), "wrapper prompt does not promote retained legacy CLI as an active owner");
+	record(!selfHostingPrompt.includes("# rlm_query — Recursive Language Model sub-call for Pi."), "wrapper prompt embeds only the thin CLI launcher");
 	process.env.CONTEXT = contextFile;
 	process.env.RLM_PROMPT_FILE = staleRootPromptFile;
 	const taskFilePrompt = buildYpiPrompt(runtime);
@@ -266,6 +300,37 @@ async function run(): Promise<void> {
 	contains("dynamic prompt prioritizes task context over persistent memory", taskFilePrompt, "Inspect it before using persistent memory");
 	delete process.env.CONTEXT;
 	delete process.env.RLM_PROMPT_FILE;
+
+	const transcriptRequiredEnv = {
+		...baseEnv("required-transcripts"),
+		RLM_REQUIRE_TRANSCRIPTS: "1",
+		RLM_SHARED_SESSIONS: "0",
+	};
+	const nativeTranscriptRequired = await invokeNative(
+		transcriptRequiredEnv,
+		"REQUIRED_TRANSCRIPT_PROMPT",
+	);
+	const cliTranscriptRequired = await invokeCli(
+		{
+			...transcriptRequiredEnv,
+			RLM_CALL_COUNTER_FILE: path.join(
+				scratch,
+				"required-transcripts-cli.counter",
+			),
+		},
+		"REQUIRED_TRANSCRIPT_PROMPT",
+	);
+	contains(
+		"native transcript gate rejects missing session transport",
+		nativeTranscriptRequired.error || "",
+		"RLM_SHARED_SESSIONS=1",
+	);
+	contains(
+		"CLI transcript gate rejects missing session transport",
+		cliTranscriptRequired.error || "",
+		"RLM_SHARED_SESSIONS=1",
+	);
+	equal("CLI transcript gate exits nonzero", cliTranscriptRequired.code, 1);
 
 	const prompt = "CONTRACT_PROMPT";
 	const nativeDefault = await invokeNative(baseEnv("native-default"), prompt, "CONTRACT_CONTEXT");
@@ -300,8 +365,13 @@ async function run(): Promise<void> {
 		RLM_CHILD_PROVIDERS: "first-provider,second-provider",
 		RLM_CHILD_THINKING_LEVELS: "low,high",
 	};
-	const routedNative = await invokeNative(routedNativeEnv, prompt, "CONTRACT_CONTEXT");
-	const routedCli = await invokeCli(routedCliEnv, prompt);
+	const routedNative = await invokeNative(
+		routedNativeEnv,
+		prompt,
+		"CONTRACT_CONTEXT",
+		"1",
+	);
+	const routedCli = await invokeCli(routedCliEnv, prompt, "1");
 	if (routedNative.observation && routedCli.observation) {
 		for (const key of ["RLM_DEPTH", "RLM_PROVIDER", "RLM_MODEL", "RLM_THINKING_LEVEL"]) {
 			equal(`depth-routed ${key}`, routedNative.observation[key], routedCli.observation[key]);
@@ -310,7 +380,11 @@ async function run(): Promise<void> {
 		equal("second-depth provider selected", routedNative.observation.RLM_PROVIDER, "second-provider");
 		equal("second-depth thinking selected", routedNative.observation.RLM_THINKING_LEVEL, "high");
 	} else {
-		record(false, "both adapters emitted routed observations");
+		record(
+			false,
+			"both adapters emitted routed observations",
+			`native=${JSON.stringify(routedNative.error)} cli=${JSON.stringify(routedCli.error)} code=${routedCli.code}`,
+		);
 	}
 
 	const malformedNative = await invokeNative({ ...baseEnv("native-malformed"), RLM_DEPTH: "0junk" }, prompt);
@@ -321,15 +395,15 @@ async function run(): Promise<void> {
 		`native=${JSON.stringify(malformedNative.error)} CLI code=${malformedCli.code}`,
 	);
 
-	const noJjNative = await invokeNative({ ...baseEnv("native-no-jj-choice"), RLM_JJ: "auto" }, prompt);
-	const noJjCli = await invokeCli({ ...baseEnv("cli-no-jj-choice"), RLM_JJ: "auto" }, prompt);
+	const reviewNative = await invokeNative(baseEnv("native-read-only"), prompt);
+	const reviewCli = await invokeCli(baseEnv("cli-read-only"), prompt);
 	record(
-		!noJjNative.error
-			&& noJjCli.code === 0
-			&& noJjNative.observation?.ARGS.includes("<--exclude-tools><bash,edit,write>") === true
-			&& noJjCli.observation?.ARGS.includes("<--exclude-tools><bash,edit,write>") === true,
-		"both adapters silently choose read-only review in a non-jj checkout",
-		`native=${JSON.stringify(noJjNative.error)} CLI=${JSON.stringify(noJjCli.error)}`,
+		!reviewNative.error
+			&& reviewCli.code === 0
+			&& reviewNative.observation?.ARGS.includes("<--exclude-tools><bash,edit,write>") === true
+			&& reviewCli.observation?.ARGS.includes("<--exclude-tools><bash,edit,write>") === true,
+		"both adapters choose read-only review without workspace setup",
+		`native=${JSON.stringify(reviewNative.error)} CLI=${JSON.stringify(reviewCli.error)}`,
 	);
 
 	const extensionsOffNative = await invokeNative({ ...baseEnv("native-ext-off"), RLM_CHILD_EXTENSIONS: "0", RLM_ROOT_PROMPT_FILE: staleRootPromptFile }, prompt);
@@ -379,15 +453,6 @@ async function run(): Promise<void> {
 		);
 	}
 
-	const legacyCli = await invokeCli({ ...baseEnv("cli-legacy"), YPI_LEGACY_IMPL: "1" }, prompt);
-	record(legacyCli.code === 0, "retained CLI fallback remains executable", legacyCli.error);
-	if (legacyCli.observation) {
-		equal("retained CLI fallback preserves prompt content", legacyCli.observation.PROMPT_CONTENT, prompt);
-		equal("retained CLI fallback preserves context content", legacyCli.observation.CONTEXT_CONTENT, "CONTRACT_CONTEXT");
-	} else {
-		record(false, "retained CLI fallback emitted a child observation");
-	}
-
 	clearRuntimeEnv();
 	process.env.YPI_EXTENSION_ROOT = projectRoot;
 	process.env.YPI_EXTENSION_PATH = runtime.extensionPath;
@@ -417,7 +482,10 @@ async function run(): Promise<void> {
 	record(Boolean(capturedRootPrompt && existsSync(capturedRootPrompt)), "root prompt is captured before agent start");
 	equal("extension context binds the current root session for shell --fork", process.env.RLM_SESSION_FILE, path.join(sessionDir, "parent.jsonl"));
 	if (capturedRootPrompt) equal("captured root prompt is exact", readFileSync(capturedRootPrompt, "utf8"), "ROOT HUMAN CHARTER");
-	handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" }, lifecycleContext);
+	await handlers.get("session_shutdown")?.(
+		{ type: "session_shutdown", reason: "quit" },
+		lifecycleContext,
+	);
 	record(!capturedRootPrompt || !existsSync(capturedRootPrompt), "root prompt lease is removed at session shutdown");
 
 	console.log(`\nResults: ${pass} passed, ${fail} failed, ${known} known divergences`);

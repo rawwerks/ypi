@@ -1,7 +1,6 @@
 import { Type } from "typebox";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { canExecute, readCostSummary } from "./guardrails.ts";
-import { registerLegacyNativeRlmQueryTool } from "./legacy-native-tool.ts";
 import { appendRuntimeTrace, formatRecursiveResultForTool, runRecursiveChild, type ChildToolActivity } from "./runtime-core.ts";
 import type { YpiRuntime } from "./runtime.ts";
 import { debug } from "./runtime.ts";
@@ -17,17 +16,20 @@ const RlmQueryParams = Type.Object({
 		description: "Copy the current session file into the child session before running.",
 	})),
 	mode: Type.Optional(Type.String({
-		description: "review (default, read-only) or implement (one exclusive writer in an existing clean Git/jj checkout).",
+		description: "review (default, read-only) or implement (root-only writer in an isolated Git worktree).",
 		pattern: "^(review|implement)$",
+	})),
+	scope: Type.Optional(Type.Array(Type.String({
+		description: "Literal repository-relative file or directory path prefix owned by this implementer.",
+		maxLength: 1024,
+	}), {
+		description: "Required for implement mode. Concurrent implementers must declare disjoint scopes.",
+		minItems: 1,
+		maxItems: 64,
 	})),
 });
 
 export function registerNativeRlmQueryTool(pi: ExtensionAPI, runtime: YpiRuntime): void {
-	if (process.env.YPI_LEGACY_IMPL === "1") {
-		registerLegacyNativeRlmQueryTool(pi, runtime);
-		return;
-	}
-
 	const tool = defineTool({
 		name: "rlm_query",
 		label: "Recursive query",
@@ -37,14 +39,11 @@ export function registerNativeRlmQueryTool(pi: ExtensionAPI, runtime: YpiRuntime
 			"Use rlm_query for clear subtasks that benefit from an extra context window.",
 			"Pass exact source text through the context parameter when the child must inspect specific data.",
 			"Use rlm_query mode=review for audits, research, and probes; review is read-only and is the default.",
-			"Use root-only mode=implement for one bounded edit/write unit after scope and verification gates are explicit; the parent runs commands and tests, and parallel implementers are forbidden.",
+			"Use root-only mode=implement with an explicit scope for bounded edit/write work. Parallel implementers require disjoint declared scopes; the parent integrates returned refs, then runs commands and tests.",
 			"Do not recurse past the active RLM_MAX_DEPTH limit.",
 		],
 		parameters: RlmQueryParams,
-		// A sequential batch barrier prevents root edit/write/bash calls from
-		// overlapping a shared-checkout implementer. Parallel read-only fan-out
-		// remains available through shell `rlm_query --async`.
-		executionMode: "sequential" as const,
+		executionMode: "parallel" as const,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const started = Date.now();
@@ -122,6 +121,7 @@ export function registerNativeRlmQueryTool(pi: ExtensionAPI, runtime: YpiRuntime
 					context: params.context,
 					fork: params.fork,
 					mode: params.mode === "implement" ? "implement" : "review",
+					scope: params.scope,
 					caller: "tool",
 					signal,
 					onAdmitted(callCount) {

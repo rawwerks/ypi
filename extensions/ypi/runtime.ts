@@ -11,7 +11,6 @@ export interface YpiRuntime {
 	runtimeCorePath: string;
 	runtimeInternalDir: string;
 	cliAdapterPath: string;
-	legacyRlmQueryPath: string;
 }
 
 function normalizedPath(filePath: string): string {
@@ -41,7 +40,6 @@ export function resolveRuntime(importMetaUrl: string): YpiRuntime {
 		runtimeCorePath: path.join(root, "extensions", "ypi", "runtime-core.ts"),
 		runtimeInternalDir: path.join(root, "extensions", "ypi", "internal"),
 		cliAdapterPath: path.join(root, "extensions", "ypi", "cli.ts"),
-		legacyRlmQueryPath: path.join(root, "rlm_query.legacy"),
 	};
 }
 

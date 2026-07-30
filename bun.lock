@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "ypi",
+      "name": "@ruslanvasylev/ypi",
       "dependencies": {
         "@earendil-works/pi-coding-agent": "0.80.9",
         "typebox": "1.1.38",

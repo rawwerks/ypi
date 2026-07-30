@@ -212,8 +212,6 @@ STDOUT_FILE="$TEST_TMP/ext5_stdout.txt"
 
 export RLM_DEPTH=0
 export RLM_MAX_DEPTH=1
-# This extension E2E is a read-only recursion probe; choose no-jj explicitly.
-export RLM_JJ=0
 
 timeout 45 "$PROJECT_DIR/ypi" -p --no-session "${PI_E2E_ARGS[@]}" \
     "What is 2+2? Reply with ONLY the number." \
@@ -227,29 +225,6 @@ if grep -q "4" "$STDOUT_FILE"; then
     fi
 else
     fail "EXT5: ypi full launch" "wrong answer or crash: $(head -3 "$STDOUT_FILE")"
-fi
-
-# ─── EXT6: hashline.ts loads (complex extension) ─────────────────────────
-# hashline is one of the more complex extensions — good canary
-
-echo "--- EXT6: hashline.ts (complex extension) loads ---"
-
-if [ -f "$PROJECT_DIR/contrib/extensions/hashline.ts" ]; then
-    STDERR_FILE="$TEST_TMP/ext6_stderr.txt"
-    STDOUT_FILE="$TEST_TMP/ext6_stdout.txt"
-
-    timeout 30 pi -p --no-session "${PI_E2E_ARGS[@]}" \
-        -e "$PROJECT_DIR/contrib/extensions/hashline.ts" \
-        "Say OK" \
-        >"$STDOUT_FILE" 2>"$STDERR_FILE" || true
-
-    if grep -qi "Failed to load extension\|Cannot find module\|is not a function\|TypeError" "$STDERR_FILE"; then
-        fail "EXT6: hashline.ts" "$(grep -i "error\|failed\|cannot\|TypeError" "$STDERR_FILE" | head -3)"
-    else
-        pass "EXT6: hashline.ts loads"
-    fi
-else
-    echo "  ⊘ EXT6: skipped (hashline.ts not found)"
 fi
 
 # ─── EXT7: Extension with tool_call handler (new API) ────────────────────

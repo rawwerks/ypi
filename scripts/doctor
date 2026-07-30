@@ -1,12 +1,11 @@
 #!/bin/bash
-# doctor — verify the host `pi` runtime is the one ypi / pi-recursive need.
+# doctor — verify the host `pi` runtime is the one ypi needs.
 #
 # The most common ypi setup failure is a wrong or stale `pi`:
 #   * the OLD package (@mariozechner/pi-coding-agent) shadowing the new one, or
 #   * a version older than the pinned, compatible release (.pi-version).
-# Either way ypi "seems broken" with no clear signal. This makes it loud and
-# self-fixing, so the failure we hit (pi 0.73.1 instead of @earendil 0.79.4)
-# can never silently happen again.
+# Either way ypi can fail without naming the host mismatch. This check makes
+# that mismatch explicit and gives source-checkout recovery instructions.
 #
 # Honors YPI_PI_BIN (same override ypi/rlm_query use) so it checks the exact
 # binary recursion will spawn.
@@ -45,7 +44,7 @@ if [ -n "${YPI_PI_BIN:-}" ]; then
     PI_BIN="$YPI_PI_BIN"
     if [ ! -x "$PI_BIN" ] && ! command -v "$PI_BIN" >/dev/null 2>&1; then
         bad "pi not found at YPI_PI_BIN=$PI_BIN"
-        fixln "bun add -g ${PKG}@${PINNED}  # then unset YPI_PI_BIN or point it at the real pi"
+        fixln "run 'bun install --frozen-lockfile' in $PROJECT_DIR, then unset YPI_PI_BIN or point it at the repository pi"
         exit 1
     fi
 else
@@ -59,8 +58,8 @@ else
     done
     if [ -z "$PI_BIN" ]; then PI_BIN="$(command -v pi 2>/dev/null || true)"; fi
     if [ -z "$PI_BIN" ]; then
-        bad "pi not found in ypi's package dependencies or on PATH"
-        fixln "reinstall ypi (preferred) or bun add -g ${PKG}@${PINNED}"
+        bad "pi not found in ypi's repository dependencies or on PATH"
+        fixln "run 'bun install --frozen-lockfile' in $PROJECT_DIR or set YPI_PI_BIN to a compatible pi"
         exit 1
     fi
 fi
@@ -70,8 +69,8 @@ REAL="$(readlink -f "$PI_BIN" 2>/dev/null || echo "$PI_BIN")"
 case "$REAL" in
     *"$OLD_PKG"*)
         bad "pi is the OLD package: $OLD_PKG"
-        echo -e "${DIM}  ypi/pi-recursive require ${PKG}; the old package is shadowing it.${RESET}"
-        fixln "bun add -g ${PKG}@${PINNED}   (or repoint ~/.bun/bin/pi at the @earendil-works cli.js)"
+        echo -e "${DIM}  ypi requires ${PKG}; the old package is shadowing it.${RESET}"
+        fixln "use $PROJECT_DIR/node_modules/.bin/pi after 'bun install --frozen-lockfile', or set YPI_PI_BIN explicitly"
         exit 1 ;;
     *"$PKG"*)
         ok "pi provided by ${PKG}" ;;
@@ -101,11 +100,11 @@ if [ "$PINNED" = "unknown" ]; then
     note "no .pi-version pin found; installed pi is $INSTALLED"
 elif [ "${INSTALLED%%.*}" != "${PINNED%%.*}" ]; then
     bad "pi major-version mismatch: installed $INSTALLED, pinned $PINNED"
-    fixln "bun add -g ${PKG}@${PINNED}"
+    fixln "run 'bun install --frozen-lockfile' in $PROJECT_DIR or set YPI_PI_BIN to a compatible major version"
     exit 1
 elif ver_lt "$INSTALLED" "$PINNED"; then
     bad "pi too old: installed $INSTALLED < pinned $PINNED"
-    fixln "bun add -g ${PKG}@${PINNED}"
+    fixln "run 'bun install --frozen-lockfile' in $PROJECT_DIR or set YPI_PI_BIN to version $PINNED or newer"
     exit 1
 else
     ok "pi version $INSTALLED satisfies pinned $PINNED"

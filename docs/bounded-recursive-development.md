@@ -1,8 +1,8 @@
 # Bounded Recursive Development
 
-Use this runbook for large, proof-bound, or self-hosting ypi changes. It keeps
-recursive review useful without turning the root session into an unbounded
-orchestration tree.
+Use this runbook for large, proof-bound, or self-hosting ypi changes. It bounds
+simultaneous model generations and preserves evidence without treating a
+reviewer count or a low total-call allowance as a substitute for completion.
 
 This is an operating contract over existing ypi, repository, test, telemetry,
 and eval surfaces. It does not introduce another orchestrator or VCS.
@@ -10,12 +10,13 @@ and eval surfaces. It does not introduce another orchestrator or VCS.
 ## Scope and non-goals
 
 The root agent owns the goal, decomposition, parent-side adjudication, and final
-diff acceptance. Read-only children own reviews and focused probes. One bounded
-implementation unit may be delegated with `rlm_query` `mode=implement` after its
-scope and gates are explicit; never run parallel implementers or distribute
-overlapping runtime edits. Do not add a new result validator or make OpenProse
-the proof owner. `.prose/recursive-development.prose` remains a lightweight
-feature workflow and is not the proof-bound path described here.
+diff acceptance. Read-only children own reviews and focused probes. After
+deterministic discovery makes path scopes explicit and disjoint, the root may
+delegate implementation slices in batches of at most three active children.
+More slices may run in later batches when evidence requires them. The root
+remains the single integration head; descendants cannot request writable
+authority. Do not add a second orchestration owner or result validator. This
+runbook and its persisted envelope are the proof-bound path.
 
 ## Create the envelope once
 
@@ -55,12 +56,18 @@ export YPI_RECURSIVE_RUN_DIR="$RUN_DIR"
 export RLM_TRACE_ID="$RUN_ID"
 export PI_TRACE_FILE="$RUN_DIR/tree.trace"
 export RLM_CALL_COUNTER_FILE="$RUN_DIR/calls"
+export RLM_CONCURRENCY_DIR="$RUN_DIR/concurrency"
 export RLM_COST_FILE="$RUN_DIR/cost.jsonl"
+export RLM_SESSION_DIR="$RUN_DIR/sessions"
 export RLM_CALL_COUNT=0
 export RLM_JSON=1
-export RLM_MAX_DEPTH=2
-export RLM_MAX_CALLS=18
+export RLM_MAX_DEPTH=3
+export RLM_MAX_CALLS=65536
+export RLM_MAX_CONCURRENT_CALLS=3
+export RLM_SHARED_SESSIONS=1
+export RLM_REQUIRE_TRANSCRIPTS=1
 
+mkdir -m 700 "$RLM_SESSION_DIR"
 printf '0\n' > "$RLM_CALL_COUNTER_FILE"
 : > "$RLM_COST_FILE"
 : > "$PI_TRACE_FILE"
@@ -76,19 +83,27 @@ printf '0\n' > "$RLM_CALL_COUNTER_FILE"
   printf 'export RLM_TRACE_ID=%q\n' "$RLM_TRACE_ID"
   printf 'export PI_TRACE_FILE=%q\n' "$PI_TRACE_FILE"
   printf 'export RLM_CALL_COUNTER_FILE=%q\n' "$RLM_CALL_COUNTER_FILE"
+  printf 'export RLM_CONCURRENCY_DIR=%q\n' "$RLM_CONCURRENCY_DIR"
   printf 'export RLM_COST_FILE=%q\n' "$RLM_COST_FILE"
+  printf 'export RLM_SESSION_DIR=%q\n' "$RLM_SESSION_DIR"
   printf 'export RLM_JSON=1\n'
-  printf 'export RLM_MAX_DEPTH=2\n'
-  printf 'export RLM_MAX_CALLS=18\n'
+  printf 'export RLM_MAX_DEPTH=3\n'
+  printf 'export RLM_MAX_CALLS=65536\n'
+  printf 'export RLM_MAX_CONCURRENT_CALLS=3\n'
+  printf 'export RLM_SHARED_SESSIONS=1\n'
+  printf 'export RLM_REQUIRE_TRANSCRIPTS=1\n'
 } > "$RUN_DIR/envelope.sh"
 chmod 600 "$RUN_DIR/envelope.sh"
 ```
 
 At natural checkpoints, report elapsed time when
 `now - YPI_RUN_STARTED_EPOCH >= YPI_RUN_CHECKPOINT_SECONDS`; this is advisory
-only. A call-cap hit stops new child admission, not the task: continue directly
-in the root, preserve completed evidence, and report the topology change without
-asking the user to choose a new cap.
+only. The 65,536 total-call value is emergency fault containment, not a work
+allocation or quality target. If it is ever reached while the proof contract is
+open, stop new child admission, continue directly where possible, preserve the
+evidence, and report the unresolved proof state rather than declaring success.
+Provider-backed proof runs launch the root with
+`--session-dir "$RLM_SESSION_DIR"`; `--no-session` invalidates the run.
 
 ## Resume without resetting
 
@@ -118,6 +133,9 @@ git merge-base --is-ancestor "$YPI_RUN_BASE_HEAD" HEAD
 test -f "$RLM_CALL_COUNTER_FILE"
 test -f "$RLM_COST_FILE"
 test -f "$PI_TRACE_FILE"
+test -d "$RLM_SESSION_DIR"
+test ! -L "$RLM_SESSION_DIR"
+test "$(python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1], follow_symlinks=False).st_mode & 0o777)[2:])' "$RLM_SESSION_DIR")" = 700
 
 export RLM_CALL_COUNT="$(tr -d '[:space:]' < "$RLM_CALL_COUNTER_FILE")"
 ```
@@ -128,57 +146,66 @@ line. A rebase or remote change requires a fresh run instead of silently moving
 proof state. The counter file is authoritative. Explicitly restoring
 `RLM_CALL_COUNT` prevents a missing or contaminated ambient value from becoming
 the fallback. The cost ledger preserves observational spend and token telemetry
-across sessions.
+across sessions. The concurrency directory also holds the root-generation
+authority manifest. The local socket normally lives there; when that pathname
+would exceed the Unix-domain limit, the runtime uses and retires a separate
+short private directory. These are runtime-owned internal state: do not edit,
+replace, or reuse them as a continuation control surface.
 
-## Call allocation
+## Admission and coverage
 
-The 18-call ceiling is allocated as follows:
+At most three child model generations are active across the tree. Additional
+siblings queue and run when capacity becomes available; they are not refused
+because three earlier children existed. Depth remains three. Total child calls
+continue until the declared proof obligations are terminal, a concrete blocker
+prevents further evidence, or the emergency backstop is reached.
 
-- three independent reviewers with at most two sequential probes each: 9;
-- one focused re-review with at most one probe: 2;
-- one independent closeout with at most one probe: 2;
-- disagreement, failed-admission, or countercheck reserve: 5.
-
-At most three top-level reviewers run concurrently. A reviewer may have only one
-probe in flight. This bounds redundant fan-out while retaining the three distinct risk
-viewpoints. Parent adjudication is direct root work and
-never consumes a child-call slot.
+Deduplicate already-proved mechanisms and charter new calls against open
+questions. Scheduling heuristics may reduce active concurrency, but they never
+waive required sibling coverage, descendant checks, failed-gate repair, or
+closeout evidence.
 
 ## Execution order
 
 1. **Discover deterministically.** Use `rg`, Python, source inspection, and
    existing validators before asking a model.
-2. **Choose one implementation head.** Explore and decide in the root. Once a
-   bounded unit has explicit files, constraints, and tests, delegate it to one
-   `mode=implement` child or implement it directly when writing the charter
-   would cost as much as the edit. The root reviews changed scope and the final
-   diff and runs focused gates; it does not absorb a worker's trial-and-error.
-3. **Run three independent reviews in one turn.** Do not expose sibling reports:
+2. **Choose one root integration head.** Explore and decide in the root. Once
+   bounded units have explicit, non-overlapping file scopes, constraints, and
+   tests, delegate at most three simultaneous `mode=implement` children in one
+   native batch.
+   Implement directly when partitioning would cost as much as the edits. Wait
+   for the full batch, review each attempt reference, declared scope, snapshot
+   diff, and worktree-removal verdict, then apply the refs without automatic
+   conflict resolution and run focused gates. Dispatch later batches when new
+   disjoint units are discovered.
+3. **Cover independent risk facets.** Start disjoint reviews concurrently when
+   useful, with no more than three active. Do not expose sibling reports:
    - runtime/lifecycle: deadlines, cancellation, process groups, output,
-     async, and jj cleanup;
-   - packaging/evidence: routing, prompt authority, installed resolution,
-     fallbacks, eval honesty, and release gates;
+     async, worktree/ref finalization, and recovery;
+   - entry/evidence: routing, prompt authority, source-checkout resolution,
+     generated artifacts, eval honesty, and delivery gates;
    - security/cleanup: path containment, permissions, temp ownership,
      symlinks, deletion scope, and hostile metadata.
 4. **Absorb skeptically.** The parent deduplicates by mechanism, reproduces each
    accepted finding, and records it in the existing blocker/telemetry ledger.
 5. **Fix serially.** Re-evaluate only invalidated owners.
-6. **Run one focused re-review.** Give it open blockers and changed paths; ask
-   only for resolution failures and regressions. Add another reviewer only for
-   a named disagreement the parent cannot resolve.
-7. **Run one independent closeout.** Stop the review loop after PASS unless a
-   direct counterexample invalidates it.
+6. **Focus re-review on reopened evidence.** Give it open blockers and changed
+   paths; ask for resolution failures and regressions. Add targeted reviewers
+   when a named disagreement or uncovered mechanism remains.
+7. **Run independent closeout.** Stop the review loop only when the proof
+   ledger is terminal. A direct counterexample reopens the affected owner even
+   after a prior PASS.
 
 If a second broad `REOPEN` occurs or root context degrades, write a continuation
 brief and resume with the same envelope before making more edits.
 
 ## Child result boundary
 
-Each reviewer returns at most 12 KiB and up to eight highest-severity findings
-inline. Every inline finding includes `path:line`, mechanism, user impact, and
-one reproduction command or artifact reference. If more findings exist, the
-child writes the complete report beneath the run directory and returns its path
-plus `additional_finding_count`; findings are never silently discarded.
+Every inline finding includes `path:line`, mechanism, user impact, and one
+reproduction command or artifact reference. When the transport cannot carry the
+complete report safely, the child writes the unabridged report beneath the run
+directory and returns its path plus an integrity hash. Findings are never
+discarded because an arbitrary count was reached.
 
 Long reproduction scripts belong in run artifacts, not the parent response. No
 new schema validator is required; this is a charter and parent-absorption rule.
@@ -190,46 +217,53 @@ Mechanical discovery stays in deterministic tools. A cheaper model is allowed
 only for a bounded synthesis call launched in its own shell process with an
 explicit provider/model route; do not set global depth routing.
 
-Native calls are sequential so a shared-checkout implementer cannot overlap
-root mutations. Parallel evidence uses at most three shell `rlm_query --async`
-read-only jobs and only after a notification smoke proves that this Pi instance
-receives its sentinel and useful root work is queued. If the smoke fails or
-`YPI_INSTANCE_ID` is absent, stay sequential rather than debugging a replacement
-during the run.
+Native calls may run in parallel. Writable active fan-out is capped at three
+and requires mechanically disjoint declared scopes; do not include root
+mutators in the same batch or integrate before all results return. Parallel shell
+`rlm_query --async` remains read-only. Record each returned job, output,
+sentinel, and PID, then collect every required result explicitly. A host
+completion watcher may wake the root, but it does not adjudicate or collect the
+result. If the root cannot keep ownership of collection and cancellation, stay
+sequential.
+
+Cancelling the root terminalizes its active coordinator generation before
+registered child process groups are signalled. Treat any admitted call after
+that terminal marker, or any transcript lacking its post-cleanup lifecycle
+terminal record, as a failed proof even when a child completion record exists.
 
 ## Freeze before provider-backed evaluation
 
 Before the first live-model lane:
 
 1. close all source-review blockers;
-2. run focused tests, package/install checks, and release consistency;
-3. run `scripts/encrypt-prose --check`;
-4. run `make test-eval-contracts` with mock Pi;
+2. run `make test-fast` and `make test-extensions`;
+3. run `make test-eval-contracts` with mock Pi;
+4. validate required transcripts through their post-cleanup lifecycle terminal
+   records;
 5. commit every tracked change;
-6. require a clean worktree and record exact HEAD.
+6. require a clean checkout and record exact HEAD.
 
 Runtime parity runs only through the existing facade:
 
 ```bash
 YPI_EVAL_OUTPUT_ROOT="$RUN_DIR/eval" make eval-runtime-parity LANE=canonical-cli
-YPI_EVAL_OUTPUT_ROOT="$RUN_DIR/eval" make eval-runtime-parity LANE=legacy-cli
 YPI_EVAL_OUTPUT_ROOT="$RUN_DIR/eval" make eval-runtime-parity LANE=canonical-native
-YPI_EVAL_OUTPUT_ROOT="$RUN_DIR/eval" make eval-runtime-parity LANE=legacy-native
 ```
 
 `tests/eval/runtime-parity/run-lane.sh` owns recursion-environment sanitization,
 private counters/ledgers, exact transition and call-count proof, and semantic
-scoring. Do not construct an ad-hoc `env -i` lane. Do not edit tracked files
-while lanes run. A tracked edit invalidates final runtime evidence. Permit one
-rerun only for a documented provider/transient failure.
+scoring. Run the two independent lanes concurrently with explicit collection.
+Do not construct an ad-hoc `env -i` lane. Do not edit tracked files while lanes
+run. A tracked edit invalidates final runtime evidence. Permit one rerun only
+for a documented provider or transport failure.
 
 ## Closeout and delivery
 
-Completion requires resolved telemetry, deterministic and installed-package
-checks, exact-final-commit runtime contracts, parent verification, truth-seeking
-review, telemetry validation, encryption validation, and honest branch state.
-Import a recursive trace into Agent Protocol only when child execution itself is
-being promoted as proof.
+Completion requires resolved telemetry, deterministic source-checkout checks,
+exact-final-commit runtime contracts, parent verification, independent review,
+live recursion proof when required, and honest branch state. Import a recursive
+trace into Agent Protocol only when child execution itself is being promoted as
+proof.
 
 Before any push, resolve the push URL and run `scripts/validate-push-owner`.
 Remotes whose exact owner namespace is not `ruslanvasylev` are read-only unless
@@ -240,8 +274,9 @@ inferred or suggested by this delivery workflow.
 ## Metrics
 
 Record allocations, spawned sessions, overlapping child-minutes, root wall
-time, transcript bytes, cost/tokens from the run ledger, duplicate mechanisms,
-timeouts, and rejected live-model lanes. The historical non-dollar baseline is 131
+time, transcript bytes, receipt validation, root-plus-child usage, cost/tokens
+from the run ledger, duplicate mechanisms, timeouts, and rejected live-model
+lanes. The historical non-dollar baseline is 131
 allocations, 42 sessions, 842.6 overlapping child-minutes, 31.4 MB transcripts,
 and about 9h20m root wall time. The historical orchestration had no comparable
 `RLM_COST_FILE`; do not invent a dollar baseline or savings percentage.

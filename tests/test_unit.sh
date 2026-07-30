@@ -112,6 +112,9 @@ if [ -n "${CONTEXT:-}" ] && [ -f "${CONTEXT:-}" ]; then
         echo "CONTEXT_CONTENT=$(cat "$CONTEXT")"
     fi
 fi
+if [ "${YPI_TEST_RECURSE_ONCE:-0}" = "1" ] && [ "$RLM_DEPTH" = "1" ]; then
+    exec rlm_query "Nested depth proof"
+fi
 MOCK_PI
 chmod +x "$MOCK_BIN/pi"
 
@@ -126,8 +129,6 @@ for var in $(env | grep '^YPI_' | cut -d= -f1); do unset "$var"; done
 # use the mock. A live parent ypi session exports YPI_PI_BIN to the real pi;
 # without this override unit tests accidentally make real model calls.
 export YPI_PI_BIN="$MOCK_BIN/pi"
-# The unit harness explicitly chooses no-jj read-only children.
-export RLM_JJ=0
 # Disable JSON mode in unit tests — mock pi doesn't output JSON
 export RLM_JSON=0
 
@@ -213,16 +214,29 @@ OUTPUT=$(
 )
 assert_contains "T4: parent context inherited" "dogs" "$OUTPUT"
 
+# T4b: an explicit marker controls whether stdin is read, not whether an empty
+# read suppresses the inherited context fallback.
+OUTPUT=$(
+    CONTEXT="$TEST_TMP/parent_ctx.txt" \
+    RLM_STDIN=1 \
+    RLM_DEPTH=0 \
+    RLM_MAX_DEPTH=3 \
+    RLM_PROVIDER=test-provider \
+    RLM_MODEL=test-model \
+    rlm_query "What animal?" </dev/null
+)
+assert_contains "T4b: explicit empty stdin falls back to parent context" "dogs" "$OUTPUT"
+
 # ─── Test Group: Depth Handling ───────────────────────────────────────────
 
 echo ""
 echo "=== Depth Handling ==="
 
-# T5: at max depth, rlm_query is removed from child's PATH
+# T5: a root can launch the child at the configured maximum depth.
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
-    RLM_DEPTH=2 \
-    RLM_MAX_DEPTH=3 \
+    RLM_DEPTH=0 \
+    RLM_MAX_DEPTH=1 \
     RLM_PROVIDER=test-provider \
     RLM_MODEL=test-model \
     rlm_query "Max depth question?"
@@ -247,11 +261,12 @@ set -e
 assert_contains "T6: beyond max depth error" "Max depth exceeded" "$OUTPUT"
 assert_not_contains "T6: beyond max depth no pi call" "MOCK_PI_CALLED" "$OUTPUT"
 
-# T7: depth increments correctly across levels
+# T7: a real nested child inherits root authority and increments depth.
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
-    RLM_DEPTH=1 \
+    RLM_DEPTH=0 \
     RLM_MAX_DEPTH=4 \
+    YPI_TEST_RECURSE_ONCE=1 \
     RLM_PROVIDER=test-provider \
     RLM_MODEL=test-model \
     RLM_SYSTEM_PROMPT="$PROJECT_DIR/SYSTEM_PROMPT.md" \
@@ -292,15 +307,6 @@ OUTPUT=$(
 assert_contains "T8b: ypi extension passed to child" "-e $PROJECT_DIR/extensions/recursive.ts" "$OUTPUT"
 assert_not_contains "T8b: no duplicate system prompt with extension" "--system-prompt" "$OUTPUT"
 
-# T8c: the retained fallback embeds its own active implementation when it must
-# self-host without the canonical extension, not the thin canonical launcher.
-OUTPUT=$(
-    CONTEXT="$TEST_TMP/ctx.txt" YPI_LEGACY_IMPL=1 RLM_EXTENSIONS=0 \
-    RLM_DEPTH=0 RLM_MAX_DEPTH=3 rlm_query "Legacy self-host source?"
-)
-assert_contains "T8c: retained fallback embeds active legacy source" "LEGACY_SELF_SOURCE=1" "$OUTPUT"
-assert_not_contains "T8c: retained fallback does not embed thin launcher" "THIN_SELF_SOURCE=1" "$OUTPUT"
-
 # T9: missing system prompt file → no --system-prompt arg
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
@@ -336,8 +342,6 @@ assert_contains "T10: trace has depth" "depth=0→1" "$TRACE_CONTENT"
 assert_not_contains "T10: trace excludes private prompt text" "Traced question" "$TRACE_CONTENT"
 
 # T11: an automatic private trace is created when no path is supplied.
-AUTO_TRACE="$TEST_TMP/rlm_trace_auto-trace.jsonl"
-rm -f "$AUTO_TRACE"
 OUTPUT=$(
     CONTEXT="$TEST_TMP/ctx.txt" \
     RLM_DEPTH=0 \
@@ -347,7 +351,21 @@ OUTPUT=$(
     RLM_TRACE_ID=auto-trace \
     rlm_query "Automatically traced question?"
 )
+AUTO_TRACE_LABEL=$(printf '%s' auto-trace | sha256sum | cut -c1-8)
+mapfile -t AUTO_TRACES < <(
+    find "$TEST_TMP" -mindepth 2 -maxdepth 2 \
+        -path "$TEST_TMP/ypi_runtime_${AUTO_TRACE_LABEL}_*/trace.jsonl" \
+        -type f -print
+)
+if [ "${#AUTO_TRACES[@]}" -eq 1 ]; then
+    AUTO_TRACE="${AUTO_TRACES[0]}"
+    pass "T11: exactly one randomized runtime trace created"
+else
+    AUTO_TRACE="$TEST_TMP/missing-auto-trace"
+    fail "T11: exactly one randomized runtime trace created" "count=${#AUTO_TRACES[@]}"
+fi
 assert_file_exists "T11: automatic trace file created" "$AUTO_TRACE"
+if [ "$(stat -c '%a' "$(dirname "$AUTO_TRACE")" 2>/dev/null || true)" = "700" ]; then pass "T11: automatic runtime directory is private"; else fail "T11: automatic runtime directory is private" "mode=$(stat -c '%a' "$(dirname "$AUTO_TRACE")" 2>/dev/null || true)"; fi
 if [ "$(stat -c '%a' "$AUTO_TRACE")" = "600" ]; then pass "T11: automatic trace is private"; else fail "T11: automatic trace is private" "mode=$(stat -c '%a' "$AUTO_TRACE")"; fi
 assert_not_contains "T11: automatic trace excludes prompt text" "Automatically traced question" "$(cat "$AUTO_TRACE")"
 
@@ -385,7 +403,7 @@ OUTPUT=$(
 )
 assert_contains "T14: default depth=0→1" "RLM_DEPTH=1" "$OUTPUT"
 assert_contains "T14: default maximum depth is three" "RLM_MAX_DEPTH=3" "$OUTPUT"
-assert_contains "T14: default total call cap is bounded" "RLM_MAX_CALLS=128" "$OUTPUT"
+assert_contains "T14: default total call backstop leaves long-tree headroom" "RLM_MAX_CALLS=65536" "$OUTPUT"
 # T14b: provider/model must NOT be hardcoded — Pi's defaults should be used
 assert_contains "T14: no hardcoded provider" "RLM_PROVIDER=" "$OUTPUT"
 assert_not_contains "T14: no cerebras default" "cerebras" "$OUTPUT"
@@ -405,7 +423,6 @@ assert_contains "T14c: explicit model passes through" "--model claude-opus-4-6" 
 
 # T14e: bare ypi root launcher defers provider/model defaults to Pi settings
 OUTPUT=$(
-    YPI_QUIET=1 \
     "$PROJECT_DIR/ypi" -p --no-session "Launcher default routing?"
 )
 assert_not_contains "T14e: launcher does not hardcode provider" "--provider" "$OUTPUT"
@@ -419,7 +436,6 @@ assert_not_contains "T14e: launcher does not build system prompt" "--system-prom
 OUTPUT=$(
     RLM_PROVIDER=openrouter \
     RLM_MODEL=openai/gpt-5.5:xhigh \
-    YPI_QUIET=1 \
     "$PROJECT_DIR/ypi" -p --no-session "Launcher model routing?"
 )
 assert_contains "T14f: launcher provider from env" "--provider openrouter" "$OUTPUT"
@@ -429,7 +445,6 @@ assert_contains "T14f: launcher model from env" "--model openai/gpt-5.5:xhigh" "
 OUTPUT=$(
     RLM_PROVIDER=openrouter \
     RLM_MODEL=openai/gpt-5.5:xhigh \
-    YPI_QUIET=1 \
     "$PROJECT_DIR/ypi" --provider anthropic --model claude-haiku -p --no-session "Launcher explicit routing?"
 )
 assert_contains "T14g: launcher explicit provider" "--provider anthropic" "$OUTPUT"

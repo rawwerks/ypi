@@ -43,8 +43,6 @@ done
 HEAD_BEFORE="$(git rev-parse HEAD)"
 "$ROOT_DIR/scripts/pre-push-checks"
 "$ROOT_DIR/scripts/doctor"
-"$ROOT_DIR/scripts/check-release-consistency"
-"$ROOT_DIR/scripts/encrypt-prose" --check
 HEAD_AFTER="$(git rev-parse HEAD)"
 if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ] || ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
   echo "scripts/land: checkout changed during validation; rerun on the final clean commit" >&2

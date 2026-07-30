@@ -1,8 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { acquireWorkspace } from "../extensions/ypi/internal/workspace-policy.ts";
+import { acquireWorkspace, WorkspaceFinalizationError } from "../extensions/ypi/internal/workspace-policy.ts";
 
 let pass = 0;
 let fail = 0;
@@ -10,34 +10,40 @@ function record(ok: boolean, label: string, detail = "") {
 	if (ok) { pass++; console.log(`  ✓ ${label}`); }
 	else { fail++; console.error(`  ✗ ${label}${detail ? `: ${detail}` : ""}`); }
 }
-function git(cwd: string, ...args: string[]) {
-	// Drop inherited GIT_* (a git hook exports GIT_DIR/GIT_WORK_TREE, which
-	// would point fixture commands at the parent repository), then set the
-	// deterministic identity this harness needs.
+
+function gitEnvironment(): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {};
 	for (const [key, value] of Object.entries(process.env)) {
-		if (key.startsWith("GIT_")) continue;
-		env[key] = value;
+		if (!key.startsWith("GIT_")) env[key] = value;
 	}
 	env.GIT_AUTHOR_NAME = "ypi-test";
 	env.GIT_AUTHOR_EMAIL = "ypi@example.invalid";
 	env.GIT_COMMITTER_NAME = "ypi-test";
 	env.GIT_COMMITTER_EMAIL = "ypi@example.invalid";
-	const result = spawnSync("git", args, { cwd, encoding: "utf8", env });
+	return env;
+}
+
+function git(cwd: string, ...args: string[]) {
+	const result = spawnSync("git", args, { cwd, encoding: "utf8", env: gitEnvironment() });
 	if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
 	return String(result.stdout || "").trim();
 }
+
 function fixture(): string {
 	const root = mkdtempSync(path.join(tmpdir(), "ypi_workspace_policy."));
 	git(root, "init", "-q");
+	writeFileSync(path.join(root, ".gitignore"), "ignored/\n");
 	writeFileSync(path.join(root, "tracked.txt"), "base\n");
-	git(root, "add", "tracked.txt");
+	git(root, "add", ".gitignore", "tracked.txt");
 	git(root, "commit", "-qm", "base");
 	return root;
 }
+
 function expectThrow(label: string, expected: string, fn: () => unknown) {
-	try { fn(); record(false, label, "expected throw"); }
-	catch (error) {
+	try {
+		fn();
+		record(false, label, "expected throw");
+	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		record(message.includes(expected), label, message);
 	}
@@ -46,69 +52,153 @@ function expectThrow(label: string, expected: string, fn: () => unknown) {
 console.log("\n=== Workspace policy harness ===");
 const reviewRoot = fixture();
 const review = acquireWorkspace({ cwd: reviewRoot, childDepth: 1, mode: "review" });
-record(review.readOnly && review.mode === "read-only" && review.cwd === reviewRoot, "non-jj review silently stays read-only");
-record(!existsSync(path.join(reviewRoot, ".jj")), "review never initializes jj");
+record(review.readOnly && review.mode === "read-only" && review.cwd === reviewRoot, "review stays read-only");
 record(review.finalize().changedPaths.length === 0, "review emits an empty complete change report");
 review.cleanup();
+rmSync(reviewRoot, { recursive: true, force: true });
 
 const cleanRoot = fixture();
-const writer = acquireWorkspace({ cwd: cleanRoot, childDepth: 1, mode: "implement" });
-record(!writer.readOnly && writer.mode === "git-shared" && writer.quiesceProcessGroup, "clean Git implementer acquires one shared writer lease");
-const lockPath = git(cleanRoot, "rev-parse", "--path-format=absolute", "--git-path", "ypi-shared-writer.lock");
-record(existsSync(lockPath), "writer lease is materialized inside existing Git metadata");
-expectThrow("second implementer is rejected while lease is held", "Another ypi implementer", () => acquireWorkspace({ cwd: cleanRoot, childDepth: 1, mode: "implement" }));
-writeFileSync(path.join(cleanRoot, "tracked.txt"), "changed\n");
-writeFileSync(path.join(cleanRoot, "space name.txt"), "new\n");
+const baselineHead = git(cleanRoot, "rev-parse", "HEAD");
+const hookSentinel = `${cleanRoot}.internal-git-hook-ran`;
+const hooks = path.join(git(cleanRoot, "rev-parse", "--absolute-git-dir"), "hooks");
+for (const name of ["post-checkout", "reference-transaction"]) {
+	const hook = path.join(hooks, name);
+	writeFileSync(hook, `#!/bin/sh\nprintf '%s\\n' ran >> '${hookSentinel}'\n`);
+	chmodSync(hook, 0o755);
+}
+const writer = acquireWorkspace({ cwd: cleanRoot, childDepth: 1, mode: "implement", scope: ["tracked.txt", "space name.txt"] });
+record(
+	!writer.readOnly
+		&& writer.mode === "git-worktree"
+		&& writer.quiesceProcessGroup
+		&& writer.cwd !== cleanRoot
+		&& existsSync(writer.cwd),
+	"clean Git implementer acquires an isolated worktree lease",
+);
+record(!existsSync(hookSentinel), "internal worktree creation does not execute repository hooks");
+const commonDir = git(cleanRoot, "rev-parse", "--path-format=absolute", "--git-common-dir");
+const registryRoot = path.join(commonDir, "ypi-implementers", "leases");
+record(existsSync(registryRoot), "implementer lease is persisted in common Git metadata");
+expectThrow(
+	"overlapping implementer is rejected while lease is held",
+	"overlaps live implementer",
+	() => acquireWorkspace({ cwd: cleanRoot, childDepth: 1, mode: "implement", scope: ["tracked.txt"] }),
+);
+writeFileSync(path.join(writer.cwd, "tracked.txt"), "changed\n");
+writeFileSync(path.join(writer.cwd, "space name.txt"), "new\n");
+record(
+	readFileSync(path.join(cleanRoot, "tracked.txt"), "utf8") === "base\n"
+		&& !existsSync(path.join(cleanRoot, "space name.txt"))
+		&& git(cleanRoot, "status", "--porcelain=v2", "--untracked-files=all") === "",
+	"implementer edits never reach the real checkout",
+);
 const report = writer.finalize();
-record(report.reportComplete && report.changedPaths.includes("tracked.txt") && report.changedPaths.includes("space name.txt"), "implementer reports tracked and untracked changed paths", JSON.stringify(report));
 writer.cleanup();
-record(!existsSync(lockPath), "owned writer lease is released after final report");
-record(readFileSync(path.join(cleanRoot, "tracked.txt"), "utf8") === "changed\n", "shared implementer work remains in the parent checkout for review");
+record(
+	report.reportComplete
+		&& report.workspaceMode === "git-worktree"
+		&& report.treeRestored === true
+		&& report.changedPaths.includes("tracked.txt")
+		&& report.changedPaths.includes("space name.txt")
+		&& Boolean(report.attemptRef)
+		&& Boolean(report.attemptCommit),
+	"implementer reports a verified attempt ref and changed paths",
+	JSON.stringify(report),
+);
+record(!existsSync(writer.cwd), "ephemeral implementer worktree is removed after verified snapshot");
+record(!existsSync(hookSentinel), "internal attempt-ref finalization does not execute repository hooks");
+record(
+	readFileSync(path.join(cleanRoot, "tracked.txt"), "utf8") === "base\n"
+		&& !existsSync(path.join(cleanRoot, "space name.txt"))
+		&& git(cleanRoot, "status", "--porcelain=v2", "--untracked-files=all") === "",
+	"real checkout remains at its clean baseline after finalization",
+);
+record(git(cleanRoot, "rev-parse", report.attemptRef!) === report.attemptCommit, "attempt ref resolves to the reported commit");
+record(
+	git(cleanRoot, "show", `${report.attemptRef}:tracked.txt`) === "changed"
+		&& git(cleanRoot, "show", `${report.attemptRef}:space name.txt`) === "new",
+	"attempt ref contains the exact tracked and untracked edits",
+);
+git(cleanRoot, "cherry-pick", "-n", report.attemptCommit!);
+record(
+	readFileSync(path.join(cleanRoot, "tracked.txt"), "utf8") === "changed\n"
+		&& readFileSync(path.join(cleanRoot, "space name.txt"), "utf8") === "new\n",
+	"ordinary Git applies the complete implementer attempt",
+);
+git(cleanRoot, "reset", "--hard", baselineHead);
+git(cleanRoot, "clean", "-fd");
+
+const cleanupTmp = mkdtempSync(path.join(tmpdir(), "ypi_ref_cleanup."));
+const cleanupScript = path.resolve(import.meta.dir, "..", "rlm_cleanup");
+const cleanupDry = spawnSync(cleanupScript, ["--repo", cleanRoot, "--attempt-age", "0"], {
+	encoding: "utf8",
+	env: { ...gitEnvironment(), TMPDIR: cleanupTmp },
+});
+record(
+	cleanupDry.status === 0
+			&& cleanupDry.stdout.includes("Attempt refs older than 0m: 1 (preserved)")
+			&& git(cleanRoot, "rev-parse", report.attemptRef!) === report.attemptCommit,
+		"attempt-ref inspection remains dry-run by default",
+	cleanupDry.stderr,
+);
+const cleanupForced = spawnSync(cleanupScript, ["--repo", cleanRoot, "--attempt-age", "0", "--force"], {
+	encoding: "utf8",
+	env: { ...gitEnvironment(), TMPDIR: cleanupTmp },
+});
+record(
+	cleanupForced.status === 0
+		&& cleanupForced.stdout.includes("Attempt refs older than 0m: 1 (preserved)")
+		&& git(cleanRoot, "rev-parse", report.attemptRef!) === report.attemptCommit,
+	"forced cleanup preserves attempt refs because age is not deletion authority",
+	cleanupForced.stderr,
+);
+rmSync(cleanupTmp, { recursive: true, force: true });
 
 const dirtyRoot = fixture();
 writeFileSync(path.join(dirtyRoot, "tracked.txt"), "dirty\n");
-expectThrow("dirty checkout declines implement mode", "requires a clean Git checkout", () => acquireWorkspace({ cwd: dirtyRoot, childDepth: 1, mode: "implement" }));
-const dirtyLock = git(dirtyRoot, "rev-parse", "--path-format=absolute", "--git-path", "ypi-shared-writer.lock");
-record(!existsSync(dirtyLock), "dirty-check rejection leaves no writer lease");
-record(!existsSync(path.join(dirtyRoot, ".jj")), "implement rejection never initializes jj");
+expectThrow(
+	"dirty checkout declines implement mode",
+	"requires a clean Git checkout",
+	() => acquireWorkspace({ cwd: dirtyRoot, childDepth: 1, mode: "implement", scope: ["tracked.txt"] }),
+);
+const dirtyCommon = git(dirtyRoot, "rev-parse", "--path-format=absolute", "--git-common-dir");
+record(!existsSync(path.join(dirtyCommon, "ypi-implementers", "leases")), "dirty-check rejection leaves no implementer registry");
+rmSync(dirtyRoot, { recursive: true, force: true });
 
-const jjRoot = fixture();
-mkdirSync(path.join(jjRoot, ".jj", "repo"), { recursive: true });
-const jjFakeBin = mkdtempSync(path.join(tmpdir(), "ypi_fake_jj_exclusive."));
-const jjLogCount = path.join(jjFakeBin, "log-count");
-const jjDiffArgs = path.join(jjFakeBin, "diff-args");
-const jjFake = path.join(jjFakeBin, "jj");
-writeFileSync(jjFake, `#!/usr/bin/env bash
-if [ "$1" = root ]; then printf '%s\\n' "${jjRoot}"; exit 0; fi
-if [ "$1" = workspace ] && [ "$2" = add ]; then mkdir -p "\${@: -1}"; exit 0; fi
-if [ "$1" = workspace ] && [ "$2" = forget ]; then exit 0; fi
-if [ "$1" = log ]; then n=$(cat "${jjLogCount}" 2>/dev/null || echo 0); if [ "$n" -eq 0 ]; then echo baseline-change; else echo final-change; fi; echo $((n+1)) > "${jjLogCount}"; exit 0; fi
-if [ "$1" = diff ]; then printf '%s\\n' "$*" > "${jjDiffArgs}"; echo 'M tracked.txt'; exit 0; fi
-exit 1
-`);
-chmodSync(jjFake, 0o755);
-process.env.YPI_JJ_BIN = jjFake;
-const jjWriter = acquireWorkspace({ cwd: jjRoot, childDepth: 1, mode: "implement" });
-record(jjWriter.mode === "jj" && existsSync(path.join(jjRoot, ".jj", "repo", "ypi-implementer.lock")), "existing jj implementer acquires a repository-wide lease");
-expectThrow("second jj implementer is rejected while lease is held", "Another ypi implementer", () => acquireWorkspace({ cwd: jjRoot, childDepth: 1, mode: "implement" }));
-const jjReport = jjWriter.finalize();
-record(jjReport.baselineHead === "baseline-change" && jjReport.finalHead === "final-change" && jjReport.changedPaths.includes("tracked.txt"), "jj report spans baseline through final working-copy change", JSON.stringify(jjReport));
-record(readFileSync(jjDiffArgs, "utf8").includes("--from baseline-change --to @"), "jj report compares the full implementation range");
-jjWriter.cleanup();
-record(!existsSync(path.join(jjRoot, ".jj", "repo", "ypi-implementer.lock")), "jj writer lease is released after cleanup");
-delete process.env.YPI_JJ_BIN;
-
-const slowRoot = fixture();
-mkdirSync(path.join(slowRoot, ".jj", "repo"), { recursive: true });
-const fakeBin = mkdtempSync(path.join(tmpdir(), "ypi_fake_jj."));
-const registry = path.join(fakeBin, "registry");
-const fakeJj = path.join(fakeBin, "jj");
-writeFileSync(fakeJj, `#!/usr/bin/env bash\nif [ "$1" = root ]; then printf '%s\\n' "${slowRoot}"; exit 0; fi\nif [ "$1" = workspace ] && [ "$2" = add ]; then touch "${registry}"; sleep 30; fi\nif [ "$1" = workspace ] && [ "$2" = forget ]; then rm -f "${registry}"; exit 0; fi\n`);
-chmodSync(fakeJj, 0o755);
-process.env.YPI_JJ_BIN = fakeJj;
-expectThrow("implementer jj setup obeys the active invocation deadline", "RLM_TIMEOUT expired during jj workspace add", () => acquireWorkspace({ cwd: slowRoot, childDepth: 1, mode: "implement", setupDeadlineMilliseconds: Date.now() + 200 }));
-delete process.env.YPI_JJ_BIN;
-record(!existsSync(registry), "timed-out existing-jj setup forgets provisional registration");
+const ignoredRoot = fixture();
+const ignoredWriter = acquireWorkspace({ cwd: ignoredRoot, childDepth: 1, mode: "implement", scope: [".gitignore", "ignored"] });
+writeFileSync(path.join(ignoredWriter.cwd, ".gitignore"), "");
+mkdirSync(path.join(ignoredWriter.cwd, "ignored"));
+writeFileSync(path.join(ignoredWriter.cwd, "ignored", "leak.txt"), "must not disappear\n", { flag: "w" });
+let ignoredFailure: WorkspaceFinalizationError | undefined;
+try {
+	ignoredWriter.finalize();
+} catch (error) {
+	if (error instanceof WorkspaceFinalizationError) ignoredFailure = error;
+}
+ignoredWriter.cleanup();
+record(
+	Boolean(ignoredFailure)
+		&& ignoredFailure?.report.reportComplete === false
+		&& ignoredFailure.report.treeRestored === false
+		&& ignoredFailure.message.includes("baseline checkout"),
+	"unsnapshotable ignored write fails finalization loudly",
+	ignoredFailure?.message,
+);
+record(
+	existsSync(path.join(ignoredWriter.cwd, "ignored", "leak.txt"))
+		&& readFileSync(path.join(ignoredWriter.cwd, "ignored", "leak.txt"), "utf8") === "must not disappear\n"
+		&& git(ignoredRoot, "status", "--porcelain=v2", "--untracked-files=all") === "",
+	"snapshot failure preserves the isolated primary copy and real checkout",
+);
+git(ignoredRoot, "worktree", "remove", "--force", ignoredWriter.cwd);
+rmSync(path.dirname(ignoredWriter.cwd), { recursive: true, force: true });
+const ignoredCommon = git(ignoredRoot, "rev-parse", "--path-format=absolute", "--git-common-dir");
+rmSync(path.join(ignoredCommon, "ypi-implementers"), { recursive: true, force: true });
+rmSync(path.join(ignoredCommon, "ypi-implementers.lock"), { recursive: true, force: true });
+rmSync(ignoredRoot, { recursive: true, force: true });
+rmSync(cleanRoot, { recursive: true, force: true });
+rmSync(hookSentinel, { force: true });
 
 console.log(`\nResults: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

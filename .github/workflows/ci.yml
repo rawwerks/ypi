@@ -1,12 +1,11 @@
 name: CI
 
 # Hermetic PR/push gate — the ONLY automated check that runs on inbound PRs
-# (local git hooks never run on a contributor's machine, and the maintainer's
-# jj workflow bypasses git hooks). Deliberately:
-#   * NO real-LLM e2e (those run locally via `make release-preflight` at release time),
+# (local git hooks never run on a contributor's machine). Deliberately:
+#   * NO real-LLM e2e (those run only from an explicit local invocation),
 #   * pi PINNED to .pi-version, never "latest", so an upstream pi release can never
 #     redden this gate. Upstream drift is a re-pin signal handled locally, not in CI.
-# Green here = a fresh clean-room repro of the hermetic gates + packaging.
+# Green here = a fresh clean-room repro of the hermetic gates.
 
 on:
   push:
@@ -35,5 +34,5 @@ jobs:
           echo "pi: $(pi --version)"
           echo "bun: $(bun --version)"
 
-      - name: Hermetic gate (test-fast + extensions + pack tests; no LLM, no publish)
+      - name: Hermetic gate (test-fast + extensions; no LLM)
         run: scripts/pre-push-checks

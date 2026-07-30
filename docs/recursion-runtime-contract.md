@@ -1,141 +1,234 @@
 # Recursion Runtime Contract
 
-This contract is the canonical behavior boundary for ypi recursion. The engine
-owner is `extensions/ypi/runtime-core.ts`; it separates runtime policy from its
-user-facing adapters so native Pi tool calls and CLI composition cannot silently
-grow different guardrails, routes, or child lifecycles.
+This document defines the ownership boundary for ypi recursion. The executable
+contract is `tests/runtime_contract_harness.ts`; documentation cannot change
+behavior without a matching source and test change.
 
-The executable contract is `tests/runtime_contract_harness.ts`. Prose changes do
-not alter behavior unless the harness and the owning implementation change with
-it. `runtime-core.ts` is the only child-runtime entrypoint available to adapters;
-configuration, resource, and process owners under `extensions/ypi/internal/`
-remain private and are checked against adapter bypass.
+## Canonical Owner
 
-## Shared engine responsibilities
+`extensions/ypi/runtime-core.ts` is the only child-runtime entry point available
+to adapters. It owns:
 
-Both adapters must resolve the same behavior for:
+- depth and terminal-depth admission;
+- atomic tree-wide call allocation;
+- generation-bound tree-wide child-concurrency admission;
+- optional tree-wide timeout accounting;
+- provider, model, and thinking-level routing by child depth;
+- exact prompt, root charter, context, and session transport;
+- child environment allowlisting and discovery isolation;
+- canonical extension selection;
+- read-only review mode and root-only implement mode;
+- child process cancellation, exit classification, streaming bounds, and
+  cleanup;
+- trace, token, and cost telemetry.
 
-- recursion depth and terminal-depth admission
-- atomic tree-wide call allocation and maximum-call admission
-- optional user-requested timeout anchoring and remaining wall-clock allowance
-- always-on cost-ledger telemetry with no dollar admission or stop policy
-- provider, model, and thinking-level routing by child depth
-- trace identity and path-safe session naming
-- file-backed delegated prompt transport, root-human-request capture, and optional context artifacts, including exact child-visible paths and task-context precedence over unrelated retrieval
-- child session and fork behavior, including immutable async root/context/session snapshots
-- child environment allowlisting
-- exact ypi extension ownership by default, explicit ambient-extension opt-in, and non-extension discovery policy, including a private offline Pi agent/config root when full resource isolation is requested without replacing Pi's shipped assets
-- semantic child mode: read-only review by default; one root-only bounded implementer using a repository-wide lease plus an isolated workspace in existing jj, or an exclusive lease in an existing clean Git checkout; implementers retain checkout-confined edit/write but not process-spawning bash, and cannot escape through absolute/traversal/symlink paths or mutate VCS metadata
-- prohibition on installing or initializing VCS state; dirty, contended, nested, or non-VCS implement requests return implementation to the root
-- child process cancellation, exit classification, output bounds, and cleanup
+Private owners under `extensions/ypi/internal/` implement these policies. An
+adapter must not bypass them or duplicate their decisions.
 
-A runtime result must distinguish normal exit, timeout, cancellation, and child
-failure. Output limits must be enforced while reading the child stream, not only
-after the full stream is resident in memory. Incremental JSON parsing must retain
-late answer and cost events even when an earlier diagnostic event exceeds its
-capture bound. If the skipped oversized event itself could own cost—or a failed/cancelled JSON
-child emits no `turn_end`—the shared ledger is marked incomplete. That marker
-qualifies telemetry but never blocks later product work.
+## Implementer State Ownership
 
-## Default guardrail posture
+The writable lifecycle has one persisted contract:
 
-- `RLM_MAX_DEPTH=3` remains the default instead of being promoted to 4. In the
-  bounded contract-audit ablation, depth 3 returned all 12 expected findings
-  with no false positives; depth 4 then timed out without a final answer.
-  Complete ledger events show lower-bound ratios of 1.818× tokens and 1.342×
-  cost, while session-observed usage gives 1.914× tokens and 1.433× cost. Depth
-  2 was not evaluated, so this is not a claim that 3 is globally optimal. The reproducible contract is under
-  `tests/eval/depth-ablation/`.
-- `RLM_MAX_CALLS=128` bounds total fan-out with headroom above the approximately
-  52-call evaluation trace that motivated this change.
-- ypi sets no default timeout. Explicit user-requested timeouts remain supported;
-  normal interactive control is live progress plus manual cancellation.
-- Dollar budgets are unsupported as a control. Cost and tokens remain visible telemetry.
-- Deeper overrides require an explicit total-call limit and visible progress.
-- `$RLM_ROOT_PROMPT_FILE` captures the active root human request before the root
-  agent starts; standalone shell calls fall back to their first delegation.
-  Child prompts use Pi's non-interactive stdin input while remaining file-backed
-  for symbolic access. Pi normalizes outer stdin whitespace, so the prompt file
-  is byte-authoritative. Child prompts must echo applicable goal/scope/acceptance;
-  parents validate results before absorption.
+- `internal/implementer-lease.ts` owns lease states, object-ID rules, attempt
+  ref naming, and schema validation;
+- `internal/atomic-file.ts` owns durable file replacement;
+- `internal/tree-coordinator.ts` owns root-generation authority, atomic
+  tree-wide call allocation, the three-generation queue, cooperative slot
+  yielding, and registered child process identities;
+- `internal/concurrency.ts` is the narrow client for coordinator-backed slot
+  acquisition, launch registration, suspension, and release;
+- `internal/implementer-registry-layout.ts` owns implementer registry paths and
+  conservative recovery-state detection;
+- `internal/workspace-registry.ts` owns live admission and registry mutation;
+- `internal/implementer-recovery/` owns stale-state classification, Git
+  salvage, workspace ownership proof, and destructive recovery;
+- `scripts/launch-recursive-child.ts` and
+  `scripts/cleanup-implementer-workspaces.ts` are thin Node entry points.
 
-## Adapter-owned responsibilities
+Live execution and recovery import the same lease contract. Recovery does not
+redeclare the schema, scope normalization, or state names. Destructive
+worktree removal remains private to the recovery workspace owner and occurs
+only after a verified ref or a proven pre-admission state.
 
-### Native Pi adapter
+## Adapter Ownership
 
-`extensions/ypi/native-tool.ts` owns only Pi-facing concerns:
+### Native Pi Adapter
 
-- TypeBox request schema and tool registration
-- Pi context/model/session projection into a runtime request
-- progress and cancellation bridging, including elapsed time, four sanitized recent tool activities, completed cost, and an observe-only stale warning
-- Pi tool-result presentation
+`extensions/ypi/native-tool.ts` owns only:
 
-### CLI adapter
+- TypeBox request schema and tool registration;
+- Pi context, model, thinking, and session projection;
+- live progress and cancellation bridging;
+- tool-result presentation.
 
-`extensions/ypi/cli.ts` owns command-line concerns; `rlm_query` only resolves the
-package root, selects the explicit legacy fallback when requested, and launches
-Node:
+Native requests may execute in parallel. A root-owned authenticated coordinator
+admits three active child generations and queues additional calls. Waiting
+parents cooperatively yield their inherited slot, so a full depth-1 batch
+cannot deadlock depth-2 or depth-3 work. The coordinator freezes the configured
+cap for one root generation and rejects per-process drift; cancellation and the
+tree deadline remain binding while a yielded parent reacquires its slot. Every
+request proves the exact private authority manifest, generation secret, caller
+process identity, and live stable root identity. Root cancellation first marks
+the generation terminal, then signals only registered child process groups.
+Detached survivors cannot admit or launch more work after root death.
+Continuation adopts a pre-existing call-counter inode only when it is a
+current-user-owned `0600` one-link file whose canonical contents exactly match
+the declared count. Long evidence paths use a separate bounded private socket
+directory, which is retired only after the server and all request connections
+close.
+Implement requests carry explicit path scopes; the writer registry refuses
+component-overlap. The extension blocks root mutators and unknown tools from a
+mixed implementer batch. The root waits for the full batch before mutating or
+integrating.
 
-- CLI flags
-- inherited or piped stdin under an active invocation deadline
-- asynchronous job metadata, cancellation, immutable snapshots, sentinels, and exit-bearing peer notification
-- backpressure/EPIPE-safe command-line presentation of runtime errors and output
+### Shell Adapter
 
-Pipes and shell loops remain supported because programmatic composition is an
-important RLM capability. They do not justify a second copy of runtime policy.
+`extensions/ypi/cli.ts` owns only:
 
-## Contract invariants
+- `--fork` and `--async` parsing;
+- explicit, piped, or file-backed context selection;
+- background job metadata, immutable input snapshots, sentinel, and
+  cancellation behavior;
+- backpressure and broken-pipe handling;
+- command-line error presentation.
 
-For equivalent requests, both adapters must agree on:
+The `rlm_query` file resolves the checkout, selects the Pi and Node
+executables, and launches the generated adapter. It owns no recursion policy.
+`dist/rlm_query.mjs` must be reproducible from the TypeScript source.
 
-1. child depth, call number, provider, model, and thinking level
-2. prompt and context contents visible to the child
-3. session enabled/disabled state
-4. extension/discovery settings
-5. credential and recursive environment projection
-6. optional timeout and maximum-call admission decisions plus non-blocking cost telemetry
-7. cleanup and result classification
+`rlm_cleanup` is likewise a thin shell adapter around the TypeScript recovery
+CLI. It owns generic temporary-file and attempt-ref retention policy, not lease
+schema or worktree salvage behavior.
 
-Adapter-specific argv syntax is allowed only where Pi requires a different
-surface. Every intentional difference must be named by the executable contract.
+## Shared Invariants
 
-## Incumbent divergences frozen before convergence
+Equivalent native and shell requests must agree on:
 
-The initial contract harness recorded incumbent gaps rather than treating them
-as desired behavior. All initially identified deterministic divergences were
-resolved before shared ownership moved.
+1. child depth and allocated call number;
+2. provider, model, and thinking level;
+3. prompt and context visible to the child;
+4. session and fork behavior;
+5. extension and non-extension discovery policy;
+6. credential and recursive environment projection;
+7. timeout, maximum-call, and child-concurrency admission;
+8. process exit, cancellation, output, and cleanup classification.
 
-Resolved stabilization gaps remain part of the evidence history:
+Adapter-specific Pi arguments are permitted only when the surface requires
+them. Every intentional difference belongs in the executable contract.
 
-- native depth parsing now rejects integer prefixes and unsafe integers rather
-  than accepting the `Number.parseInt` prefix
-- extension-isolated children retain the standalone ypi system prompt through
-  both adapters
-- review children exclude built-in mutators through both adapters without a
-  global allowlist that could hide installed package tools; missing jj is silent
-  because reviews need no workspace, and no path recommends VCS initialization
-- one root implementer may acquire a repository-wide existing-jj or clean-Git
-  writer lease; child descendants cannot escalate writable authority, and the
-  implementer cannot spawn shell process trees
-- native answer/stderr retention is bounded while stdout is drained and parsed;
-  raw stdout is counted rather than retained, and the result reports threshold crossings
-- command substitution around CLI `--async` now returns job metadata without
-  waiting for the child; the sentinel records the eventual child exit code and
-  cleanup runs for success and failure
+## Context And Sessions
 
-A convergence change must either resolve a gap or explicitly reclassify it with
-contract evidence. It may not silently normalize the difference.
+The exact child charter is file-backed and sent through Pi's non-interactive
+input. The active root request and delegated charter remain symbolically
+addressable. When a caller supplies exact context, the child receives its file
+path rather than a copy embedded into the prompt.
 
-## Compatibility and deletion-candidate policy
+An asynchronous call snapshots its context, root charter, and fork source
+before acknowledging admission. Later mutation of the caller's files cannot
+change the admitted job.
 
-No incumbent path is removed during convergence. A superseded path may be
-**marked for deletion** only after:
+Shared sessions use the active Pi session directory. Forking pre-populates the
+child session with the parent snapshot. A non-fork child may still have its own
+session file but does not inherit parent events.
 
-- the shared contract passes through its replacement
-- deterministic and real-model parity evidence is recorded
-- packaging and installed-consumer checks pass
-- a documented fallback remains available for at least one release window
-- a maintainer explicitly approves later removal
+`RLM_REQUIRE_TRANSCRIPTS=1` turns auditability into a proof gate. Admission
+fails before spawn unless session sharing uses an existing absolute
+current-user-owned `0700` directory with no symlinked ancestry. The runtime
+atomically creates each deterministic child file as `0600`, holds its
+descriptor across the child lifetime, and rejects stale targets. Fork mode
+copies a strict JSONL parent prefix before publication.
 
-The candidate, replacement, evidence, fallback, and owner decision are tracked
-in `docs/deletion-candidates.md`.
+After the child becomes terminal, the runtime proves that the pathname still
+names the leased, singly-linked inode; the directory identity and permissions
+are unchanged; the secured prefix digest is unchanged; and the appended bytes
+are strict UTF-8, newline-terminated JSONL containing at least one Pi message
+event. It then atomically creates a per-call receipt beside the transcript.
+Transcript failure is secondary to an existing nonzero child outcome, so it
+does not replace exit `42`, timeout `124`, or cancellation `130`.
+`scripts/validate-recursion-transcripts.ts` requires one matching start,
+completion, post-cleanup lifecycle terminal marker, transcript, and receipt for
+every call and recomputes the current digests. A completion record alone cannot
+prove that resource cleanup, slot release, and inherited-parent resumption
+succeeded. `rlm_sessions` is a direct-child, no-symlink presentation tool; it
+is limited to current-user-owned `0600` singly-linked files in a `0700`
+directory. It is not an evidence validator.
+
+## Implement Mode
+
+Implement mode is available only to depth 0 and only in an existing clean Git
+checkout. It refuses:
+
+- dirty, sparse, non-Git, or operation-in-progress checkouts;
+- a missing, invalid, or overlapping scope;
+- a descendant writer;
+- a missing canonical extension;
+- submodule mutation;
+- writes outside the declared scope or worktree, through symlink escapes,
+  inside `.git`, or to ignored paths.
+
+Each implementer has no shell process tool and edits a detached ephemeral Git
+worktree at the common baseline. The user's real checkout stays clean. After
+the child exits, the runtime captures the complete worktree through a temporary
+index, verifies that every changed path belongs to the declared scope, creates
+a commit and `refs/ypi/attempt-*` reference, stages again to detect drift, then
+removes the worktree and lease.
+
+The persisted lease records owner and child PIDs, baseline, scope, worktree,
+and ref state. Any uncertain failure retains it. A verified reference is
+reported when available; otherwise the isolated worktree remains the primary
+copy. A launch gate persists the detached child PID before releasing Pi, so a
+parent death cannot create an unregistered writer. `rlm_cleanup` never removes
+a live lease. For a dead lease it snapshots the exact current worktree when
+needed, verifies the ref and worktree trees match, removes the worktree, and
+prunes stale Git metadata. Attempt refs are evidence and are never deleted by
+age; `--attempt-age` only controls which preserved refs the cleanup report
+lists.
+
+Worktrees contain tracked files only. Ignored files and uninitialized submodule
+content must arrive through explicit context or remain root-owned.
+
+`tests/workspace_crash_matrix.ts` covers single-lease interruption.
+`tests/workspace_concurrent_crash_matrix.ts` kills children at six stages and a
+parent with two leases. It proves work preservation, live-lease isolation,
+registry recovery, and a continuously clean real checkout.
+`tests/cross_depth_cancellation_harness.ts` separately proves that root
+cancellation terminalizes authority before signalling independently detached
+writer and recursive-descendant process groups, blocks post-terminal
+admission, preserves writable work, and leaves unrelated processes untouched.
+
+## Default Guardrails
+
+- `RLM_MAX_DEPTH` defaults to 3. The tracked depth ablation found all planted
+  defects at depth 3, while depth 4 consumed more resources and timed out on
+  that task. This does not claim a universal optimum.
+- `RLM_MAX_CALLS` is a shared tree-wide emergency backstop and defaults to
+  65,536. It is deliberately far above observed paper-scale useful call counts;
+  explicit proof envelopes may set a smaller task-specific bound.
+- `RLM_MAX_CONCURRENT_CALLS` defaults to 3. Calls beyond the active-generation
+  limit wait; they are not rejected or silently dropped.
+- `RLM_REQUIRE_TRANSCRIPTS` defaults to 0. Proof-bearing or benchmark runs set
+  it to 1 and provide a private explicit session directory.
+- No timeout is set by default. A caller may explicitly set one.
+- Cost and tokens are telemetry only. Dollar caps are unsupported.
+- Staleness warnings observe live work and never terminate it.
+- The root continues directly when a depth or call boundary prevents another
+  child.
+
+`config/runtime-env.json` owns the complete input registry. README tables are
+checked against that registry. Provider credential forwarding has a separate
+source-derived allowlist test because those names belong to Pi providers, not
+the recursion configuration namespace.
+
+## Result And Telemetry Rules
+
+Normal exit, timeout, cancellation, and child failure are distinct. Output
+limits are enforced during streaming, not after unbounded retention.
+Incremental structured parsing must still observe late answer and cost events
+when an earlier event crosses a capture limit.
+
+If an omitted oversized event could own cost, or a failed structured child
+never emits its terminal usage event, the ledger is marked incomplete. That
+marker qualifies telemetry but never blocks later product work.
+
+The shared contract, generated-bundle check, native harness, guardrail suite,
+and extension smoke must pass before an adapter change is accepted.

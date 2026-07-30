@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
     "module": "preserve",
     "moduleResolution": "bundler",
     "noEmit": true,
@@ -12,7 +13,7 @@
   },
   "include": [
     "extensions/recursive.ts",
-    "extensions/ypi.ts",
-    "extensions/ypi/**/*.ts"
+    "extensions/ypi/**/*.ts",
+    "scripts/*.ts"
   ]
 }

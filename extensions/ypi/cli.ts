@@ -5,13 +5,13 @@ import { ensureEnvironment } from "./env.ts";
 import { remainingTimeoutSeconds } from "./guardrails.ts";
 import { cancelAsyncJob, createAsyncJob, discardAsyncJob, finishAsyncJob, launchAsyncWorker, markAsyncJobAdmitted, markAsyncJobChildPid, readAsyncJob, waitForAsyncAdmission, waitForAsyncTerminal } from "./internal/cli-async.ts";
 import { resolveContextSource, type ContextSource } from "./internal/cli-input.ts";
+import { terminateRootTreeCoordinator } from "./internal/tree-coordinator.ts";
 import { formatRecursiveResultForTool, RecursiveChildError, runRecursiveChild } from "./runtime-core.ts";
 import { resolveRuntime, type YpiRuntime } from "./runtime.ts";
 
 interface CliFlags {
 	fork: boolean;
 	async: boolean;
-	notifyPid?: number;
 	prompt: string;
 }
 
@@ -40,14 +40,23 @@ function activeRuntime(): YpiRuntime {
 }
 
 function usage(): never {
-	console.error('Usage: rlm_query [--fork] [--async] [--notify PID] "your prompt here"');
+	console.error('Usage: rlm_query [--fork] [--async] "your prompt here"');
 	process.exit(1);
+}
+
+function rejectRetiredFlags(args: string[]): void {
+	for (const argument of args) {
+		if (argument === "--notify") {
+			console.error("✗ --notify was removed; read the async output and sentinel paths");
+			process.exit(2);
+		}
+		if (argument !== "--fork" && argument !== "--async") return;
+	}
 }
 
 function parseFlags(args: string[]): CliFlags {
 	let fork = false;
 	let async = false;
-	let notifyPid: number | undefined;
 	let index = 0;
 	flagLoop: while (args[index]?.startsWith("--")) {
 		switch (args[index]) {
@@ -59,13 +68,6 @@ function parseFlags(args: string[]): CliFlags {
 				async = true;
 				index++;
 				break;
-			case "--notify": {
-				const raw = args[index + 1];
-				if (!raw || !/^\d+$/.test(raw)) usage();
-				notifyPid = Number(raw);
-				index += 2;
-				break;
-			}
 			default:
 				// Preserve the historical parser: an unknown --token becomes the prompt.
 				break flagLoop;
@@ -73,11 +75,7 @@ function parseFlags(args: string[]): CliFlags {
 	}
 	const prompt = args[index];
 	if (!prompt) usage();
-	if (notifyPid !== undefined && !async) {
-		console.error("✗ --notify requires --async");
-		process.exit(1);
-	}
-	return { fork, async, notifyPid, prompt };
+	return { fork, async, prompt };
 }
 
 function parentContext(cwd = process.cwd()) {
@@ -152,30 +150,44 @@ async function runWorker(jobPath: string): Promise<void> {
 	const onTerminate = () => { requestedExitCode = 143; controller.abort(); };
 	process.once("SIGINT", onInterrupt);
 	process.once("SIGTERM", onTerminate);
-	const job = readAsyncJob(jobPath);
-	const runtime = activeRuntime();
-	ensureEnvironment(runtime);
-	if (job.parentSessionSnapshot) process.env.RLM_SESSION_FILE = job.parentSessionSnapshot;
-	if (job.rootPromptSnapshot) process.env.RLM_ROOT_PROMPT_FILE = job.rootPromptSnapshot;
-	let code = 0;
-	let output = "";
 	try {
-		const result = await executeRequest(runtime, { prompt: job.prompt, fork: job.fork }, { contextPath: job.contextPath }, {
-			cwd: job.cwd,
-			extensionPath: job.extensionPath,
-			treeStartTimeSeconds: job.treeStartTimeSeconds,
-			onAdmitted: () => markAsyncJobAdmitted(job),
-			onChildSpawn: (pid) => markAsyncJobChildPid(job, pid),
-			signal: controller.signal,
-		});
-		output = formatRecursiveResultForTool(result);
-	} catch (error) {
-		code = requestedExitCode ?? errorExitCode(error);
-		output = `${cliErrorText(error)}\n`;
+		const job = readAsyncJob(jobPath);
+		const runtime = activeRuntime();
+		ensureEnvironment(runtime);
+		if (job.parentSessionSnapshot) process.env.RLM_SESSION_FILE = job.parentSessionSnapshot;
+		if (job.rootPromptSnapshot) process.env.RLM_ROOT_PROMPT_FILE = job.rootPromptSnapshot;
+		let code = 0;
+		let output = "";
+		try {
+			const result = await executeRequest(runtime, { prompt: job.prompt, fork: job.fork }, { contextPath: job.contextPath }, {
+				cwd: job.cwd,
+				extensionPath: job.extensionPath,
+				treeStartTimeSeconds: job.treeStartTimeSeconds,
+				onAdmitted: () => markAsyncJobAdmitted(job),
+				onChildSpawn: (pid) => markAsyncJobChildPid(job, pid),
+				signal: controller.signal,
+			});
+			output = formatRecursiveResultForTool(result);
+		} catch (error) {
+			code = requestedExitCode ?? errorExitCode(error);
+			output = `${cliErrorText(error)}\n`;
+		}
+		finishAsyncJob(job, code, output);
+	} finally {
+		await terminateRootTreeCoordinator("async-root-complete");
+		process.removeListener("SIGINT", onInterrupt);
+		process.removeListener("SIGTERM", onTerminate);
 	}
-	finishAsyncJob(job, code, output);
-	process.removeListener("SIGINT", onInterrupt);
-	process.removeListener("SIGTERM", onTerminate);
+}
+
+async function cancelAsyncJobToTerminal(
+	job: ReturnType<typeof createAsyncJob>,
+	workerPid: number,
+): Promise<boolean> {
+	cancelAsyncJob(job, workerPid);
+	if (await waitForAsyncTerminal(job)) return true;
+	cancelAsyncJob(job, workerPid, "SIGKILL");
+	return waitForAsyncTerminal(job, 1_000);
 }
 
 export async function main(args = process.argv.slice(2)): Promise<number> {
@@ -199,13 +211,22 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 		else stdoutFailure = error;
 		controller.abort();
 	};
-	const onInterrupt = () => { signalExitCode = 130; controller.abort(); };
-	const onTerminate = () => { signalExitCode = 143; controller.abort(); };
+	const onInterrupt = () => {
+		signalExitCode = 130;
+		void terminateRootTreeCoordinator("root-cli-interrupt");
+		controller.abort();
+	};
+	const onTerminate = () => {
+		signalExitCode = 143;
+		void terminateRootTreeCoordinator("root-cli-terminate");
+		controller.abort();
+	};
 	process.once("SIGINT", onInterrupt);
 	process.once("SIGTERM", onTerminate);
 	process.stdout.on("error", onStdoutError);
 	let source: ContextSource | undefined;
 	try {
+		rejectRetiredFlags(args);
 		const flags = parseFlags(args);
 		const remaining = remainingTimeoutSeconds();
 		source = await resolveContextSource({
@@ -220,7 +241,6 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 				job = createAsyncJob({
 					prompt: flags.prompt,
 					fork: flags.fork,
-					notifyPid: flags.notifyPid,
 					cwd: process.cwd(),
 					context: source.context,
 					contextPath: source.contextPath,
@@ -228,7 +248,12 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 					treeStartTimeSeconds: invocationStartedAt,
 				});
 				pid = launchAsyncWorker(job, fileURLToPath(import.meta.url));
-				await waitForAsyncAdmission(job, 30_000, controller.signal);
+				const admissionRemaining = remainingTimeoutSeconds();
+				await waitForAsyncAdmission(
+					job,
+					admissionRemaining === undefined ? undefined : Math.max(0, admissionRemaining * 1000),
+					controller.signal,
+				);
 				if (controller.signal.aborted) throw new Error("Async recursion acknowledgement cancelled");
 				await writeStdout(`${JSON.stringify({
 					job_id: path.basename(path.dirname(job.jobPath)),
@@ -239,15 +264,22 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 				return 0;
 			} catch (error) {
 				if (job && controller.signal.aborted) {
-					cancelAsyncJob(job, pid);
-					if (!await waitForAsyncTerminal(job)) {
-						cancelAsyncJob(job, pid, "SIGKILL");
-						await waitForAsyncTerminal(job, 1_000);
+					const terminal = pid <= 0 || await cancelAsyncJobToTerminal(job, pid);
+					if (terminal) {
+						discardAsyncJob(job, pid);
+					} else {
+						console.error(`Async job did not publish terminal state; preserved at ${path.dirname(job.jobPath)}`);
 					}
-					discardAsyncJob(job);
 					return brokenPipe ? 0 : signalExitCode;
 				}
-				if (job) discardAsyncJob(job, pid);
+				if (job) {
+					const terminal = pid <= 0 || existsSync(job.sentinelPath) || await cancelAsyncJobToTerminal(job, pid);
+					if (terminal) {
+						discardAsyncJob(job, pid);
+					} else {
+						console.error(`Async job did not publish terminal state; preserved at ${path.dirname(job.jobPath)}`);
+					}
+				}
 				console.error(cliErrorText(error));
 				return errorExitCode(error);
 			}
@@ -277,6 +309,9 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 		if (!controller.signal.aborted) console.error(cliErrorText(error));
 		return controller.signal.aborted ? signalExitCode : errorExitCode(error);
 	} finally {
+		if ((process.env.RLM_DEPTH || "0") === "0") {
+			await terminateRootTreeCoordinator("root-cli-complete");
+		}
 		process.removeListener("SIGINT", onInterrupt);
 		process.removeListener("SIGTERM", onTerminate);
 		process.stdout.removeListener("error", onStdoutError);

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pre-commit hook for ypi
-# Safety net for direct git usage. jj bypasses this entirely.
+# Safety net for direct Git usage.
 #
 # Install: git config core.hooksPath .githooks
 
@@ -27,17 +27,5 @@ if [ "${YPI_SKIP_UBS:-0}" != "1" ] && command -v ubs &>/dev/null; then
         fi
     fi
 fi
-
-# --- Block unencrypted files in sops-managed paths ---
-for file in $(git diff --cached --name-only | grep -E '^(private/|experiments/|\.prose/runs/|\.prose/agents/)'); do
-    if [ ! -f "$file" ]; then
-        continue
-    fi
-    if ! head -1 "$file" | grep -q '"data": "ENC\[' 2>/dev/null && \
-       ! head -5 "$file" | grep -q '"sops"' 2>/dev/null; then
-        echo "⛔ $file is unencrypted! Run: scripts/encrypt-prose" >&2
-        exit 1
-    fi
-done
 
 exit 0

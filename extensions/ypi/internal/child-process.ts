@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { constants as osConstants } from "node:os";
 import type { CostSummary } from "../guardrails.ts";
+import { atomicCreateFile } from "./atomic-file.ts";
+import { withPrivateUmask } from "./private-path.ts";
+import { currentProcessStartIdentity } from "./process-identity.ts";
 import {
 	createBoundedCapture,
 	createJsonDecoder,
@@ -22,7 +25,13 @@ export interface ChildProcessOptions {
 	onToolActivity?: (activity: ChildToolActivity) => void;
 	onTextDrain?: () => Promise<void>;
 	onSpawn?: (pid: number) => void;
+	onLaunchReady?: () => void;
 	quiesceProcessGroup?: boolean;
+	launchGate?: {
+		launcherPath: string;
+		pidFile?: string;
+		readyFile?: string;
+	};
 }
 
 export interface ChildProcessResult extends ChildOutputSnapshot {
@@ -40,19 +49,34 @@ function signalledExitCode(signal: NodeJS.Signals | null): number {
 
 export function runChildProcess(options: ChildProcessOptions): Promise<ChildProcessResult> {
 	return new Promise((resolve, reject) => {
-		const child = spawn(process.env.YPI_PI_BIN || "pi", options.args, {
+			const piExecutable = process.env.YPI_PI_BIN || "pi";
+			const executable = options.launchGate ? process.env.YPI_NODE_BIN || process.execPath : piExecutable;
+			const args: string[] = options.launchGate
+				? [
+					options.launchGate.launcherPath,
+					...(options.launchGate.pidFile && options.launchGate.readyFile
+						? [
+							"--pid-file",
+							options.launchGate.pidFile,
+							"--ready-file",
+							options.launchGate.readyFile,
+						]
+						: []),
+					"--owner-pid",
+					String(process.pid),
+					"--owner-process-identity",
+					currentProcessStartIdentity(),
+					"--",
+					piExecutable,
+					...options.args,
+				]
+				: options.args;
+		const child = withPrivateUmask(() => spawn(executable, args, {
 			cwd: options.cwd,
 			env: options.env,
 			stdio: ["pipe", "pipe", "pipe"],
 			detached: process.platform !== "win32",
-		});
-		if (child.pid) options.onSpawn?.(child.pid);
-		// Pi's non-interactive stdin path preserves the exact task without CLI
-		// option parsing, @file wrappers, or ARG_MAX exposure.
-		child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-			if (error.code !== "EPIPE") reject(error);
-		});
-		child.stdin.end(options.stdinText ?? "");
+		}));
 		let stdoutCharacters = 0;
 		const rawStderr = createBoundedCapture(MAX_TOOL_OUTPUT_CHARS);
 		const plainText = createBoundedCapture(MAX_TOOL_OUTPUT_CHARS);
@@ -63,6 +87,9 @@ export function runChildProcess(options: ChildProcessOptions): Promise<ChildProc
 		let killTimer: NodeJS.Timeout | undefined;
 		let quiesceKillTimer: NodeJS.Timeout | undefined;
 		let timeoutTimer: NodeJS.Timeout | undefined;
+		let stdinError: NodeJS.ErrnoException | undefined;
+		let processError: Error | undefined;
+		let launchRegistrationError: Error | undefined;
 
 		child.stdout.setEncoding("utf8");
 		child.stderr.setEncoding("utf8");
@@ -86,11 +113,11 @@ export function runChildProcess(options: ChildProcessOptions): Promise<ChildProc
 		});
 		child.stderr.on("data", (chunk: string) => rawStderr.append(chunk));
 
-		const killChild = (reason: "abort" | "timeout") => {
+		const killChild = (reason: "abort" | "timeout" | "transport") => {
 			if (terminating) return;
 			terminating = true;
 			if (reason === "timeout") timedOut = true;
-			else cancelled = true;
+			else if (reason === "abort") cancelled = true;
 			if (!child.pid) {
 				child.kill("SIGTERM");
 				return;
@@ -101,6 +128,16 @@ export function runChildProcess(options: ChildProcessOptions): Promise<ChildProc
 				try { process.kill(target, "SIGKILL"); } catch { child.kill("SIGKILL"); }
 			}, 1500);
 		};
+		// Pi's non-interactive stdin path preserves the exact task without CLI
+		// option parsing, @file wrappers, or ARG_MAX exposure. A normal early
+		// child exit can close the pipe with EPIPE. Any other transport failure
+		// terminates the child group and is reported only after `close`, so the
+		// caller cannot release a concurrency or writer lease around live work.
+		child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+			if (error.code === "EPIPE") return;
+			stdinError ??= error;
+			killChild("transport");
+		});
 		const abortHandler = () => killChild("abort");
 		const cleanup = (preserveKillEscalation = false) => {
 			options.signal?.removeEventListener("abort", abortHandler);
@@ -109,7 +146,9 @@ export function runChildProcess(options: ChildProcessOptions): Promise<ChildProc
 			if (timeoutTimer) clearTimeout(timeoutTimer);
 		};
 
-		child.on("error", (error) => { cleanup(); reject(error); });
+		child.on("error", (error) => {
+			processError ??= error;
+		});
 		child.on("exit", () => {
 			// `close` waits for inherited stdio descriptors. Start quiescing as soon
 			// as the trusted child leader exits so a background descendant retaining
@@ -128,20 +167,34 @@ export function runChildProcess(options: ChildProcessOptions): Promise<ChildProc
 			cleanup(terminating);
 			jsonDecoder.finish();
 			const json = jsonDecoder.result();
-			const settle = () => resolve({
-				code: timedOut ? 124 : cancelled ? 130 : code ?? signalledExitCode(childSignal),
-				signal: childSignal,
-				stderr: rawStderr.text(),
-				text: options.jsonMode ? json.text : plainText.text(),
-				cost: options.jsonMode ? json.cost : undefined,
-				stdoutTruncated: stdoutCharacters > MAX_CHILD_STREAM_CHARS,
-				stderrTruncated: rawStderr.truncated,
-				textTruncated: options.jsonMode ? json.textTruncated : plainText.truncated,
-				jsonEventTruncated: options.jsonMode ? json.jsonEventTruncated : false,
-				jsonCostIncomplete: options.jsonMode ? json.jsonCostIncomplete : false,
-				timedOut,
-				cancelled,
-			});
+			const settle = () => {
+				if (launchRegistrationError) {
+					reject(launchRegistrationError);
+					return;
+				}
+				if (processError) {
+					reject(processError);
+					return;
+				}
+				if (stdinError) {
+					reject(stdinError);
+					return;
+				}
+				resolve({
+					code: timedOut ? 124 : cancelled ? 130 : code ?? signalledExitCode(childSignal),
+					signal: childSignal,
+					stderr: rawStderr.text(),
+					text: options.jsonMode ? json.text : plainText.text(),
+					cost: options.jsonMode ? json.cost : undefined,
+					stdoutTruncated: stdoutCharacters > MAX_CHILD_STREAM_CHARS,
+					stderrTruncated: rawStderr.truncated,
+					textTruncated: options.jsonMode ? json.textTruncated : plainText.truncated,
+					jsonEventTruncated: options.jsonMode ? json.jsonEventTruncated : false,
+					jsonCostIncomplete: options.jsonMode ? json.jsonCostIncomplete : false,
+					timedOut,
+					cancelled,
+				});
+			};
 			if (!options.quiesceProcessGroup || !child.pid || process.platform === "win32") {
 				settle();
 				return;
@@ -154,8 +207,31 @@ export function runChildProcess(options: ChildProcessOptions): Promise<ChildProc
 				settle();
 			}, 250);
 		});
-		if (options.timeoutSeconds !== undefined) timeoutTimer = setTimeout(() => killChild("timeout"), options.timeoutSeconds * 1000);
-		if (options.signal?.aborted) abortHandler();
-		else options.signal?.addEventListener("abort", abortHandler, { once: true });
+		if (child.pid) {
+			try {
+				options.onSpawn?.(child.pid);
+				if (
+					options.launchGate?.pidFile
+					&& options.launchGate.readyFile
+				) {
+					atomicCreateFile(options.launchGate.pidFile, `${child.pid}\n`, { mode: 0o600 });
+					atomicCreateFile(options.launchGate.readyFile, `${child.pid}\n`, { mode: 0o600 });
+					options.onLaunchReady?.();
+				}
+			} catch (error) {
+				launchRegistrationError = error instanceof Error
+					? error
+					: new Error(String(error));
+				killChild("transport");
+			}
+		}
+		if (!launchRegistrationError) child.stdin.end(options.stdinText ?? "");
+		if (!terminating && options.timeoutSeconds !== undefined) {
+			timeoutTimer = setTimeout(() => killChild("timeout"), options.timeoutSeconds * 1000);
+		}
+		if (!terminating) {
+			if (options.signal?.aborted) abortHandler();
+			else options.signal?.addEventListener("abort", abortHandler, { once: true });
+		}
 	});
 }
