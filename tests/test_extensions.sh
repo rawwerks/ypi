@@ -1,8 +1,7 @@
 #!/bin/bash
 # test_extensions.sh — Verify ypi extensions load cleanly with installed Pi
 #
-# Tests that our .ts extensions are compatible with the installed pi version.
-# Requires: pi installed and on PATH.
+# Tests that our .ts extensions are compatible with the repository-selected Pi.
 #
 # Run: bash tests/test_extensions.sh
 
@@ -10,6 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/helpers/resolve_pi_bin.sh"
 
 PASS=0
 FAIL=0
@@ -20,12 +20,13 @@ fail() { FAIL=$((FAIL + 1)); ERRORS="${ERRORS}\n  ✗ $1: $2"; echo "  ✗ $1: $
 
 # ─── Check prerequisites ─────────────────────────────────────────────────
 
-if ! command -v pi &>/dev/null; then
+PI_BIN="$(resolve_ypi_pi_bin "$PROJECT_DIR")"
+if [ -z "$PI_BIN" ] || [ ! -x "$PI_BIN" ]; then
     echo "SKIP: pi not installed"
     exit 0
 fi
 
-PI_VERSION=$(pi --version 2>/dev/null || echo "unknown")
+PI_VERSION=$("$PI_BIN" --version 2>/dev/null | tr -d '[:space:]' || echo "unknown")
 echo ""
 echo "=== Extension Compatibility Tests (pi $PI_VERSION) ==="
 echo ""
@@ -44,6 +45,11 @@ if [ -n "$KNOWN_GOOD" ] && [ "$KNOWN_GOOD" = "$PINNED" ]; then
     pass "pinned Pi consistent (.pi-version=$KNOWN_GOOD == package.json=$PINNED)"
 else
     fail "pinned Pi consistent (.pi-version == package.json)" ".pi-version=$KNOWN_GOOD package.json=$PINNED"
+fi
+if [ "$PI_VERSION" = "$KNOWN_GOOD" ]; then
+    pass "tested Pi matches pin ($PI_VERSION)"
+else
+    fail "tested Pi matches pin" "binary=$PI_BIN version=$PI_VERSION expected=$KNOWN_GOOD"
 fi
 
 if [ "$PI_MANIFEST" = "./extensions/recursive.ts" ]; then
@@ -75,7 +81,7 @@ test_extension_loads() {
     # initializes explicit extensions, so syntax/API breakage is caught.
     local rc
     set +e
-    timeout 15 pi --no-extensions -e "$path" --list-models test \
+    timeout 15 "$PI_BIN" --no-extensions -e "$path" --list-models test \
         >"$stderr_file.stdout" 2>"$stderr_file"
     rc=$?
     set -e
@@ -103,7 +109,7 @@ echo "--- Environment integration ---"
 stderr_file=$(mktemp "${TMPDIR:-/tmp}/ext_test.txt.XXXXXX")
 set +e
 RLM_DEPTH=0 RLM_MAX_DEPTH=5 \
-    timeout 15 pi --no-extensions \
+    timeout 15 "$PI_BIN" --no-extensions \
     -e "$PROJECT_DIR/extensions/recursive.ts" --list-models test \
     >"$stderr_file.stdout" 2>"$stderr_file"
 rc=$?
@@ -139,9 +145,9 @@ stderr_file="$MIN_ROOT/minimal.stderr"
 stdout_file="$MIN_ROOT/minimal.stdout"
 set +e
 env -u YPI_EXTENSION_ROOT -u YPI_EXTENSION_PATH \
-	    RLM_DEPTH=0 RLM_MAX_DEPTH=1 \
+    RLM_DEPTH=0 RLM_MAX_DEPTH=1 \
     YPI_EXTENSION_DEBUG=1 \
-    timeout 15 pi --no-extensions \
+    timeout 15 "$PI_BIN" --no-extensions \
     -e "$MIN_ROOT/extensions/recursive.ts" --list-models test \
     >"$stdout_file" 2>"$stderr_file"
 rc=$?
