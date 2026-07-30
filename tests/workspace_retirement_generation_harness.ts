@@ -1,6 +1,7 @@
 import {
 	chmodSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -19,7 +20,9 @@ import {
 import {
 	captureWorkspaceContainerIdentity,
 	captureWorkspaceDirectoryIdentity,
+	captureWorkspaceTreeIdentity,
 	retireEmptyWorkspaceContainer,
+	verifyWorkspaceContainer,
 } from "../extensions/ypi/internal/workspace-container.ts";
 import { capturePrivateDirectoryIdentity } from "../extensions/ypi/internal/private-path.ts";
 
@@ -209,6 +212,73 @@ console.log("\n=== Workspace retirement generation harness ===");
 		failure.includes("marker identity is unavailable")
 			&& existsSync(owner),
 		"unrecorded marker generation is preserved",
+		failure,
+	);
+}
+
+{
+	const value = fixture(true);
+	const worktree = value.worktreeRoot!;
+	mkdirSync(worktree, { mode: 0o700 });
+	writeFileSync(
+		path.join(worktree, ".git"),
+		`gitdir: ${path.join(root, "worktrees", value.token)}\n`,
+		{ mode: 0o600 },
+	);
+	value.workspaceIdentity = captureWorkspaceTreeIdentity(value);
+	rmSync(worktree, { recursive: true });
+	mkdirSync(worktree, { mode: 0o700 });
+	const onlyCopy = path.join(worktree, "only-copy");
+	writeFileSync(onlyCopy, "PRESERVE CHECKOUT REPLACEMENT\n", { mode: 0o600 });
+	writeFileSync(
+		path.join(worktree, ".git"),
+		"gitdir: synthetic replacement\n",
+		{ mode: 0o600 },
+	);
+	const replacement = lstatSync(worktree, { bigint: true });
+	const replacementGitFile = lstatSync(path.join(worktree, ".git"), { bigint: true });
+	value.workspaceIdentity.worktreeDevice = replacement.dev.toString();
+	value.workspaceIdentity.worktreeInode = replacement.ino.toString();
+	value.workspaceIdentity.worktreeGitFileDevice = replacementGitFile.dev.toString();
+	value.workspaceIdentity.worktreeGitFileInode = replacementGitFile.ino.toString();
+	let failure = "";
+	try {
+		verifyWorkspaceContainer(value, "present");
+	} catch (error) {
+		failure = error instanceof Error ? error.message : String(error);
+	}
+	record(
+		failure.includes("checkout Git indirection identity changed")
+			&& readFileSync(onlyCopy, "utf8") === "PRESERVE CHECKOUT REPLACEMENT\n",
+		"Git indirection digest catches checkout replacement despite simulated inode reuse",
+		failure,
+	);
+}
+
+{
+	const value = fixture(true);
+	const worktree = value.worktreeRoot!;
+	mkdirSync(worktree, { mode: 0o700 });
+	const gitFile = path.join(worktree, ".git");
+	writeFileSync(
+		gitFile,
+		`gitdir: ${path.join(root, "worktrees", value.token)}\n`,
+		{ mode: 0o600 },
+	);
+	value.workspaceIdentity = captureWorkspaceTreeIdentity(value);
+	delete value.workspaceIdentity.worktreeGitFileDevice;
+	delete value.workspaceIdentity.worktreeGitFileInode;
+	delete value.workspaceIdentity.worktreeGitFileDigest;
+	let failure = "";
+	try {
+		verifyWorkspaceContainer(value, "present");
+	} catch (error) {
+		failure = error instanceof Error ? error.message : String(error);
+	}
+	record(
+		failure.includes("checkout Git indirection identity is unavailable")
+			&& existsSync(gitFile),
+		"legacy lease without Git indirection proof fails closed before deletion",
 		failure,
 	);
 }

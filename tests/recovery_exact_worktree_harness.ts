@@ -2,7 +2,6 @@ import {
 	existsSync,
 	mkdtempSync,
 	rmSync,
-	rmdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -106,6 +105,13 @@ function persistLease(
 	initializeImplementerLeaseFile(state.leaseDirectory, state.record);
 }
 
+function createGitIndirection(state: ReturnType<typeof fixture>): void {
+	atomicCreateFile(
+		path.join(state.worktree, ".git"),
+		`gitdir: ${path.join(state.common, "worktrees", state.record.token)}\n`,
+	);
+}
+
 console.log("\n=== Exact worktree recovery harness ===");
 
 {
@@ -145,6 +151,7 @@ console.log("\n=== Exact worktree recovery harness ===");
 	createPrivateDirectory(state.container);
 	atomicCreateFile(path.join(state.container, "owner"), `${state.record.token}\n`);
 	createPrivateDirectory(state.worktree);
+	createGitIndirection(state);
 	state.record.workspaceIdentity = captureWorkspaceContainerIdentity(state.record);
 	state.record.workspaceIdentity = captureWorkspaceTreeIdentity(state.record);
 	persistLease(state);
@@ -231,6 +238,7 @@ console.log("\n=== Exact worktree recovery harness ===");
 	createPrivateDirectory(state.container);
 	atomicCreateFile(path.join(state.container, "owner"), `${state.record.token}\n`);
 	createPrivateDirectory(state.worktree);
+	createGitIndirection(state);
 	createPrivateDirectory(unrelated);
 	state.record.workspaceIdentity = captureWorkspaceContainerIdentity(state.record);
 	state.record.workspaceIdentity = captureWorkspaceTreeIdentity(state.record);
@@ -247,7 +255,7 @@ console.log("\n=== Exact worktree recovery harness ===");
 			calls.push(args.join(" "));
 			if (args[0] === "for-each-ref") return "";
 			if (args[0] === "worktree" && args[1] === "remove") {
-				rmdirSync(state.worktree);
+				rmSync(state.worktree, { recursive: true });
 				return "";
 			}
 			throw new Error(`unexpected Git text: ${args.join(" ")}`);

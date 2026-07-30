@@ -48,7 +48,13 @@ if (command === "rev-parse") {
   process.exit(0);
 }
 if (command === "worktree") {
-  if (args[1] === "add") fs.mkdirSync(args.at(-2), { recursive: true });
+  if (args[1] === "add") {
+    const worktree = args.at(-2);
+    const gitdir = path.join(common, "worktrees", "fixture");
+    fs.mkdirSync(worktree, { recursive: true });
+    fs.mkdirSync(gitdir, { recursive: true });
+    fs.writeFileSync(path.join(worktree, ".git"), "gitdir: " + gitdir + "\\n");
+  }
   if (args[1] === "remove") fs.rmSync(args.at(-1), { recursive: true, force: true });
   process.exit(0);
 }

@@ -21,6 +21,9 @@ export interface WorkspaceFilesystemIdentity {
 	ownerInode?: string;
 	worktreeDevice?: string;
 	worktreeInode?: string;
+	worktreeGitFileDevice?: string;
+	worktreeGitFileInode?: string;
+	worktreeGitFileDigest?: string;
 }
 
 export interface ImplementerLeaseRecord {
@@ -112,8 +115,20 @@ function isWorkspaceFilesystemIdentity(value: unknown): value is WorkspaceFilesy
 		&& (
 			identity.worktreeDevice === undefined
 				? identity.worktreeInode === undefined
+					&& identity.worktreeGitFileDevice === undefined
+					&& identity.worktreeGitFileInode === undefined
+					&& identity.worktreeGitFileDigest === undefined
 				: isCanonicalUnsignedInteger(identity.worktreeDevice)
 					&& isCanonicalUnsignedInteger(identity.worktreeInode)
+					&& (
+						identity.worktreeGitFileDevice === undefined
+							? identity.worktreeGitFileInode === undefined
+								&& identity.worktreeGitFileDigest === undefined
+							: isCanonicalUnsignedInteger(identity.worktreeGitFileDevice)
+								&& isCanonicalUnsignedInteger(identity.worktreeGitFileInode)
+								&& typeof identity.worktreeGitFileDigest === "string"
+								&& /^[a-f0-9]{64}$/.test(identity.worktreeGitFileDigest)
+					)
 		);
 }
 

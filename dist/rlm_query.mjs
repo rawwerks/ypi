@@ -3488,7 +3488,7 @@ function isWorkspaceFilesystemIdentity(value) {
   if (!value || typeof value !== "object" || Array.isArray(value))
     return false;
   const identity = value;
-  return isCanonicalUnsignedInteger(identity.containerDevice) && isCanonicalUnsignedInteger(identity.containerInode) && (identity.ownerDevice === undefined ? identity.ownerInode === undefined : isCanonicalUnsignedInteger(identity.ownerDevice) && isCanonicalUnsignedInteger(identity.ownerInode)) && (identity.worktreeDevice === undefined ? identity.worktreeInode === undefined : isCanonicalUnsignedInteger(identity.worktreeDevice) && isCanonicalUnsignedInteger(identity.worktreeInode));
+  return isCanonicalUnsignedInteger(identity.containerDevice) && isCanonicalUnsignedInteger(identity.containerInode) && (identity.ownerDevice === undefined ? identity.ownerInode === undefined : isCanonicalUnsignedInteger(identity.ownerDevice) && isCanonicalUnsignedInteger(identity.ownerInode)) && (identity.worktreeDevice === undefined ? identity.worktreeInode === undefined && identity.worktreeGitFileDevice === undefined && identity.worktreeGitFileInode === undefined && identity.worktreeGitFileDigest === undefined : isCanonicalUnsignedInteger(identity.worktreeDevice) && isCanonicalUnsignedInteger(identity.worktreeInode) && (identity.worktreeGitFileDevice === undefined ? identity.worktreeGitFileInode === undefined && identity.worktreeGitFileDigest === undefined : isCanonicalUnsignedInteger(identity.worktreeGitFileDevice) && isCanonicalUnsignedInteger(identity.worktreeGitFileInode) && typeof identity.worktreeGitFileDigest === "string" && /^[a-f0-9]{64}$/.test(identity.worktreeGitFileDigest)));
 }
 function isLeaseDirectoryIdentity(value) {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -3990,7 +3990,7 @@ function reserveImplementerLease(commonGitDir, root, baselineHead, scope, deadli
 }
 
 // extensions/ypi/internal/workspace-container.ts
-import { randomBytes as randomBytes8 } from "node:crypto";
+import { createHash as createHash5, randomBytes as randomBytes8 } from "node:crypto";
 import {
   constants as constants6,
   lstatSync as lstatSync6,
@@ -4004,6 +4004,7 @@ import {
   unlinkSync as unlinkSync4
 } from "node:fs";
 import path19 from "node:path";
+var WORKTREE_GIT_FILE_MAX_BYTES = 64 * 1024;
 function identity(metadata) {
   return {
     device: metadata.dev.toString(),
@@ -4027,6 +4028,28 @@ function readOwnerMarker(candidate) {
     return {
       metadata,
       value: Buffer.from(readFileSync6(descriptor))
+    };
+  } finally {
+    if (descriptor !== undefined)
+      closeSync6(descriptor);
+  }
+}
+function readWorktreeGitFile(candidate) {
+  let descriptor;
+  try {
+    descriptor = openSync6(candidate, constants6.O_RDONLY | constants6.O_NOFOLLOW);
+    const metadata = fstatSync5(descriptor, { bigint: true });
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1n || metadata.size > BigInt(WORKTREE_GIT_FILE_MAX_BYTES)) {
+      throw new Error("checkout Git indirection is not a bounded singly linked regular file");
+    }
+    const value = Buffer.from(readFileSync6(descriptor));
+    const pathnameMetadata = lstatBigInt(candidate);
+    if (!pathnameMetadata.isFile() || pathnameMetadata.isSymbolicLink() || pathnameMetadata.nlink !== 1n || !sameIdentity5(pathnameMetadata, metadata.dev.toString(), metadata.ino.toString())) {
+      throw new Error("checkout Git indirection changed while it was inspected");
+    }
+    return {
+      metadata,
+      digest: createHash5("sha256").update(value).digest("hex")
     };
   } finally {
     if (descriptor !== undefined)
@@ -4080,10 +4103,15 @@ function captureWorkspaceTreeIdentity(record) {
   const current = verifyWorkspaceContainer(record, "capture");
   const metadata = lstatBigInt(current.worktree);
   const worktreeId = identity(metadata);
+  const gitFile = readWorktreeGitFile(path19.join(current.worktree, ".git"));
+  const gitFileId = identity(gitFile.metadata);
   return {
     ...record.workspaceIdentity,
     worktreeDevice: worktreeId.device,
-    worktreeInode: worktreeId.inode
+    worktreeInode: worktreeId.inode,
+    worktreeGitFileDevice: gitFileId.device,
+    worktreeGitFileInode: gitFileId.inode,
+    worktreeGitFileDigest: gitFile.digest
   };
 }
 function verifyWorkspaceContainer(record, worktreeState) {
@@ -4117,6 +4145,20 @@ function verifyWorkspaceContainer(record, worktreeState) {
   if (worktree) {
     if (!worktree.isDirectory() || worktree.isSymbolicLink() || worktreeState !== "capture" && (!expected.worktreeDevice || !expected.worktreeInode || !sameIdentity5(worktree, expected.worktreeDevice, expected.worktreeInode))) {
       throw new Error("recorded checkout identity changed; preserve it for explicit inspection");
+    }
+    if (worktreeState !== "capture") {
+      if (!expected.worktreeGitFileDevice || !expected.worktreeGitFileInode || !expected.worktreeGitFileDigest) {
+        throw new Error("recorded checkout Git indirection identity is unavailable; preserve it for explicit inspection");
+      }
+      let gitFile;
+      try {
+        gitFile = readWorktreeGitFile(path19.join(location.worktree, ".git"));
+      } catch {
+        throw new Error("recorded checkout Git indirection identity changed; preserve it for explicit inspection");
+      }
+      if (!sameIdentity5(gitFile.metadata, expected.worktreeGitFileDevice, expected.worktreeGitFileInode) || gitFile.digest !== expected.worktreeGitFileDigest) {
+        throw new Error("recorded checkout Git indirection identity changed; preserve it for explicit inspection");
+      }
     }
   }
   return location;

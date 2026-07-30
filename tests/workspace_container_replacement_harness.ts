@@ -47,8 +47,12 @@ if (command === "rev-parse") {
 }
 if (command === "worktree") {
   if (args[1] === "add") {
-    fs.mkdirSync(args.at(-2), { recursive: true });
-    fs.writeFileSync(registration, args.at(-2));
+    const worktree = args.at(-2);
+    const gitdir = path.join(common, "worktrees", "fixture");
+    fs.mkdirSync(worktree, { recursive: true });
+    fs.mkdirSync(gitdir, { recursive: true });
+    fs.writeFileSync(path.join(worktree, ".git"), "gitdir: " + gitdir + "\\n");
+    fs.writeFileSync(registration, worktree);
   }
   if (args[1] === "remove") {
     fs.rmSync(args.at(-1), { recursive: true, force: true });
@@ -134,6 +138,13 @@ try {
 			mkdirSync(target, { mode: 0o700 });
 			replacement = path.join(target, "only-copy.txt");
 			writeFileSync(replacement, "must survive uncertain replacement\n", { mode: 0o600 });
+			if (replacementTarget === "checkout") {
+				writeFileSync(
+					path.join(target, ".git"),
+					"gitdir: synthetic replacement\n",
+					{ mode: 0o600 },
+				);
+			}
 		},
 	});
 	writerRoot = lease.cwd;
@@ -180,12 +191,13 @@ const passed = replacementTarget === "registration"
 	? reportComplete && !replacementSurvived
 	: !reportComplete
 		&& replacementSurvived
-		&& (
-			replacementTarget === "container"
-				? failure.includes("workspace container identity changed")
-					|| failure.includes("workspace container has unexpected content")
-				: failure.includes("recorded checkout identity changed")
-		);
+			&& (
+				replacementTarget === "container"
+					? failure.includes("workspace container identity changed")
+						|| failure.includes("workspace container has unexpected content")
+					: failure.includes("recorded checkout identity changed")
+						|| failure.includes("recorded checkout Git indirection identity changed")
+			);
 if (!passed) {
 	process.exit(1);
 }

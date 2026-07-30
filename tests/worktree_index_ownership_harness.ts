@@ -96,6 +96,11 @@ function fixture(sequence: number): Fixture {
 	writeFileSync(path.join(container, "owner"), `${token}\n`, { mode: 0o600 });
 	chmodSync(path.join(container, "owner"), 0o600);
 	record.workspaceIdentity = captureWorkspaceContainerIdentity(record);
+	writeFileSync(
+		path.join(worktree, ".git"),
+		`gitdir: ${path.join(commonGitDir, "worktrees", token)}\n`,
+		{ mode: 0o600 },
+	);
 	record.workspaceIdentity = captureWorkspaceTreeIdentity(record);
 	record.recordDigest = implementerLeaseRecordDigest(record);
 	initializeImplementerLeaseFile(leaseDirectory, record);
