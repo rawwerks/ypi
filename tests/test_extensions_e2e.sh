@@ -1,14 +1,14 @@
 #!/bin/bash
 # test_extensions_e2e.sh — Real extension tests with actual Pi
 #
-# Tests that ypi extensions work correctly with the installed pi version.
+# Tests that ypi extensions work correctly with the repository-selected Pi.
 # Uses REAL Pi with REAL LLM calls to verify extension functionality.
 #
 # This catches breaking changes in Pi's extension API that shallow
 # "does it load?" tests miss.
 #
 # Prerequisites:
-#   - pi installed and on PATH
+#   - repository dependencies installed, or a compatible YPI_PI_BIN
 #   - API key configured (OPENROUTER_API_KEY, ANTHROPIC_API_KEY, etc.)
 #
 # Run: bash tests/test_extensions_e2e.sh
@@ -17,8 +17,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/helpers/resolve_pi_bin.sh"
 
 export PATH="$PROJECT_DIR:$PATH"
+PI_BIN="$(resolve_ypi_pi_bin "$PROJECT_DIR")"
+if [ -z "$PI_BIN" ] || [ ! -x "$PI_BIN" ]; then
+    echo "SKIP: pi not installed"
+    exit 0
+fi
 
 PASS=0
 FAIL=0
@@ -31,7 +37,12 @@ fail() { FAIL=$((FAIL + 1)); ERRORS="${ERRORS}\n  ✗ $1: $2"; echo "  ✗ $1: $
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/ypi_ext_e2e.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
 
-PI_VERSION=$(pi --version 2>/dev/null || echo "unknown")
+PI_VERSION=$("$PI_BIN" --version 2>/dev/null | tr -d '[:space:]' || echo "unknown")
+PINNED_VERSION=$(tr -d '[:space:]' < "$PROJECT_DIR/.pi-version")
+if [ "$PI_VERSION" != "$PINNED_VERSION" ]; then
+    echo "FAIL: selected Pi $PI_VERSION does not match pinned $PINNED_VERSION ($PI_BIN)"
+    exit 1
+fi
 echo ""
 echo "=== Extension E2E Tests (pi $PI_VERSION) ==="
 echo ""
@@ -69,7 +80,7 @@ STDERR_FILE="$TEST_TMP/ext1_stderr.txt"
 STDOUT_FILE="$TEST_TMP/ext1_stdout.txt"
 
 # Run a minimal prompt with the canonical ypi extension
-timeout 30 pi -p --no-session --no-extensions "${PI_E2E_ARGS[@]}" \
+timeout 30 "$PI_BIN" -p --no-session --no-extensions "${PI_E2E_ARGS[@]}" \
     -e "$PROJECT_DIR/extensions/recursive.ts" \
     "Reply with exactly: EXTENSION_TEST_OK" \
     >"$STDOUT_FILE" 2>"$STDERR_FILE" || true
@@ -103,7 +114,7 @@ TSEXT
 STDERR_FILE="$TEST_TMP/ext2_stderr.txt"
 STDOUT_FILE="$TEST_TMP/ext2_stdout.txt"
 
-timeout 30 pi -p --no-session "${PI_E2E_ARGS[@]}" \
+timeout 30 "$PI_BIN" -p --no-session "${PI_E2E_ARGS[@]}" \
     -e "$TEST_TMP/test_hook.ts" \
     "Say OK" \
     >"$STDOUT_FILE" 2>"$STDERR_FILE" || true
@@ -146,7 +157,7 @@ TSEXT
 STDERR_FILE="$TEST_TMP/ext3_stderr.txt"
 STDOUT_FILE="$TEST_TMP/ext3_stdout.txt"
 
-timeout 30 pi -p --no-session "${PI_E2E_ARGS[@]}" \
+timeout 30 "$PI_BIN" -p --no-session "${PI_E2E_ARGS[@]}" \
     -e "$TEST_TMP/test_theme.ts" \
     "Say OK" \
     >"$STDOUT_FILE" 2>"$STDERR_FILE" || true
@@ -187,7 +198,7 @@ TSEXT
 STDERR_FILE="$TEST_TMP/ext4_stderr.txt"
 STDOUT_FILE="$TEST_TMP/ext4_stdout.txt"
 
-timeout 30 pi -p --no-session "${PI_E2E_ARGS[@]}" \
+timeout 30 "$PI_BIN" -p --no-session "${PI_E2E_ARGS[@]}" \
     -e "$TEST_TMP/test_status.ts" \
     "Say OK" \
     >"$STDOUT_FILE" 2>"$STDERR_FILE" || true
@@ -252,7 +263,7 @@ STDERR_FILE="$TEST_TMP/ext7_stderr.txt"
 STDOUT_FILE="$TEST_TMP/ext7_stdout.txt"
 
 # Ask something that triggers bash tool
-timeout 45 pi -p --no-session "${PI_E2E_ARGS[@]}" \
+timeout 45 "$PI_BIN" -p --no-session "${PI_E2E_ARGS[@]}" \
     -e "$TEST_TMP/test_tool_hook.ts" \
     "Run: echo TOOL_TEST_MARKER" \
     >"$STDOUT_FILE" 2>"$STDERR_FILE" || true
