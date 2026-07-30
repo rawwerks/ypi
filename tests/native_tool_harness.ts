@@ -74,6 +74,16 @@ function readLog(): string {
 	return existsSync(logFile) ? readFileSync(logFile, "utf8") : "";
 }
 
+async function waitForFile(filePath: string, timeoutMilliseconds = 5_000): Promise<void> {
+	const deadline = Date.now() + timeoutMilliseconds;
+	while (!existsSync(filePath)) {
+		if (Date.now() >= deadline) {
+			throw new Error(`Timed out waiting for ${filePath}`);
+		}
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+}
+
 writeFileSync(fakePi, `#!/usr/bin/env bash
 SYSTEM_PROMPT_FILE=""
 for ((i=1; i<=$#; i++)); do
@@ -214,6 +224,7 @@ elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "write-file-fail" ]; then
   exit 42
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "write-then-sleep" ]; then
   printf '%s\n' 'interrupted implementation' > interrupted-implemented.txt
+  [ -n "\${YPI_FAKE_READY_FILE:-}" ] && printf '%s\n' ready > "$YPI_FAKE_READY_FILE"
   echo "IMPLEMENT_CHILD_WAITING"
   sleep 30
 elif [ "\${YPI_FAKE_PI_MODE:-ok}" = "write-background" ]; then
@@ -711,27 +722,38 @@ async function run(): Promise<void> {
 	process.env.RLM_MAX_DEPTH = "2";
 	process.env.RLM_JSON = "0";
 	process.env.YPI_FAKE_PI_MODE = "write-then-sleep";
+	const cancellationReady = path.join(scratch, "implement-cancelled.ready");
+	process.env.YPI_FAKE_READY_FILE = cancellationReady;
 	ensureEnvironment(runtime, context(cancelledImplementRoot));
 	const cancellation = new AbortController();
-	setTimeout(() => cancellation.abort(), 150);
+	const cancelledExecution = tool.execute(
+		"implement-cancelled",
+		{ prompt: "bounded cancelled implementation", mode: "implement", scope: ["interrupted-implemented.txt"] },
+		cancellation.signal,
+		undefined,
+		context(cancelledImplementRoot),
+	);
+	let readinessFailure: unknown;
 	try {
-		await tool.execute(
-			"implement-cancelled",
-			{ prompt: "bounded cancelled implementation", mode: "implement", scope: ["interrupted-implemented.txt"] },
-			cancellation.signal,
-			undefined,
-			context(cancelledImplementRoot),
-		);
+		await waitForFile(cancellationReady);
+	} catch (error) {
+		readinessFailure = error;
+	}
+	cancellation.abort();
+	try {
+		await cancelledExecution;
 		record(false, "N5a: cancelled implementer preserves a worktree/ref result", "expected cancellation");
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		record(
-				message.includes("Child Pi cancelled")
-					&& message.includes("interrupted-implemented.txt")
-					&& message.includes("Ephemeral worktree removed: yes")
-					&& !existsSync(path.join(cancelledImplementRoot, "interrupted-implemented.txt")),
-				"N5a: cancelled implementer preserves a worktree/ref result",
-			message,
+			!readinessFailure
+				&& message.includes("Child Pi cancelled")
+				&& message.includes("Changed paths (1): interrupted-implemented.txt")
+				&& message.includes("Attempt ref:")
+				&& message.includes("Ephemeral worktree removed: yes")
+				&& !existsSync(path.join(cancelledImplementRoot, "interrupted-implemented.txt")),
+			"N5a: cancelled implementer preserves a worktree/ref result",
+			readinessFailure instanceof Error ? readinessFailure.message : message,
 		);
 	}
 
