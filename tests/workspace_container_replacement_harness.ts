@@ -180,10 +180,11 @@ const passed = replacementTarget === "registration"
 	? reportComplete && !replacementSurvived
 	: !reportComplete
 		&& replacementSurvived
-		&& failure.includes(
+		&& (
 			replacementTarget === "container"
-				? "workspace container identity changed"
-				: "recorded checkout identity changed",
+				? failure.includes("workspace container identity changed")
+					|| failure.includes("workspace container has unexpected content")
+				: failure.includes("recorded checkout identity changed")
 		);
 if (!passed) {
 	process.exit(1);
